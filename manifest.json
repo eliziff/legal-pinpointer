@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Legal Pinpointer",
+  "version": "0.1.22",
+  "description": "Copy clean Canadian legal citations and structure-aware pinpoint links.",
+  "permissions": [
+    "clipboardRead",
+    "clipboardWrite",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "engine-worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Legal Pinpointer"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.canlii.org/*/doc/*",
+        "https://www.canlii.org/*/laws/*",
+        "https://canlii.org/*/doc/*",
+        "https://canlii.org/*/laws/*",
+        "https://advance.lexis.com/document/*",
+        "https://nextcanada.westlaw.com/Document/*",
+        "https://www.nextcanada.westlaw.com/Document/*"
+      ],
+      "js": [
+        "canlii-courts.js",
+        "core.js",
+        "text-fragments.js",
+        "providers.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  }
+}

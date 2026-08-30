@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Legal Pinpointer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <h1>Legal Pinpointer</h1>
+    <p id="document-summary" class="summary">Checking this document…</p>
+
+    <div class="actions" aria-label="Copy actions">
+      <button id="copy-pinpoint" type="button">Copy pinpoint</button>
+      <button id="copy-quote" type="button">Copy with quote</button>
+      <button id="copy-citation" class="secondary" type="button">Copy citation</button>
+      <button id="open-canlii" class="secondary" type="button">Open in CanLII</button>
+    </div>
+
+    <fieldset>
+      <legend>Pinpoint format</legend>
+      <label>
+        <input type="radio" name="pinpoint-style" value="bare">
+        <span><strong>Bare</strong><small>12-14 or 7(2)-(4)</small></span>
+      </label>
+      <label>
+        <input type="radio" name="pinpoint-style" value="full">
+        <span><strong>Full McGill</strong><small>at paras 12-14 or ss 7(2)-(4)</small></span>
+      </label>
+      <label>
+        <input id="link-full-text-fragment-pinpoint" type="checkbox">
+        <span><strong>Link full pinpoint phrase</strong><small>For text fragments, include “at para(s)” or the provision prefix.</small></span>
+      </label>
+    </fieldset>
+
+    <details>
+      <summary>Keyboard shortcuts</summary>
+      <dl>
+        <div><dt>Ctrl+X</dt><dd>Copy pinpoint</dd></div>
+        <div><dt>Ctrl+Shift+X</dt><dd>Copy with selected quote</dd></div>
+        <div><dt>Alt+X</dt><dd>Copy citation</dd></div>
+        <div><dt>Alt+C</dt><dd>Open the CanLII version</dd></div>
+      </dl>
+    </details>
+
+    <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
