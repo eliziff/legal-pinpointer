@@ -28,7 +28,7 @@ Selections include every structural unit crossed. Rich clipboard output links th
 
 Provider-native anchors are used first, with one deliberate hierarchy rule: a page-delimited case confirmed by the exact legal-structure engine outranks native paragraphs. Cases otherwise use paragraphs; legislation uses provisions; and pilcrow or silcrow markers are definitive in secondary sources.
 
-The fallback is not a JavaScript reimplementation. `legal-structure.wasm` is the unmodified `legal-structure` Rust parser and grammar tables, linked behind the small C ABI in `engine-src/src/lib.rs`. The browser-only adaptations are:
+`legal-structure.wasm` is the unmodified `legal-structure` Rust parser and grammar tables, linked behind the small C ABI in `engine-src/src/lib.rs`. The browser-only adaptations are:
 
 - line-oriented DOM linearization and declared engine-offset-to-DOM mapping;
 - validation that inferred reporter pages correspond to literal `[page n]` DOM text, including the parser-bounded final page;
