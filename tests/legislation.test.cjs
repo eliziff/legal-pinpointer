@@ -17,6 +17,10 @@ test('the packaged snapshot resolves exact CanLII legislation identities and ref
     'https://www.canlii.org/en/ab/laws/stat/sa-2008-c-a-4.2/latest/sa-2008-c-a-4.2.html'
   );
   assert.equal(
+    legislation.resolve(index, 'Adult Guardianship and Trusteeship Act', 'SA 2008, c. A-4.2', 'en'),
+    'https://www.canlii.org/en/ab/laws/stat/sa-2008-c-a-4.2/latest/sa-2008-c-a-4.2.html'
+  );
+  assert.equal(
     legislation.resolve(index, 'Adult Guardianship (Abuse and Neglect) Regulation', 'B.C. Reg. 13/2000, s. 1', 'en'),
     'https://www.canlii.org/en/bc/laws/regu/bc-reg-13-2000/latest/bc-reg-13-2000.html'
   );

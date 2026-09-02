@@ -85,6 +85,12 @@
     return { title: heading, citation: '' };
   }
 
+  function legislationCitationCore(value) {
+    return normalizeCitation(value)
+      .replace(/,\s*(?:(?:ss?|sections?)|(?:rr?|rules?)|(?:arts?|articles?)|\u00a7{1,2})\.?\s+.+$/i, '')
+      .trim();
+  }
+
   function neutralCitations(value) {
     const text = normalizeSpace(value);
     const matches = text.matchAll(/\b((?:18|19|20)\d{2})\s+([A-Z][A-Z0-9-]{1,15})\s+(\d+)\b/g);
@@ -169,6 +175,7 @@
       rawTitle = parts.title;
       cite = normalizeCitation(parts.citation);
     }
+    if (type === 'legislation') cite = legislationCitationCore(cite);
     const plain = cite ? `${rawTitle}, ${cite}` : rawTitle;
     const italicize = type === 'case' || type === 'legislation';
     const titleHtml = italicize ? `<i>${escapeHtml(rawTitle)}</i>` : escapeHtml(rawTitle);
@@ -323,6 +330,17 @@
     return groups;
   }
 
+  function pinpointPrefix(kind, count, style) {
+    if (kind === 'pilcrow') return '\u00b6 ';
+    if (kind === 'silcrow') return '\u00a7 ';
+    if (style !== 'full') return '';
+    if (kind === 'page') return 'at p. ';
+    if (kind === 'section') return `${count === 1 ? 's' : 'ss'} `;
+    if (kind === 'rule') return `${count === 1 ? 'r' : 'rr'} `;
+    if (kind === 'article') return `${count === 1 ? 'art' : 'arts'} `;
+    return `${count === 1 ? 'para' : 'paras'} `;
+  }
+
   function formatPinpoint(kind, values, style) {
     const locators = [];
     for (const value of values || []) {
@@ -331,15 +349,7 @@
     }
     if (!locators.length) return '';
     const collapsed = collapseLocatorRanges(locators);
-    if (kind === 'pilcrow') return `\u00b6 ${collapsed}`;
-    if (kind === 'silcrow') return `\u00a7 ${collapsed}`;
-    if (style !== 'full') return collapsed;
-
-    if (kind === 'page') return `at ${collapsed}`;
-    if (kind === 'section') return `${locators.length === 1 ? 's' : 'ss'} ${collapsed}`;
-    if (kind === 'rule') return `${locators.length === 1 ? 'r' : 'rr'} ${collapsed}`;
-    if (kind === 'article') return `${locators.length === 1 ? 'art' : 'arts'} ${collapsed}`;
-    return `at ${locators.length === 1 ? 'para' : 'paras'} ${collapsed}`;
+    return `${pinpointPrefix(kind, locators.length, style)}${collapsed}`;
   }
 
   function provisionDepth(value) {
@@ -438,6 +448,18 @@
     };
   }
 
+  function outputCitationLink(citation, url) {
+    const coreHtml = escapeHtml(citation.citation || '');
+    if (!coreHtml) return outputLink(citation.plain, citation.html, url);
+    const index = citation.html.lastIndexOf(coreHtml);
+    if (index < 0) return outputLink(citation.plain, citation.html, url);
+    const linked = outputLink(citation.citation, coreHtml, url).html;
+    return {
+      plain: citation.plain,
+      html: `${citation.html.slice(0, index)}${linked}${citation.html.slice(index + coreHtml.length)}`
+    };
+  }
+
   const api = {
     canliiAnchorForLocator,
     canliiUrlForCitation,
@@ -459,7 +481,9 @@
     normalizeCitation,
     normalizeSpace,
     outputLink,
+    outputCitationLink,
     parseLocator,
+    pinpointPrefix,
     provisionDepth,
     removeRedundantProvisionAncestors,
     reporterCandidates,

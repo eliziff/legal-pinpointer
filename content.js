@@ -228,17 +228,6 @@
     return core.withFragment(model.cleanUrl, nativeFragment || '');
   }
 
-  function pinpointPrefix(kind, count, style) {
-    if (kind === 'pilcrow') return '\u00b6 ';
-    if (kind === 'silcrow') return '\u00a7 ';
-    if (style !== 'full') return '';
-    if (kind === 'page') return 'at ';
-    if (kind === 'section') return `${count === 1 ? 's' : 'ss'} `;
-    if (kind === 'rule') return `${count === 1 ? 'r' : 'rr'} `;
-    if (kind === 'article') return `${count === 1 ? 'art' : 'arts'} `;
-    return `at ${count === 1 ? 'para' : 'paras'} `;
-  }
-
   function anchorHtml(label, url) {
     const target = new URL(url);
     if (target.protocol !== 'https:') throw new Error('Legal Pinpointer refused a non-HTTPS copy target.');
@@ -249,7 +238,7 @@
     const nodes = uniqueLocatorNodes(inputNodes);
     const plain = core.formatPinpoint(model.structure.kind, nodes.map((node) => node.locator), style);
     if (sourceInfo.kind === 'text-fragment') {
-      const prefix = pinpointPrefix(model.structure.kind, nodes.length, style);
+      const prefix = core.pinpointPrefix(model.structure.kind, nodes.length, style);
       const locators = core.collapseLocatorRanges(nodes.map((node) => node.locator));
       return {
         plain,
@@ -265,7 +254,7 @@
       const last = anchorHtml(group.lastDisplay, targetForNode(model, sourceInfo, nodes[group.end]));
       return `${first}-${last}`;
     });
-    const prefix = pinpointPrefix(model.structure.kind, nodes.length, style);
+    const prefix = core.pinpointPrefix(model.structure.kind, nodes.length, style);
     return {
       plain,
       html: `${core.escapeHtml(prefix)}${pieces.join(', ')}`
@@ -527,18 +516,18 @@
 
     if (mode === 'citation') {
       const target = model.canliiUrl || model.cleanUrl;
-      payload = core.outputLink(model.citation.plain, model.citation.html, target);
+      payload = core.outputCitationLink(model.citation, target);
       message = `Copied citation: ${model.citation.plain}`;
     } else if (!model.structure || !model.structure.nodes.length) {
       const target = model.canliiUrl || model.cleanUrl;
-      payload = core.outputLink(model.citation.plain, model.citation.html, target);
+      payload = core.outputCitationLink(model.citation, target);
       message = `Copied page: ${model.citation.plain}`;
     } else {
       const sourceInfo = await copySource(model, mode);
       if (sourceInfo.kind === 'text-fragment') fragmentSource = sourceInfo;
       const nodes = sourceInfo.range ? nodesForRange(model, sourceInfo.range, mode === 'quote') : [sourceInfo.node];
       if (!nodes.length) throw new Error('No page, paragraph, or provision overlaps that range.');
-      const settings = await storageGet({ pinpointStyle: 'bare', linkFullTextFragmentPinpoint: false });
+      const settings = await storageGet({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false });
       const pinpoint = pinpointMarkup(
         model,
         sourceInfo,
@@ -570,7 +559,7 @@
     const model = await inspectPage();
     const range = liveSelectionRange();
     const selected = range ? nodesForRange(model, range) : [];
-    const settings = await storageGet({ pinpointStyle: 'bare' });
+    const settings = await storageGet({ pinpointStyle: 'full' });
     return {
       ok: true,
       provider: model.provider,
