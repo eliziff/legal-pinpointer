@@ -16,7 +16,7 @@ No build or package installation is required to use the extension.
 - **Ctrl+Shift+X** copies the pinpoint plus selected text.
 - **Alt+X** copies the cleaned McGill-style citation as a link.
 - **Alt+C** opens the reliably detected CanLII version.
-- The popup exposes the same actions. McGill pinpoints are the default (`para 12`, `paras 12-14`, `at p. 353`, `s 7(2)`, or `ss 7(2)-(4)`), with bare locators available as an option.
+- The popup exposes the same actions. McGill pinpoints are the default (`para 12`, `paras 12-14`, `at p. 353`, `at pp. 553, 559`, `s 7(2)`, or `ss 7(2)-(4)`), with bare locators available as an option.
 
 If a supported document exposes no usable structure, copy actions fall back to the cleaned page link labelled with the citation title. Secondary-source section headings such as `§ 12.02` act as page-wide pinpoints, while citation copy uses the provider's separate source and author metadata without the pinpoint.
 

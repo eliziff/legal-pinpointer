@@ -334,7 +334,7 @@
     if (kind === 'pilcrow') return '\u00b6 ';
     if (kind === 'silcrow') return '\u00a7 ';
     if (style !== 'full') return '';
-    if (kind === 'page') return 'at p. ';
+    if (kind === 'page') return `at ${count === 1 ? 'p.' : 'pp.'} `;
     if (kind === 'section') return `${count === 1 ? 's' : 'ss'} `;
     if (kind === 'rule') return `${count === 1 ? 'r' : 'rr'} `;
     if (kind === 'article') return `${count === 1 ? 'art' : 'arts'} `;
