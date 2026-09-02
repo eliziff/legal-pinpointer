@@ -88,7 +88,7 @@ async function navigateToCanlii() {
   }
 }
 
-chrome.storage.local.get({ pinpointStyle: 'bare', linkFullTextFragmentPinpoint: false }, (settings) => {
+chrome.storage.local.get({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false }, (settings) => {
   const selected = styleInputs.find((input) => input.value === settings.pinpointStyle) || styleInputs[0];
   selected.checked = true;
   linkFullTextFragmentPinpoint.checked = Boolean(settings.linkFullTextFragmentPinpoint);

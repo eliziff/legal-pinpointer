@@ -10,10 +10,11 @@ const providers = require('../providers.js');
 
 test('collapses paragraph and provision runs using legal citation notation', () => {
   assert.equal(core.formatPinpoint('paragraph', ['12', '13', '14', '15', '17', '18'], 'bare'), '12-15, 17-18');
-  assert.equal(core.formatPinpoint('paragraph', ['12', '13'], 'full'), 'at paras 12-13');
+  assert.equal(core.formatPinpoint('paragraph', ['12'], 'full'), 'para 12');
+  assert.equal(core.formatPinpoint('paragraph', ['12', '13'], 'full'), 'paras 12-13');
   assert.equal(core.formatPinpoint('section', ['7(2)', '7(3)', '7(4)'], 'bare'), '7(2)-(4)');
   assert.equal(core.formatPinpoint('section', ['7(2)', '7(3)', '7(4)'], 'full'), 'ss 7(2)-(4)');
-  assert.equal(core.formatPinpoint('page', ['353'], 'full'), 'at 353');
+  assert.equal(core.formatPinpoint('page', ['353'], 'full'), 'at p. 353');
   assert.equal(core.formatPinpoint('pilcrow', ['12'], 'bare'), '\u00b6 12');
   assert.equal(core.formatPinpoint('silcrow', ['12.02'], 'full'), '\u00a7 12.02');
 });
@@ -24,7 +25,15 @@ test('prefers a bounded neutral citation and cleans provider title additions', (
     '2019 ABCA 49'
   );
   assert.equal(core.cleanPlatformTitle('Quebec (Attorney General) v Denis | Westlaw Advantage Canada'), 'Quebec (Attorney General) v Denis');
-  assert.equal(core.makeCitation('case', 'R. v. Grant (S.C.C.)', '2009 SCC 32').plain, 'R v Grant, 2009 SCC 32');
+  const citation = core.makeCitation('case', 'R. v. Grant (S.C.C.)', '2009 SCC 32');
+  assert.equal(citation.plain, 'R v Grant, 2009 SCC 32');
+  assert.deepEqual(
+    core.outputCitationLink(citation, 'https://www.canlii.org/en/ca/scc/doc/2009/2009scc32/2009scc32.html'),
+    {
+      plain: 'R v Grant, 2009 SCC 32',
+      html: '<i>R v Grant</i>, <a href="https://www.canlii.org/en/ca/scc/doc/2009/2009scc32/2009scc32.html">2009 SCC 32</a>'
+    }
+  );
 });
 
 test('italicizes only the legislation title when a provider combines its heading and citation', () => {
@@ -33,8 +42,12 @@ test('italicizes only the legislation title when a provider combines its heading
     'ADULT GUARDIANSHIP (ABUSE AND NEGLECT) REGULATION, B.C. Reg. 13/2000, s. 1',
     ''
   );
-  assert.equal(citation.plain, 'ADULT GUARDIANSHIP (ABUSE AND NEGLECT) REGULATION, B.C. Reg. 13/2000, s. 1');
-  assert.equal(citation.html, '<i>ADULT GUARDIANSHIP (ABUSE AND NEGLECT) REGULATION</i>, B.C. Reg. 13/2000, s. 1');
+  assert.equal(citation.plain, 'ADULT GUARDIANSHIP (ABUSE AND NEGLECT) REGULATION, B.C. Reg. 13/2000');
+  assert.equal(citation.html, '<i>ADULT GUARDIANSHIP (ABUSE AND NEGLECT) REGULATION</i>, B.C. Reg. 13/2000');
+  assert.equal(
+    core.outputCitationLink(citation, 'https://www.canlii.org/en/bc/laws/regu/bc-reg-13-2000/latest/bc-reg-13-2000.html').html,
+    '<i>ADULT GUARDIANSHIP (ABUSE AND NEGLECT) REGULATION</i>, <a href="https://www.canlii.org/en/bc/laws/regu/bc-reg-13-2000/latest/bc-reg-13-2000.html">B.C. Reg. 13/2000</a>'
+  );
 });
 
 test('a provider alias remains detectable even when surrounding text is concatenated', () => {

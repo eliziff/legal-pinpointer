@@ -16,9 +16,11 @@ No build or package installation is required to use the extension.
 - **Ctrl+Shift+X** copies the pinpoint plus selected text.
 - **Alt+X** copies the cleaned McGill-style citation as a link.
 - **Alt+C** opens the reliably detected CanLII version.
-- The popup exposes the same actions and switches between bare and full McGill pinpoint styles.
+- The popup exposes the same actions. McGill pinpoints are the default (`para 12`, `paras 12-14`, `at p. 353`, `s 7(2)`, or `ss 7(2)-(4)`), with bare locators available as an option.
 
 If a supported document exposes no usable structure, copy actions fall back to the cleaned page link labelled with the citation title. Secondary-source section headings such as `§ 12.02` act as page-wide pinpoints, while citation copy uses the provider's separate source and author metadata without the pinpoint.
+
+Citation links cover only the authoritative citation core, such as `2024 SCC 1` or `SA 2008, c. A-4.2`; the case or legislation title remains outside the link. A provision suffix exposed by a legislation page, such as `s. 1`, is treated as a page pinpoint rather than part of the legislation citation.
 
 A current-page text-fragment URL in the clipboard has precedence over both selection and hover. Its resolved range governs the pinpoint and quote, and the original fragment URL becomes every pinpoint endpoint link. The extension parses WICG text directives locally, including endpoint-only ranges and multiple `text=` directives.
 

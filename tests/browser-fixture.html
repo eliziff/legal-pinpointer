@@ -44,7 +44,7 @@
     window.__clipboardInput = '';
     window.__clipboardOutput = null;
     window.__messageHandler = null;
-    window.__pinpointStyle = 'bare';
+    window.__pinpointStyle = '';
     window.__linkFullTextFragmentPinpoint = false;
 
     class TestClipboardItem {
@@ -76,7 +76,7 @@
           get(defaults, callback) {
             callback({
               ...defaults,
-              pinpointStyle: window.__pinpointStyle,
+              pinpointStyle: window.__pinpointStyle || defaults.pinpointStyle,
               linkFullTextFragmentPinpoint: window.__linkFullTextFragmentPinpoint
             });
           },
@@ -187,7 +187,7 @@
       const lawPlane = LegalPinpointerTextFragments.buildStructureIndex(lawBase.root);
       lawPlane.root = lawBase.root;
       const lawInput = providerAdapters.engineInput(lawBase, lawPlane);
-      assert(lawBase.citation.html === '<i>ADULT GUARDIANSHIP AND TRUSTEESHIP ACT</i>, SA 2008, c. A-4.2, s. 1', `Lexis legislation citation italics crossed the title boundary: ${lawBase.citation.html}`);
+      assert(lawBase.citation.html === '<i>ADULT GUARDIANSHIP AND TRUSTEESHIP ACT</i>, SA 2008, c. A-4.2', `Lexis legislation citation core or italics were wrong: ${lawBase.citation.html}`);
       assert(resolvedLaw.canliiUrl === 'https://www.canlii.org/en/ab/laws/stat/sa-2008-c-a-4.2/latest/sa-2008-c-a-4.2.html', `Lexis legislation did not receive its snapshot-backed CanLII equivalent: ${resolvedLaw.canliiUrl}`);
       assert(lawInput.provider === 'lexis', 'The provider-text request must retain its actual provider.');
       assert(lawInput.section_map.length === 1 && lawInput.section_map[0][0] === '1', 'Lexis SECTION 1 was not sent as ordered provider evidence.');
@@ -206,15 +206,20 @@
       select(p32, 0, p33, p33.childNodes.length);
       const range = await copy('pinpoint');
       document.getElementById('result').textContent = 'RANGE';
-      assert(range.plain === '32-33', `Unexpected range text: ${range.plain}`);
+      assert(range.plain === 'paras 32-33', `The default pinpoint style was not McGill-formatted: ${range.plain}`);
       assert(range.html.includes('#par32') && range.html.includes('#par33'), 'Each range endpoint must have its own native anchor.');
       assert((range.html.match(/<a /g) || []).length === 2, 'A two-ended range must contain exactly two links.');
       assert(!document.getElementById('legal-pinpointer-status'), 'Popup actions must not also create an in-page toast.');
 
+      const caseCitation = await copy('citation');
+      assert(caseCitation.plain === 'Example v Example, 2024 SCC 1', `Unexpected case citation text: ${caseCitation.plain}`);
+      assert(caseCitation.html === `<i>Example v Example</i>, <a href="${cleanUrl}">2024 SCC 1</a>`, `Only the neutral citation core should be linked: ${caseCitation.html}`);
+
       window.__clipboardInput = 'x'.repeat(1_000_001);
       const oversizedClipboardFallback = await copy('pinpoint');
-      assert(oversizedClipboardFallback.plain === '32-33', 'Oversized clipboard text must be ignored in favour of the live selection.');
+      assert(oversizedClipboardFallback.plain === 'paras 32-33', 'Oversized clipboard text must be ignored in favour of the live selection.');
       window.__clipboardInput = '';
+      window.__pinpointStyle = 'bare';
 
       const invalidMode = await new Promise((resolve) => {
         const asynchronous = window.__messageHandler(
@@ -272,12 +277,12 @@
       assert(fragmentRange.html.includes('>32-33</a>'), 'The single text-fragment hyperlink must cover the complete pinpoint range.');
       window.__pinpointStyle = 'full';
       const fullFragmentRange = await copy('pinpoint');
-      assert(fullFragmentRange.plain === 'at paras 32-33', `Unexpected full text-fragment pinpoint: ${fullFragmentRange.plain}`);
-      assert(fullFragmentRange.html.startsWith('at paras <a ') && fullFragmentRange.html.endsWith('>32-33</a>'), `Only the text-fragment locator may be linked: ${fullFragmentRange.html}`);
+      assert(fullFragmentRange.plain === 'paras 32-33', `Unexpected full text-fragment pinpoint: ${fullFragmentRange.plain}`);
+      assert(fullFragmentRange.html.startsWith('paras <a ') && fullFragmentRange.html.endsWith('>32-33</a>'), `Only the text-fragment locator may be linked: ${fullFragmentRange.html}`);
       assert((fullFragmentRange.html.match(/<a /g) || []).length === 1, 'A full-style text-fragment pinpoint must remain one hyperlink.');
       window.__linkFullTextFragmentPinpoint = true;
       const linkedFullFragmentRange = await copy('pinpoint');
-      assert(linkedFullFragmentRange.html.startsWith('<a ') && linkedFullFragmentRange.html.endsWith('>at paras 32-33</a>'), `The optional text-fragment link must cover the full pinpoint phrase: ${linkedFullFragmentRange.html}`);
+      assert(linkedFullFragmentRange.html.startsWith('<a ') && linkedFullFragmentRange.html.endsWith('>paras 32-33</a>'), `The optional text-fragment link must cover the full pinpoint phrase: ${linkedFullFragmentRange.html}`);
       assert((linkedFullFragmentRange.html.match(/<a /g) || []).length === 1, 'The optional full-phrase form must remain one hyperlink.');
       window.__pinpointStyle = 'bare';
       const fragmentQuote = await copy('quote');
