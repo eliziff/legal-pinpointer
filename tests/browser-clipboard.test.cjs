@@ -8,9 +8,12 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { spawnSync } = require('node:child_process');
 
-test('selection, quote, range-link, text-fragment, and toast workflows pass in Chrome', { timeout: 30_000 }, () => {
+for (const [name, file] of [
+  ['selection, quote, range-link, text-fragment, and toast workflows pass in Chrome', 'browser-fixture.html'],
+  ['CanLII paragraph/sentence find, navigation, highlighting, and cleanup pass in Chrome', 'find-fixture.html']
+]) test(name, { timeout: 30_000 }, () => {
   const chrome = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-  const fixture = pathToFileURL(path.join(__dirname, 'browser-fixture.html')).href;
+  const fixture = pathToFileURL(path.join(__dirname, file)).href;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'legal-pinpointer-browser-'));
   try {
     const result = spawnSync(chrome, [

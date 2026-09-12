@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Pinpointer proximity find — fictional fixture</title>
+  <link rel="stylesheet" href="../find.css">
+  <style>body { font: 18px/1.8 system-ui; max-width: 850px; margin: 150px auto; } p { padding: 18px 0; } .invisible { display: none; }</style>
+</head>
+<body>
+  <button id="origin">Original focus</button>
+  <nav>Privilege waiver outside the document must not match.</nav>
+  <main id="originalDocument">
+    <p><a id="par1">[1]</a> Privilege exists. Waiver is disputed.</p>
+    <p><a id="par2">[2]</a> The <em>privilege</em> was lost through <strong>waiver</strong>.</p>
+    <p><a id="par3">[3]</a> Privilege was asserted.</p>
+    <p><a id="par4">[4]</a> Waiver was disputed.</p>
+    <p hidden>Privilege waiver must stay hidden.</p>
+    <div class="invisible"><p>Privilege waiver hidden by an ancestor.</p></div>
+  </main>
+  <pre id="result">RUNNING</pre>
+  <script>globalThis.LegalPinpointerCore = {};</script>
+  <script src="../text-fragments.js"></script>
+  <script src="../find.js"></script>
+  <script>
+    'use strict';
+    // Isolate find UI + real text mapper; provider/citation/engine contracts have
+    // their own browser fixture. Native-node shapes follow inspectCanlii.
+    const root = document.querySelector('#originalDocument');
+    globalThis.LegalPinpointerProviders = {
+      inspectCanlii() {
+        return { root, nativeNodes: Array.from(root.querySelectorAll('[id^="par"]'), element => ({
+          kind: 'paragraph', element: element.closest('p') || element
+        })) };
+      }
+    };
+    const assert = (value, message) => { if (!value) throw new Error(message); };
+    const key = (target, name, modifiers = {}) => {
+      const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...modifiers });
+      target.dispatchEvent(event);
+      return event;
+    };
+    const tick = () => new Promise(resolve => setTimeout(resolve, 160));
+    (async () => {
+      const find = LegalPinpointerFind;
+      find.install(document, new URL('https://example.com/'));
+      const origin = document.querySelector('#origin');
+      origin.focus();
+      assert(!key(origin, 'S', { ctrlKey: true, shiftKey: true }).defaultPrevented, 'Leave other sites alone');
+      find.install(document, new URL('https://www.canlii.org/en/ca/scc/doc/2024/2024scc1/2024scc1.html'));
+      assert(key(origin, 'S', { ctrlKey: true, shiftKey: true }).defaultPrevented, 'Own requested shortcut');
+      const panel = document.querySelector('#legal-pinpointer-find');
+      const input = panel.querySelector('input');
+      const status = panel.querySelector('[role="status"]');
+      const query = async value => { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); await tick(); };
+      const unchanged = root.innerHTML;
+      const originalText = root.querySelector('em').firstChild;
+      const selection = new Range(); selection.selectNodeContents(originalText);
+      getSelection().removeAllRanges(); getSelection().addRange(selection);
+      CSS.highlights.set('unrelated-feature', new Highlight(selection));
+      await query('privileg* waiv*');
+      assert(status.textContent === '1 of 2 paragraphs', '/p scope, native boundaries, hidden text');
+      assert(CSS.highlights.get('legal-pinpointer-find-hits').size === 4, 'Four exact term highlights');
+      assert(root.innerHTML === unchanged && root.querySelector('em').firstChild === originalText, 'Never rewrite source nodes');
+      key(input, 'Enter'); assert(status.textContent.startsWith('2 of 2'), 'Next');
+      key(input, 'Enter'); assert(status.textContent.startsWith('1 of 2'), 'Wrap');
+      key(input, 'Enter', { shiftKey: true }); assert(status.textContent.startsWith('2 of 2'), 'Previous');
+      key(input, 'Tab');
+      assert(status.textContent === '1 of 1 sentence' && input.value === 'privileg* waiv*' && document.activeElement === input, 'Tab changes mode, not query/focus');
+      assert(!key(input, 'x', { ctrlKey: true }).defaultPrevented, 'Native input Cut remains available');
+      assert(!key(input, 'Tab', { shiftKey: true }).defaultPrevented, 'Shift+Tab allows ordinary focus navigation');
+      await query('privilege /s waiver');
+      key(input, 'Tab');
+      assert(input.value === 'privilege /p waiver' && status.textContent.endsWith('paragraphs'), 'Tab changes explicit operator');
+      await query('"privilege" /s waiver');
+      assert(status.textContent === '1 of 1 sentence', 'Quoted term with operator');
+      await query('privilege /p waiver');
+      const added = document.createElement('p'); added.textContent = 'Privilege and waiver together.'; root.appendChild(added);
+      await tick(); await tick();
+      assert(status.textContent === '1 of 3 paragraphs', 'Mutation invalidates index');
+      await query('"unterminated');
+      assert(input.getAttribute('aria-invalid') === 'true' && !CSS.highlights.has('legal-pinpointer-find-hits'), 'Invalid query clears stale hits');
+      await query('no-such-term');
+      assert(status.textContent === 'No matching paragraphs', 'No matches');
+      await query('');
+      assert(!CSS.highlights.has('legal-pinpointer-find-hits'), 'Empty query clears hits');
+      await query('privilege waiver');
+      key(input, 'Escape');
+      assert(panel.hidden && document.activeElement === origin, 'Escape closes and restores focus');
+      assert(!CSS.highlights.has('legal-pinpointer-find-hits') && CSS.highlights.has('unrelated-feature'), 'Clear only our highlights');
+      key(origin, 'S', { ctrlKey: true, shiftKey: true });
+      assert(!panel.hidden && input.value === 'privilege waiver', 'Reopen retains query');
+      const detached = document.createElement('div');
+      detached.innerHTML = '<a id="par10"></a>Alpha. <a id="par11"></a>Beta.';
+      const base = { root: detached, nativeNodes: Array.from(detached.children, element => ({ kind: 'paragraph', element })) };
+      const paragraphs = find.collectParagraphs(base, LegalPinpointerTextFragments);
+      assert(find.searchParagraphs(paragraphs, find.parseQuery('Alpha Beta'), 'p').length === 0, 'Standalone native anchors separate paragraphs');
+      const inline = document.createElement('div');
+      inline.innerHTML = '<p>😀 duty <em>of care</em><br>waived.</p><p>Next paragraph.</p>';
+      document.body.appendChild(inline);
+      const mapped = find.collectParagraphs({ root: inline }, LegalPinpointerTextFragments);
+      const match = find.searchParagraphs(mapped, find.parseQuery('"duty of care" waiv*'), 'p')[0];
+      assert(match && find.domRange(document, match.paragraph, match.hits[0]).toString() === 'duty of care', 'Exact phrase range crosses inline markup');
+      inline.remove();
+      document.querySelector('#result').textContent = 'PASS';
+    })().catch(error => { document.querySelector('#result').textContent = `FAIL: ${error.stack}`; });
+  </script>
+</body>
+</html>
