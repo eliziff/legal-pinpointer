@@ -39,8 +39,7 @@ text while the query/results remain visible. Alt+wheel previews; release Alt
 to open. **Back to start** restores the source scroll position. **Use active
 tab** explicitly changes the pinned search origin.
 
-The fixed header, independently scrolling virtual result list and fixed preview
-replace the old floating modal. Other-window results open that window's panel
+Other-window results open that window's panel
 and hand off the search without moving tabs. All tabs includes other windows in
 the same normal/incognito context; an ungrouped origin's Group scope is empty,
 not all ungrouped tabs. Restricted/unavailable pages and partial results are
@@ -66,8 +65,6 @@ Provider-native anchors are used first, with one deliberate hierarchy rule: a pa
 - provider selectors, ordered native section evidence, and parallel-citation metadata extraction.
 
 Neutral citations found in bounded provider metadata replace proprietary citations. Reporters retain their preference over CanLII-only fallbacks. Case URLs use the exact court-route table synchronized from Beaver. Legislation URLs resolve against the packaged CanLII metadata snapshot by exact citation identity or a unique title-and-jurisdiction match. Both paths abstain when identity is uncertain. A direct provider-owned CanLII link wins when present. CanLII is preferred for native paragraph and provision anchors, but never replaces a generated provider text-fragment target.
-
-Citation-only copy, CanLII navigation, and an unselected popup use metadata-only inspection: no full text map, section cloning, or WASM parse. Structured operations keep the same engine and precedence. Models are invalidated lazily by document/header changes; no parsing runs inside the observer. Pagehide drops model/clipboard references. Compact text maps and sparse engine offsets reduce allocation without changing UTF-16 source boundaries; legacy mapping APIs remain available to existing tools. See [PERFORMANCE-APP.md](PERFORMANCE-APP.md) for the measured follow-up and validation limits.
 
 ## Security and permissions
 
@@ -106,7 +103,6 @@ Popup actions report once in the popup. Keyboard copy/navigation actions report 
 Refresh the exact parser after changing `legal-structure`:
 
 ```powershell
-cargo check --manifest-path native/legal-structure-node/Cargo.toml --offline
 .\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
 ```
 
@@ -115,7 +111,7 @@ The refresh script builds a disposable offline WASM project from the checked-in 
 Refresh the exact CanLII court-route table:
 
 ```powershell
-.\tools\sync-canlii-courts.ps1 -SourcePath 'C:\path\to\backend\src\lib\canliiUrls.ts'
+.\tools\sync-canlii-courts.ps1 -SourcePath 'C:\path\to\Beaver\backend\src\lib\canliiUrls.ts'
 ```
 
 Refresh the packaged CanLII legislation metadata from the existing local snapshot:
