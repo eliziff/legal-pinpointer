@@ -57,3 +57,10 @@ test('repeated-term highlight caps are explicit without changing match existence
   assert.equal(result.limited, true);
 });
 
+test('bounded highlights retain source order across Boolean branches and negations', () => {
+  const found = matches(compile('(later OR first) NOT absent').tree, 'first later first later', 2);
+  assert.deepEqual(Array.from(found), [{ start: 0, end: 5 }, { start: 6, end: 11 }]);
+  assert.equal(found.limited, true);
+  assert.deepEqual(hit('NOT (NOT privilege OR implied)', 'Privilege is express.'), ['Privilege']);
+  assert.deepEqual(hit('privilege NOT (implied AND waiver)', 'Privilege and waiver.'), ['Privilege']);
+});

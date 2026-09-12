@@ -6,7 +6,7 @@
   const scopes = ['current', 'all', 'group'], labels = ['Current tab', 'All tabs', 'Current tab group'];
   let host, shadow, input, status, modeButton, scopeButton, preview, title, counter, openButton, skipped, controls;
   let opened = false, mode = 'p', scope = 'current', query = '', result = null, current = -1;
-  let sequence = Date.now(), timer = 0, busy = false, scrubbing = false, lastWheel = 0, focusBefore;
+  let sequence = Date.now(), timer = 0, busy = false, scrubbing = false, lastWheel = 0, focusBefore, flight = 0, opening = false;
   const css = `
     :host {color-scheme:light dark} * {box-sizing:border-box}
     section {width:min(580px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;
@@ -61,7 +61,7 @@
     controls = [input, modeButton, scopeButton, previous, next, openButton, refresh, dismiss];
     dismiss.onclick = close; modeButton.onclick = toggleMode; scopeButton.onclick = toggleScope;
     previous.onclick = () => move(-1); next.onclick = () => move(1); openButton.onclick = openSelected;
-    refresh.onclick = () => schedule(0); input.oninput = () => { query = input.value; schedule(); };
+    refresh.onclick = () => schedule(0, true); input.oninput = () => { query = input.value; schedule(); };
   }
   function label() {
     modeButton.textContent = `/${mode}`; modeButton.title = `Same ${mode === 'p' ? 'paragraph' : 'sentence'} (Tab to switch)`;
@@ -80,15 +80,22 @@
     label(); schedule(0); input.focus({ preventScroll: true });
   }
   function toggleScope() { scope = scopes[(scopes.indexOf(scope) + 1) % scopes.length]; label(); schedule(0); input.focus({ preventScroll: true }); }
-  function schedule(delay = 140) {
-    clearTimeout(timer); sequence++; busy = true; scrubbing = false; current = -1;
+  function schedule(delay = 140, refresh = false) {
+    clearTimeout(timer); sequence += 2;
+    if (flight) {
+      flight = 0;
+      // Cancel once per outstanding request, not once per keystroke. The next
+      // debounced query gets a newer sequence than this cancellation barrier.
+      send({ type: 'SONAR_CANCEL', sequence: sequence - 1 }).catch(() => {});
+    } busy = true; scrubbing = false; current = -1;
     preview.hidden = true; page.clearPaint(); tell('Searching…');
-    const token = sequence; timer = setTimeout(() => search(token), delay);
+    const token = sequence; timer = setTimeout(() => search(token, refresh), delay);
   }
-  async function search(token) {
+  async function search(token, refresh) {
     try {
       const compiled = core.compile(input.value, mode); mode = compiled.mode; label();
-      const response = await send({ type: 'SONAR_SEARCH', query: input.value, mode, scope, sequence: token });
+      flight = token;
+      const response = await send({ type: 'SONAR_SEARCH', query: input.value, mode, scope, sequence: token, refresh });
       if (!opened || token !== sequence || response.stale) return;
       result = response; busy = false; current = result.results.length ? 0 : -1;
       const unit = mode === 'p' ? 'paragraphs' : 'sentences';
@@ -105,7 +112,7 @@
     } catch (error) {
       if (!opened || token !== sequence) return;
       busy = false; current = -1; preview.hidden = true; skipped.hidden = true; page.clearPaint(); tell(error.message, true);
-    }
+    } finally { if (flight === token) flight = 0; }
   }
   function render() {
     const selected = result?.results[current]; preview.hidden = !selected;
@@ -130,14 +137,16 @@
     current = (current + delta + result.results.length) % result.results.length; render();
   }
   async function openSelected() {
-    if (busy || current < 0 || !result) return;
-    const token = sequence;
+    if (busy || opening || current < 0 || !result) return;
+    const token = sequence; opening = true;
     try {
       await send({ type: 'SONAR_GO', session: result.session, ticket: result.ticket, id: current });
     } catch (error) { if (token === sequence && opened) tell(error.message, true); }
+    finally { opening = false; }
   }
   function onKey(event) {
     if (!opened || event.isComposing) return;
+    if (event.key === 'Alt' && !event.ctrlKey) window.addEventListener('wheel', onWheel, { capture: true, passive: false });
     if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); close(); return; }
     if (!event.composedPath().includes(host)) return;
     // Isolate the search input from Pinpointer's source-copy shortcuts, not native editing.
@@ -158,9 +167,10 @@
     lastWheel = performance.now(); scrubbing = true; move(event.deltaY > 0 ? 1 : -1);
   }
   function onKeyUp(event) {
+    if (event.key === 'Alt') window.removeEventListener('wheel', onWheel, true);
     if (event.key === 'Alt' && scrubbing) { event.preventDefault(); event.stopImmediatePropagation(); scrubbing = false; openSelected(); }
   }
-  function onBlur() { scrubbing = false; }
+  function onBlur() { scrubbing = false; window.removeEventListener('wheel', onWheel, true); }
   function focus() { if (opened) { input.focus({ preventScroll: true }); } }
   function open() {
     if (opened) { focus(); input.select(); return; }
@@ -170,13 +180,13 @@
     try { host.showPopover(); } catch (_) { /* Fixed-position fallback. */ }
     focus(); input.select();
     window.addEventListener('keydown', onKey, true); window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('wheel', onWheel, { capture: true, passive: false }); window.addEventListener('blur', onBlur);
+    window.addEventListener('blur', onBlur);
     page.setOnChange(() => { if (opened && scope === 'current') schedule(220); });
     schedule(0);
   }
   function close() {
     if (!opened) return;
-    opened = false; sequence++; clearTimeout(timer); scrubbing = false; page.setOnChange(null); page.clearPaint();
+    opened = false; sequence += 2; flight = 0; clearTimeout(timer); scrubbing = false; page.setOnChange(null); page.clearPaint();
     host.remove(); window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onKeyUp, true);
     window.removeEventListener('wheel', onWheel, true); window.removeEventListener('blur', onBlur);
     send({ type: 'SONAR_CLOSE', sequence }).catch(() => {});

@@ -32,7 +32,7 @@ function fixture() {
       const [method] = options.args;
       const value = method === 'search' ? { title: `Page ${tabId}`, url: tabs.find(t => t.id === tabId).url, limited: false,
         results: [{ index: 0, preview: 'Privilege waiver.', marks: [{ start: 0, end: 9 }], locator: '' }] } : true;
-      return [{ documentId: `doc${tabId}`, result: value }];
+      return [{ documentId: `doc${tabId}`, result: typeof method === 'string' ? { ok: true, value } : value }];
     } }
   };
   return { api, tabs, calls, storage, sender, navigations, broker: createBroker(api) };
@@ -114,4 +114,100 @@ test('empty queries do not inspect pages, errors and result caps remain visible'
   const result = await f.broker.handle(request('current', 2), f.sender);
   assert.equal(result.searched, 0); assert.equal(result.skipped.length, 1);
   assert.match(result.skipped[0].reason, /access denied/);
+});
+
+test('replacement keeps eligible indexes warm, avoids reinjection, and stores only handles', async () => {
+  const f = fixture();
+  const first = await f.broker.handle(request('all'), f.sender);
+  const second = await f.broker.handle(request('group', 2), f.sender);
+  await new Promise(setImmediate);
+  assert.equal(f.calls.filter(c => c.files).length, 0, 'Warm-page probe does not reload modules');
+  for (const id of [1, 2, 3]) {
+    assert.ok(f.calls.some(c => c.target.tabId === id && c.args?.[0] === 'release' &&
+      c.args[1][0] === first.ticket && c.args[1][1] === (id !== 3)));
+  }
+  assert.ok(second.results[0].preview);
+  assert.deepEqual(Object.keys(f.storage[second.session].results[0]).sort(), ['documentId', 'index', 'tabId', 'url']);
+});
+
+test('cross-tab batches stop at the aggregate result and text budgets', async () => {
+  for (const budget of ['results', 'text']) {
+    const f = fixture(), execute = f.api.scripting.executeScript;
+    f.tabs.splice(1);
+    for (let id = 2; id <= 40; id++) f.tabs.push({ ...f.tabs[0], id, index: id, url: `https://tab${id}.test/` });
+    let active = 0, maximum = 0, scanned = 0;
+    f.api.scripting.executeScript = async options => {
+      const entries = await execute(options);
+      if (options.args?.[0] !== 'search') return entries;
+      scanned++; maximum = Math.max(maximum, ++active);
+      await new Promise(setImmediate); active--;
+      const value = entries[0].result.value;
+      value.characters = budget === 'text' ? 4_000_000 : 10;
+      if (budget === 'results') value.results = Array.from({ length: 200 }, (_, index) => ({ ...value.results[0], index }));
+      return entries;
+    };
+    const result = await f.broker.handle(request('all'), f.sender);
+    assert.equal(maximum, 4);
+    assert.equal(scanned, 8, 'Do not read the remaining 32 tabs after exhausting a budget');
+    assert.equal(result.results.length, budget === 'results' ? 1000 : 8);
+    assert.equal(result.skipped.length, 32);
+    assert.equal(result.limited, true);
+  }
+});
+
+test('close during late injection cannot start a page search afterward', async () => {
+  const f = fixture(), execute = f.api.scripting.executeScript;
+  let resolveProbe;
+  f.api.scripting.executeScript = async options => {
+    if (typeof options.args?.[0] === 'boolean') await new Promise(resolve => { resolveProbe = resolve; });
+    return execute(options);
+  };
+  const pending = f.broker.handle(request('current'), f.sender);
+  while (!resolveProbe) await new Promise(setImmediate);
+  await f.broker.handle({ type: 'SONAR_CLOSE', sequence: 2 }, f.sender);
+  resolveProbe();
+  assert.equal((await pending).stale, true);
+  assert.equal(f.calls.filter(c => c.args?.[0] === 'search').length, 0);
+  assert.equal(Object.keys(f.storage).length, 0);
+});
+
+test('slow session writes and stale closes cannot overwrite a newer query', async () => {
+  const f = fixture(), set = f.api.storage.session.set;
+  let unblock, once = true;
+  f.api.storage.session.set = async values => {
+    if (once) { once = false; await new Promise(resolve => { unblock = resolve; }); }
+    await set(values);
+  };
+  const old = f.broker.handle(request('current'), f.sender);
+  while (!unblock) await new Promise(setImmediate);
+  const next = f.broker.handle(request('current', 5), f.sender);
+  unblock();
+  assert.equal((await old).stale, true);
+  const latest = await next;
+  assert.equal(f.storage[latest.session].ticket, latest.ticket);
+  const restarted = createBroker(f.api), releases = f.calls.filter(c => c.args?.[0] === 'release').length;
+  await restarted.handle({ type: 'SONAR_CLOSE', sequence: 2 }, f.sender);
+  assert.equal(f.storage[latest.session].ticket, latest.ticket);
+  assert.equal(f.calls.filter(c => c.args?.[0] === 'release').length, releases);
+  await restarted.handle({ type: 'SONAR_GO', session: latest.session, ticket: latest.ticket, id: 0 }, f.sender);
+  await assert.rejects(restarted.handle({ type: 'SONAR_GO', session: latest.session, ticket: latest.ticket, id: '0' }, f.sender), /Choose/);
+});
+
+test('cancel aborts the actual outstanding page job, not just its returned results', async () => {
+  const f = fixture(), execute = f.api.scripting.executeScript;
+  let aborted, ticket;
+  f.api.scripting.executeScript = async options => {
+    if (options.args?.[0] === 'search') {
+      ticket = options.args[1][0].ticket;
+      await new Promise((_, reject) => { aborted = () => reject(new Error('Search cancelled')); });
+    }
+    if (options.args?.[0] === 'release' && options.args[1][0] === ticket) aborted();
+    return execute(options);
+  };
+  const pending = f.broker.handle(request('current'), f.sender);
+  while (!aborted) await new Promise(setImmediate);
+  await f.broker.handle({ type: 'SONAR_CANCEL', sequence: 2 }, f.sender);
+  assert.equal((await pending).stale, true);
+  await f.broker.handle({ type: 'SONAR_CLOSE', sequence: 3 }, f.sender);
+  assert.equal(Object.keys(f.storage).length, 0);
 });
