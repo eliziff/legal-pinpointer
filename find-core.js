@@ -1,6 +1,7 @@
 'use strict';
 
 (function exposeFindCore(global) {
+  if (global.LegalPinpointerFindCore && typeof module === 'undefined') return;
   // No stemming or remote search: offsets always refer to the original page text.
   const segmenters = new Map();
   const WORD = '[\\p{L}\\p{N}\\p{M}_]';
@@ -98,41 +99,57 @@
       (match, prefix) => prefix === undefined ? match : `${prefix}/${mode}`);
   }
 
-  function matches(tree, text) {
-    let limited = false;
-    function evaluate(node, negated = false) {
+  function matches(tree, text, rangeLimit = 5000) {
+    if (!tree) return [];
+    // First establish Boolean truth with existence checks. In particular, do not
+    // allocate thousands of ranges for a common word before a later term fails.
+    const truth = new Map();
+    function test(node) {
+      if (truth.has(node)) return truth.get(node);
+      let value;
       if (node.type === 'term') {
         node.pattern.lastIndex = 0;
-        const ranges = [];
-        for (const match of text.matchAll(node.pattern)) {
-          if (ranges.length === 5000) { limited = true; break; }
-          ranges.push({ start: match.index, end: match.index + match[0].length });
-        }
-        return negated ? { ok: ranges.length === 0, ranges: [] } : { ok: ranges.length > 0, ranges };
-      }
-      if (node.type === 'NOT') return evaluate(node.child, !negated);
-      const conjunction = (node.type === 'AND') !== negated;
-      const left = evaluate(node.left, negated);
-      if (conjunction && !left.ok) return { ok: false, ranges: [] };
-      const right = evaluate(node.right, negated);
-      const ok = conjunction ? left.ok && right.ok : left.ok || right.ok;
-      return { ok, ranges: ok ? [...(left.ok ? left.ranges : []), ...(right.ok ? right.ranges : [])] : [] };
+        value = node.pattern.test(text);
+      } else if (node.type === 'NOT') value = !test(node.child);
+      else value = node.type === 'AND' ? test(node.left) && test(node.right) : test(node.left) || test(node.right);
+      truth.set(node, value);
+      return value;
     }
-    if (!tree) return [];
-    const result = evaluate(tree);
-    if (!result.ok) return [];
-    // Merge overlapping terms so repeated query terms do not duplicate highlights.
+    if (!test(tree)) return [];
+    const patterns = new Set();
+    function collect(node, negated = false) {
+      if (test(node) === negated) return;
+      if (node.type === 'term') { if (!negated) patterns.add(node.pattern.source); return; }
+      if (node.type === 'NOT') collect(node.child, !negated);
+      else { collect(node.left, negated); collect(node.right, negated); }
+    }
+    collect(tree);
+    // A bounded merge of regex iterators keeps the first ranges in source order,
+    // regardless of query order. Allocation is O(terms + rangeLimit), not hits.
+    const cursors = [...patterns].map(source => {
+      const pattern = new RegExp(source, 'giu');
+      return { pattern, hit: pattern.exec(text) };
+    });
     const merged = [];
-    for (const range of result.ranges.sort((a, b) => a.start - b.start || a.end - b.end)) {
+    let limited = false;
+    while (true) {
+      let cursor;
+      for (const candidate of cursors) if (candidate.hit && (!cursor || candidate.hit.index < cursor.hit.index)) cursor = candidate;
+      if (!cursor) break;
+      const range = { start: cursor.hit.index, end: cursor.hit.index + cursor.hit[0].length };
       const previous = merged[merged.length - 1];
       if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
-      else merged.push({ ...range });
+      else {
+        if (merged.length >= rangeLimit) { limited = true; break; }
+        merged.push(range);
+      }
+      cursor.hit = cursor.pattern.exec(text);
     }
     merged.limited = limited;
     return merged;
   }
 
-  function sentences(text, locale = 'en') {
+  function* sentenceUnits(text, locale = 'en') {
     let segmenter = segmenters.get(locale);
     if (!segmenter) {
       try { segmenter = new Intl.Segmenter(locale, { granularity: 'sentence' }); }
@@ -140,23 +157,25 @@
       if (segmenters.size >= 8) segmenters.clear();
       segmenters.set(locale, segmenter);
     }
-    const units = [];
+    let previous = null;
     // ICU sentence boundaries plus a small, explicit legal/title abbreviation guard.
     // This is not a guarantee of linguistic sentence parsing (see README).
     const abbreviation = /\b(?:Mr|Mrs|Ms|Dr|Prof|Mme|Mlle|M|Me|Mtre|vs?|No|Nos|para|paras|ss?|art|arts|al)\.\s*$/iu;
     for (const part of segmenter.segment(text)) {
-      const previous = units[units.length - 1];
       const before = previous && text.slice(previous.start, previous.end);
       if (previous && (abbreviation.test(before) || (/(?:\b[A-Z]\.){2,}\s*$/.test(before) && /^\s*\d/.test(part.segment)))) {
         previous.end = part.index + part.segment.length;
       } else {
-        units.push({ start: part.index, end: part.index + part.segment.length });
+        if (previous) yield previous;
+        previous = { start: part.index, end: part.index + part.segment.length };
       }
     }
-    return units;
+    if (previous) yield previous;
   }
 
-  const api = { compile, matches, sentences, switchScope };
+  function sentences(text, locale = 'en') { return [...sentenceUnits(text, locale)]; }
+
+  const api = { compile, matches, sentences, sentenceUnits, switchScope };
   global.LegalPinpointerFindCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

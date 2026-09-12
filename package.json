@@ -1,6 +1,6 @@
 {
   "name": "legal-pinpointer",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "private": true,
   "description": "Dependency-free source and tests for the Legal Pinpointer browser extension.",
   "scripts": {
@@ -9,6 +9,7 @@
     "audit:legislation": "node tools/audit-canlii-legislation-index.cjs",
     "check": "npm test && npm run test:browser && npm run audit:legislation",
     "test:sonar": "node --test tests/find.test.cjs tests/sonar.test.cjs",
-    "test:sonar:browser": "node --test tests/sonar-browser.test.cjs"
+    "test:sonar:browser": "node --test tests/sonar-browser.test.cjs",
+    "benchmark:sonar": "node tools/benchmark-sonar.cjs"
   }
 }
