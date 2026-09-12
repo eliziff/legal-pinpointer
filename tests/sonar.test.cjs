@@ -16,7 +16,7 @@ function fixture() {
   const storage = {}, calls = [], navigations = [];
   const sender = { id: 'extension', tab: tabs[0], frameId: 0, documentId: 'doc1', url: tabs[0].url };
   const api = {
-    runtime: { id: 'extension' },
+    runtime: { id: 'extension', getURL: path => `chrome-extension://extension/${path}` },
     storage: { session: { async get(key) { return structuredClone(key ? { [key]: storage[key] } : storage); },
       async set(values) { Object.assign(storage, structuredClone(values)); }, async remove(key) { delete storage[key]; } } },
     tabs: { async get(id) { const tab = tabs.find(t => t.id === id); if (!tab) throw new Error('Closed tab'); return { ...tab }; },
@@ -127,7 +127,7 @@ test('replacement keeps eligible indexes warm, avoids reinjection, and stores on
       c.args[1][0] === first.ticket && c.args[1][1] === (id !== 3)));
   }
   assert.ok(second.results[0].preview);
-  assert.deepEqual(Object.keys(f.storage[second.session].results[0]).sort(), ['documentId', 'index', 'tabId', 'url']);
+  assert.deepEqual(Object.keys(f.storage[second.session].results[0]).sort(), ['documentId', 'index', 'tabId', 'url', 'windowId']);
 });
 
 test('cross-tab batches stop at the aggregate result and text budgets', async () => {
