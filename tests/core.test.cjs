@@ -10,13 +10,13 @@ const providers = require('../providers.js');
 
 test('collapses paragraph and provision runs using legal citation notation', () => {
   assert.equal(core.formatPinpoint('paragraph', ['12', '13', '14', '15', '17', '18'], 'bare'), '12-15, 17-18');
-  assert.equal(core.formatPinpoint('paragraph', ['12'], 'full'), 'para 12');
-  assert.equal(core.formatPinpoint('paragraph', ['12', '13'], 'full'), 'paras 12-13');
+  assert.equal(core.formatPinpoint('paragraph', ['12'], 'full'), 'at para 12');
+  assert.equal(core.formatPinpoint('paragraph', ['12', '13'], 'full'), 'at paras 12-13');
   assert.equal(core.formatPinpoint('section', ['7(2)', '7(3)', '7(4)'], 'bare'), '7(2)-(4)');
   assert.equal(core.formatPinpoint('section', ['7(2)', '7(3)', '7(4)'], 'full'), 'ss 7(2)-(4)');
-  assert.equal(core.formatPinpoint('page', ['353'], 'full'), 'at p. 353');
-  assert.equal(core.formatPinpoint('page', ['553', '559'], 'full'), 'at pp. 553, 559');
-  assert.equal(core.formatPinpoint('page', ['553', '554', '555'], 'full'), 'at pp. 553-555');
+  assert.equal(core.formatPinpoint('page', ['353'], 'full'), 'at 353');
+  assert.equal(core.formatPinpoint('page', ['553', '559'], 'full'), 'at 553, 559');
+  assert.equal(core.formatPinpoint('page', ['553', '554', '555'], 'full'), 'at 553-555');
   assert.equal(core.formatPinpoint('pilcrow', ['12'], 'bare'), '\u00b6 12');
   assert.equal(core.formatPinpoint('silcrow', ['12.02'], 'full'), '\u00a7 12.02');
 });
