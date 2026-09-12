@@ -53,8 +53,7 @@ provider text-fragment target. Packaged data is a snapshot, not a live lookup.
 
 ## Maintenance
 
-Run these commands from **this repository's root**. Supply the actual source/data
-paths on your machine; the Beaver native-adapter path is not part of this checkout.
+Run these commands from this repository's root with your local source/data paths.
 
 ```powershell
 .\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
@@ -81,8 +80,7 @@ the default Windows installation path. `npm run check` combines all three checks
 [package.json](package.json) is the command source of truth.
 [tools/](tools/) also contains saved HTML/MHTML inspection and local-cache audits.
 Browser fixtures do not replace checking changed selectors against real provider
-pages. Cross-project priorities belong to
-[Beaver's master plan](https://github.com/eliziff/Beaver/blob/main/docs/roadmap/master-plan.md).
+pages.
 
 ## Privacy and notices
 
