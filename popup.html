@@ -9,6 +9,11 @@
 <body>
   <main>
     <h1>Legal Pinpointer</h1>
+    <div class="actions" aria-label="Page search">
+      <button id="find-in-page" type="button">Tab Sonar / Find · Ctrl+Shift+S</button>
+      <button id="canlii-text-search" type="button">CanLII text search · Alt+Shift+C</button>
+    </div>
+    <p id="shortcut-status" class="summary" role="status" hidden></p>
     <p id="document-summary" class="summary">Checking this document…</p>
 
     <div class="actions" aria-label="Copy actions">
@@ -26,17 +31,19 @@
       </label>
       <label>
         <input type="radio" name="pinpoint-style" value="full">
-        <span><strong>McGill</strong><small>paras 12-14, at p. 353, or ss 7(2)-(4)</small></span>
+        <span><strong>Full</strong><small>at paras 12-14, at 353, or ss 7(2)-(4)</small></span>
       </label>
       <label>
         <input id="link-full-text-fragment-pinpoint" type="checkbox">
-        <span><strong>Link full pinpoint phrase</strong><small>For text fragments, include “para(s)” or the provision prefix.</small></span>
+        <span><strong>Link full pinpoint phrase</strong><small>For text fragments, include “at para(s)” or the provision prefix.</small></span>
       </label>
     </fieldset>
 
     <details>
       <summary>Keyboard shortcuts</summary>
       <dl>
+        <div><dt>Ctrl+Shift+S</dt><dd>Tab Sonar; Tab switches /p and /s, Shift+Tab switches scope</dd></div>
+        <div><dt>Alt+Shift+C</dt><dd>CanLII document text search, including from new tabs</dd></div>
         <div><dt>Ctrl+X</dt><dd>Copy pinpoint</dd></div>
         <div><dt>Ctrl+Shift+X</dt><dd>Copy with selected quote</dd></div>
         <div><dt>Alt+X</dt><dd>Copy citation</dd></div>
@@ -47,5 +54,6 @@
     <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
   </main>
   <script src="popup.js"></script>
+  <script src="popup-find.js"></script>
 </body>
 </html>
