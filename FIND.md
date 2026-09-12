@@ -1,134 +1,142 @@
-# Tab Sonar: one proximity finder for websites and tabs
+# Tab Sonar: persistent proximity search
+
+Tab Sonar now opens in Chrome's **native side panel**, not a floating document
+modal. The query, virtualized result list, and passage preview remain visible
+when a source tab is activated. Chrome 116 or newer is required. Existing
+citation-copying shortcuts and output formats are unchanged.
 
 ## Controls
 
-- **Ctrl+Shift+S** opens the finder on an ordinary webpage. macOS uses Control,
-  not Command. The popup's **Tab Sonar / Find** button is an alternative;
-  conflicting shortcuts can be reassigned in `chrome://extensions/shortcuts`.
-- **Tab** cycles `/p` (paragraph) and `/s` (sentence), retaining the query.
-- **Shift+Tab** cycles **Current tab → All tabs → Current tab group → Current tab**.
-- **Enter / Shift+Enter**, or the arrows, preview next/previous results and wrap.
-  Current tab also highlights and scrolls the source. Multi-tab preview does
-  not activate another tab until you commit.
-- **Ctrl+Enter** or **Open passage** activates and highlights the selected result.
-  Alternatively, hold **Alt**, turn the mouse wheel to preview, then release Alt
-  to open. Merely pressing/releasing Alt does nothing; losing focus cancels the
-  wheel jump. Ordinary scrolling has no Sonar wheel listener.
-- **Return to Tab Sonar** restores the visited tab's previous window/nested scroll
-  position and returns to the originating search. It never restores an old URL.
-- **Escape** closes and releases this session's results and indexes. It does not
-  rewrite the selection or navigate back. **F6 / Shift+F6** move among controls
-  because Tab and Shift+Tab are reserved for search.
-- **Refresh** forces a fresh text index and re-reads tab/group membership.
-  Source changes invalidate cached text; Current tab refreshes automatically.
-  Multi-tab previews are revalidated before opening.
+| Control | Action |
+| --- | --- |
+| Ctrl+Shift+S | Open/focus Open tabs search. macOS uses Control, not Command. |
+| Tab | Cycle /p (same paragraph) and /s (same sentence). |
+| Shift+Tab | Cycle Current tab, All tabs, Current tab group. |
+| Enter / Shift+Enter in the query | Preview next/previous passage. |
+| Ctrl+Enter or click a result | Open the exact matching passage in its source tab. |
+| Alt+wheel; release Alt | Preview passages, then open the displayed result. |
+| Back to start | Restore the source scroll position and return to the originating tab. |
+| Use active tab | Explicitly change the origin of Current tab/group search. |
+| Refresh | Re-read tabs/group membership and rebuild the source text index. |
+| Clear | Clear the current route's query; in Open tabs, release its shared search session. |
+| F6 / Shift+F6 | Move among controls because Tab and Shift+Tab control proximity/scope. |
+| Alt+Shift+C | Open CanLII document-text search from any browser tab, including blank/new tabs. |
+
+With focus on the result list, arrows, PageUp/PageDown, Home and End preview
+results; Enter opens one. In Current tab scope, preview also highlights/scrolls
+the source **without activating it or stealing query focus**. Multi-tab preview
+does not activate any source until a click, Ctrl+Enter, or Alt release.
+
+Escape clears the active route and closes the native side panel where Chrome's
+close API is available; older supported Chrome versions can use its native X.
+The popup provides both search buttons and reports unassigned shortcut bindings.
+Chrome or another extension may claim a shortcut: assign it at
+`chrome://extensions/shortcuts`. The extension does not override the new-tab page.
+
+## CanLII document-text search, including from new tabs
+
+Alt+Shift+C is a **chrome.commands** command handled by the service worker. The
+handler opens the native panel synchronously in the keyboard gesture, before
+awaiting storage, tab lookup, or page access. It never injects into the originating
+page. Blank tabs, `chrome://newtab/`, and other browser-owned pages therefore need
+no document script to launch this form. The same approach opens Open tabs search
+from restricted pages; their contents remain unsearchable and are reported as such.
+
+Type a query and press Enter or Search CanLII. A **new tab** opens at CanLII's
+`/en/#search/text=...` URL with the complete query encoded as the text parameter.
+The starting tab is not navigated/replaced. Typing alone sends nothing. This is
+CanLII document-text search, not title/citation lookup and not a search of open
+tabs. The two routes retain separate drafts while this workspace is open.
+
+The submitted query is deliberately sent to CanLII and may become part of normal
+browser history. Local Open tabs queries and excerpts are not sent to CanLII.
+No selected document text is automatically placed into the remote query.
+
+## Stable results and cross-window navigation
+
+The header, status, list viewport, and preview occupy fixed grid regions. Long
+text scrolls inside its region; loading, errors, empty results, proximity/scope
+changes and skipped-tab details do not expand/collapse the panel. There are no
+animated height transitions. Results have fixed 132-pixel rows and mount only
+the viewport plus three overscan rows on either side. Scroll/resize redraws are
+coalesced through animation frames. Result text is escaped into DOM text/mark
+nodes, never injected as source HTML. Dark and forced-color modes are supported.
+
+Every result carries the source's title, observed pinpoint where available,
+excerpt and highlighted matches. A click uses an issued result handle, exact
+Chrome document ID, URL and current group/window checks, then revalidates the
+source ranges. Changed or unavailable passages require Refresh rather than an
+approximate jump. Existing renderer indexes and highlight reuse remain intact.
+
+Current tab and Current tab group stay pinned to the originating tab while
+visiting results. All tabs includes other windows without mixing normal and
+incognito contexts. A source in another window opens that window's native panel
+**within the original click/key gesture** and hands off the query, result list,
+selection and list scroll. No source tab is moved or regrouped. A window whose
+shared search has been changed or cleared elsewhere shows a refresh notice.
 
 ## Query language
 
 `privileg* waiv*` requires both prefixes in one unit, in either order.
 `"duty of care" breach` combines a whitespace-normalized phrase and whole word.
-Matching is Unicode-aware and case-insensitive; accents are significant. There
-is no stemming, legal inference, or model call.
+Matching is Unicode-aware and case-insensitive; accents are significant.
 
-`privilege /p waiver` or `privilege /s waiver` explicitly sets the mode; Tab
-updates operators, not quoted literals. Spaces and `AND` combine terms;
-parentheses and `OR` allow alternatives; `NOT` excludes a unit, not a document.
-Example: `(privileg* OR confidential*) waiv* NOT implied`. Every alternative must
-require a positive match. Mixed `/p` and `/s`, arbitrary word-distance operators,
-malformed groups, and internal/leading wildcards produce visible errors. This
-is not a replica of any provider's server-side search semantics. Counts are
-matching paragraphs/sentences, not word occurrences or combinations.
+`privilege /p waiver` and `privilege /s waiver` explicitly set proximity; Tab
+updates those operators but not quoted literals. Spaces and AND combine terms;
+parentheses and OR allow alternatives; NOT excludes a matching unit, not a whole
+document. For example `(privileg* OR confidential*) waiv* NOT implied`.
+Each alternative must require a positive term. Unsupported syntax is rejected.
+This is not a replica of a provider's tokenizer or a legal-relevance classifier.
 
-## Scope, access and confidentiality
+## Access, resource budgets and cleanup
 
-Current tab/group refer to the originating tab, not a visited result. All tabs
-includes other windows without mixing normal and incognito contexts. Group is
-the exact group and window; an ungrouped tab gets an explanatory empty scope.
-No tab is created, regrouped, closed, reloaded, or awakened to search.
+The native workspace adds only the **sidePanel** permission. Existing activeTab,
+scripting and HTTP/HTTPS host access support user-invoked cross-tab searches.
+Automatic citation scripts keep their original provider matches. Search code is
+not injected into every website on page load. No runtime dependency, build step,
+backend, telemetry, external assets, polling or worker-keepalive loop is added.
 
-The existing `activeTab`, `scripting`, and HTTP/HTTPS host permissions enable
-invoked current/all/group searches. `activeTab` alone cannot authorize other
-tabs. No universal content script runs at page load; automatic citation scripts
-keep their original provider matches. Chrome's site controls can narrow access;
-denied tabs are reported. No new permissions are added by the performance work,
-and there is no tabs/tabGroups/history/debugger/native-host permission.
+The broker stores compact navigation handles in extension-private RAM session
+storage; queries/previews normally remain in the panel instance. For a deliberate
+cross-window handoff only, a one-shot RAM snapshot also contains the bounded
+results and drafts. The receiving panel consumes/removes it. Unconsumed snapshots
+older than 60 seconds are pruned on the next launch; no disk or sync storage is
+used for these snapshots. Chrome restart clears session storage.
 
-Text is searched in its source tab. Bounded snippets reach the originating UI;
-only issued navigation handles, target IDs, and session metadata are stored in
-`chrome.storage.session` (extension-private RAM), not preview text or queries.
-The closed-shadow UI inserts plain text, never source HTML. A closed shadow tree
-is UI encapsulation, not a general security boundary against a hostile website.
-There are no new network requests, model calls, telemetry, or disk/sync history.
+Clear in Open tabs or Escape from that route releases the shared session. Native
+X closure does not globally destroy a workspace still in use in another window;
+existing page cache timers expire after 15 minutes and release on pagehide.
+Abandoned broker records are pruned on next launch. Browser suspension can delay
+timers. Navigation also rejects expired handles. No claim of immediate deletion
+on every browser-owned close event is made.
 
-Valid indexes survive query/mode changes. Mutation records, URLs, document IDs,
-and source ranges are checked before reuse or navigation. Closing releases the
-session; indexes shared with another live session remain until that session ends.
-Page caches have a 15-minute expiry timer and release on pagehide. Abandoned RAM
-sessions older than 15 minutes are pruned on the next open; Chrome restart clears
-session storage. Browser suspension may delay page timers. The worker is allowed
-to sleep; no keepalive loop or background crawler is introduced.
+Existing search caps remain: four-tab batches; 200 units per page and 1,000 total
+previews; four million text characters/150,000 traversal steps per page; a
+32-million-character queue-start threshold across pages (last batch may overshoot);
+five-second operation waits within an 18-second deadline. Physical paragraphs over
+65,536 UTF-16 characters and budget-truncated units are skipped whole, not split
+into misleading proximity/NOT matches. Highlight caps are 100 ranges/unit and
+2,000 background ranges; previews contain at most 460 characters. Partial work
+and skipped tabs are visible through the fixed status area and Details popover.
 
-## Boundaries and partial searches
+Search covers loaded visible top-document HTML and open shadows. Browser-internal
+pages, Web Store, built-in PDF viewers, scans, canvas text, closed shadows, iframe
+interiors and unloaded/virtualized text remain unsupported. Frozen, discarded,
+loading or access-denied tabs are skipped without waking or re-fetching them.
+**Opening a search from a new tab does not imply permission to read that tab.**
 
-Search covers loaded visible HTML in the top document and open shadow trees.
-CanLII's document container is preferred where present, but other sites need no
-legal metadata. Paragraphs follow rendered block boundaries, lists, table cells,
-and double breaks, with native paragraph anchors where available. Inline emphasis
-and a single `<br>` stay in one paragraph. `Intl.Segmenter` plus a small legal
-abbreviation guard supplies heuristic sentence boundaries.
+## Validation and maintenance
 
-Browser pages, the Web Store, built-in PDF viewer, scans, canvas text, closed
-shadows, iframe interiors, and unloaded/virtualized text remain unsupported.
-Local files require Chrome grants and are not guaranteed by the HTTP/HTTPS
-manifest. Frozen/discarded/loading/denied tabs are skipped, not reported as
-searched zero-hit documents. No re-fetch or wake-up occurs.
-
-Work is bounded, and reaching a cap produces a visible partial-search notice:
-
-- Four tabs per search batch; five-second per-operation waits within an 18-second
-  search deadline. Queued work stops on supersession, cancellation, or a budget.
-  Cancellation also reaches page jobs; timeout alone is not treated as cancellation.
-- Four million indexed characters / 150,000 traversal steps per page. Physical
-  paragraphs over 65,536 UTF-16 characters are skipped whole, as are units cut off
-  by the page budget. They are not split or truncated into misleading NOT/proximity
-  matches. The cross-tab scheduler stops starting batches at 32 million indexed
-  characters; the final batch can overshoot by up to four page budgets.
-- 200 result units per page; 1,000 total previews. Intermediate results are bounded
-  by the four-tab batch. At most three result tickets are cached per page.
-- Up to 100 source-ordered term ranges per unit, 2,000 background highlighted
-  ranges per displayed result set, and 460 characters per preview. The active
-  passage still gets its own highlight. Highlight limits also signal partial work.
-
-Traversal/matching cooperatively yield around eight-millisecond checkpoints,
-using scheduler continuations when available and a timer fallback. Native DOM,
-style, regex, and segmentation operations can exceed that target; it is not a
-hard real-time guarantee. Search does not wrap source nodes in `<mark>` elements.
-
-## Development and validation
-
-The extension needs no build or npm installation at runtime. After updating,
-reload it and already-open provider pages to remove old content-script listeners.
+See [WORKSPACE.md](WORKSPACE.md) for validation evidence and the remaining native
+Chrome acceptance checks. Run the complete checkout's focused commands:
 
 ```
 npm run test:sonar
-npm test
-npm run test:browser
+npm run test:workspace
 ```
 
-Optional browser regression and benchmark use Playwright only as an external
-test driver, not an extension dependency:
-
-```
-npm install --no-save --package-lock=false playwright
-npx playwright install chromium
-npm run test:sonar:browser
-npm run benchmark:sonar -- /path/to/baseline-checkout
-```
-
-`CHROME_PATH` selects an existing executable; `PLAYWRIGHT_MODULE` selects a
-preinstalled Playwright package. Browser tests run real page/UI/matcher/broker
-code but simulate Chrome tabs, groups, permissions, and activation. They cover
-interaction, warm-cache/paint reuse, mutation safety, cancellation, and resource
-limits. They are not installed-extension or live-provider validation. Existing
-clipboard/parser tests remain separate and unchanged. See [PERFORMANCE.md](PERFORMANCE.md)
-for measured results, methodology, and validation gaps.
+The browser driver is optional and development-only:
+`npm install --no-save --package-lock=false playwright` and
+`npx playwright install chromium`. CHROME_PATH and PLAYWRIGHT_MODULE select
+existing installations. An unpacked extension requires no npm installation.
+Reload the extension and previously injected pages after updating.

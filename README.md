@@ -1,14 +1,14 @@
 # Legal Pinpointer
 
-A small, local-only Manifest V3 extension for copying structure-aware Canadian legal pinpoints and citations from CanLII, Lexis+, and Westlaw Advantage Canada.
+A small, local-first Manifest V3 extension for structure-aware Canadian legal citations and persistent proximity search across open webpages.
 
 ## Install
 
-1. Open `chrome://extensions`.
+1. Open `chrome://extensions` in Chrome 116 or newer.
 2. Turn on Developer mode.
 3. Choose **Load unpacked** and select this folder.
 
-No build or package installation is required to use the extension.
+No build or package installation is required to use the extension. After updating, reload the extension and previously injected pages. Shortcut conflicts can be resolved at `chrome://extensions/shortcuts`; the popup reports unassigned search bindings.
 
 ## Workflows
 
@@ -28,24 +28,32 @@ A current-page text-fragment URL in the clipboard has precedence over both selec
 
 Selections include every structural unit crossed. Rich clipboard output links the two ends of a collapsed range separately, such as `32-33` or `7(2)-(4)`. Quote output preserves a small safe set of inline formatting and emits real paragraph blocks, with one newline between units in plain text. Provisions use hanging paragraph indents so explicit and word-processor-wrapped continuation lines remain aligned beneath the provision text. An ellipsis is added only after the first marker when the selection omits substantive opening text; trailing ellipses are never emitted.
 
-## Tab Sonar — proximity find on any website
+## Tab Sonar — persistent results across websites and windows
 
-**Ctrl+Shift+S** opens the same finder on ordinary webpages, including CanLII,
-Lexis, Westlaw, and non-legal sites. **Tab** cycles `/p` (same paragraph) and
-`/s` (same sentence). **Shift+Tab** cycles **Current tab → All tabs → Current
-tab group**. Start with `privileg* waiv*`; quoted phrases and explicit `/p` or
-`/s` also work. **Enter / Shift+Enter** preview the next / previous passage;
-**Ctrl+Enter** opens it. Hold **Alt** and turn the wheel to preview passages,
-then release Alt to open the selected one. A return button takes you back to
-the search and restores the destination's previous scroll position.
+**Ctrl+Shift+S** opens Chrome's native side panel. **Tab** cycles `/p` (same
+paragraph) and `/s` (same sentence). **Shift+Tab** cycles **Current tab → All
+tabs → Current tab group**. Start with `privileg* waiv*`; quoted phrases,
+Boolean groups and explicit `/p` or `/s` also work. **Enter / Shift+Enter**
+preview passages. **Click a result or Ctrl+Enter** to jump to its exact source
+text while the query/results remain visible. Alt+wheel previews; release Alt
+to open. **Back to start** restores the source scroll position. **Use active
+tab** explicitly changes the pinned search origin.
 
-This replaces the earlier CanLII-only finder; it is not a separate extension.
-All tabs means all windows in the same normal/incognito context; an ungrouped
-tab's Group scope is empty, not all ungrouped tabs. Search remains local and
-on demand, with explicit skipped-tab and partial-result counts. Cross-tab
-search requires HTTP/HTTPS site access, declared in the manifest; restrict
-site access in Chrome to narrow what it can search. Read [FIND.md](FIND.md)
-for controls, permissions, boundaries, and validation commands.
+The fixed header, independently scrolling virtual result list and fixed preview
+replace the old floating modal. Other-window results open that window's panel
+and hand off the search without moving tabs. All tabs includes other windows in
+the same normal/incognito context; an ungrouped origin's Group scope is empty,
+not all ungrouped tabs. Restricted/unavailable pages and partial results are
+reported, not silently counted as zero-hit documents.
+
+**Alt+Shift+C** opens **CanLII document-text search from any browser tab,
+including blank/new tabs**. The browser command needs no source-page injection.
+Type a query and press Enter: CanLII results open in a new tab, leaving the
+starting tab untouched. Nothing is sent while typing. Open-tab and CanLII
+queries have separate drafts. Both launchers are also available in the popup.
+
+Read [FIND.md](FIND.md) for controls, access, resource limits and cleanup, and
+[WORKSPACE.md](WORKSPACE.md) for tests and native Chrome validation gaps.
 
 ## Structure and citation policy
 
@@ -63,7 +71,11 @@ Citation-only copy, CanLII navigation, and an unselected popup use metadata-only
 
 ## Security and permissions
 
-Runtime code and metadata are fully packaged. There are no runtime dependencies, CDNs, remote scripts, analytics, backend, or external network requests. The service worker fetches only the extension's own packaged WASM and CanLII legislation index files.
+Runtime code and metadata are fully packaged. There are no runtime dependencies,
+CDNs, remote scripts, analytics or backend. The service worker fetches only the
+packaged WASM and CanLII legislation index. **Submitting a CanLII search opens a
+remote CanLII URL containing the query**; it is an explicit navigation, not local
+search, and may be recorded in normal browser history.
 
 Rich clipboard HTML is rebuilt from escaped text and a fixed inline-formatting allowlist. Provider markup, attributes, event handlers, styles, scripts, and hidden controls are never passed through.
 
@@ -71,20 +83,23 @@ The manifest requests only:
 
 - `clipboardRead`, to recognize a copied current-page text-fragment URL;
 - `clipboardWrite`, for plain and rich clipboard output;
-- `storage`, for the pinpoint-style setting;
+- `storage`, for settings and extension-private RAM navigation/handoff state;
 - `activeTab` and `scripting`, for user-invoked search injection;
+- `sidePanel`, for the persistent native search interface;
 - HTTP/HTTPS host access, to search other open tabs without activating them;
 - exact automatic content-script matches for CanLII documents, Lexis document
   pages, and Westlaw document pages. The citation-copy surface is unchanged.
 
-Search queries are not written to local/sync storage. Only navigation handles
-and session metadata live in Chrome's RAM-only, extension-private session
-storage, not preview text. Closing the finder removes its session; abandoned
-session records older than 15 minutes are pruned when the finder next opens.
-Page caches have a separate 15-minute expiry. There is no network search,
-telemetry, or background crawling.
+Local search queries are not written to disk or sync. Navigation handles use
+Chrome's private RAM session storage. A deliberate cross-window handoff also
+stores a one-shot bounded query/result snapshot there; the receiving panel
+consumes/removes it. Unconsumed snapshots older than 60 seconds are pruned on
+next launch. Clear in Open tabs releases its shared search session. Native panel
+X closure relies on the existing 15-minute page-cache/session expiry, rather
+than destroying a workspace open in another window. Browser suspension can
+delay timers. There is no background crawling, polling or worker keepalive.
 
-Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast; search feedback stays in the finder.
+Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast; search feedback stays in the native workspace.
 
 ## Maintenance
 
@@ -114,6 +129,7 @@ Run focused tests:
 ```powershell
 npm test
 npm run test:browser
+npm run test:workspace
 ```
 
-The browser fixture covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. The optional Playwright-backed `npm run test:pinpointer:browser` additionally checks compact-map equivalence, sparse offsets, metadata paths across provider-shaped fixtures, structureless selected quotes, and mutation safety. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.
+The browser fixture covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. The optional Playwright-backed `npm run test:pinpointer:browser` additionally checks compact-map equivalence, sparse offsets, metadata paths across provider-shaped fixtures, structureless selected quotes, and mutation safety. `npm run test:workspace` checks native-panel markup and routing with simulated Chrome APIs, not installed keyboard dispatch. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.

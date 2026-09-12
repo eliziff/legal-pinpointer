@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Legal Pinpointer",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "description": "Canadian legal pinpoints and Tab Sonar: paragraph/sentence search across a page, all tabs, or a tab group.",
   "permissions": [
     "clipboardRead",
     "clipboardWrite",
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "background": {
     "service_worker": "engine-worker.js"
@@ -16,6 +17,9 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "Legal Pinpointer"
+  },
+  "side_panel": {
+    "default_path": "sonar.html"
   },
   "content_scripts": [
     {
@@ -51,9 +55,16 @@
         "mac": "MacCtrl+Shift+S"
       },
       "description": "Tab Sonar: find in page, all tabs or current tab group"
+    },
+    "canlii-text-search": {
+      "suggested_key": {
+        "default": "Alt+Shift+C",
+        "mac": "Alt+Shift+C"
+      },
+      "description": "CanLII document text search (including from new tabs)"
     }
   },
-  "minimum_chrome_version": "114",
+  "minimum_chrome_version": "116",
   "host_permissions": [
     "http://*/*",
     "https://*/*"
