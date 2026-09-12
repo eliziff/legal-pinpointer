@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  extension:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install browser test tooling
+        run: npm install --no-save --package-lock=false --ignore-scripts playwright
+      - run: npm run check
+      - name: Run browser regressions
+        env:
+          CHROME_PATH: C:\Program Files\Google\Chrome\Application\chrome.exe
+        run: node --test --test-concurrency=1 tests/sonar-browser.test.cjs tests/workspace-browser.test.cjs tests/pinpointer-browser.test.cjs tests/text-hotpaths-browser.test.cjs
