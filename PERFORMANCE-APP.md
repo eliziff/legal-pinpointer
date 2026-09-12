@@ -99,3 +99,79 @@ Design references: Chrome's [security guidance](https://developer.chrome.com/doc
 [service-worker lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle),
 and [session storage](https://developer.chrome.com/docs/extensions/reference/api/storage).
 A closed shadow root is UI encapsulation, not a blanket confidentiality guarantee.
+
+
+## 0.1.29: bulk text mapping and fragment disambiguation
+
+Baseline: `063ad13b52c521cf65984b5e38507bc53c659303` (0.1.28).
+The earlier measurements above are historical; the figures below compare the
+already-optimized 0.1.28 mapper against this additional pass.
+
+Ordinary prose with single ASCII spaces now enters the structural map as one
+source chunk per text node, without per-word regex results and temporary chunks.
+Irregular or Unicode whitespace retains the existing normalization path. Mapping
+boundaries, source nodes, and the public legacy mapping mode are unchanged.
+The text-only Lexis evidence path uses the same optimization.
+
+Text-fragment resolution folds the document once for all directives, checks only
+context-sized substrings, and memoizes failed endpoint chains. Later starting
+positions do not rescan the same failed endpoints or repeatedly scan for an absent
+end term. Non-overlapping occurrence order is preserved even when the literal term
+can overlap itself. The memo and folded text live only for that resolution call;
+there is no new observer, persistent cache, network call or worker activity.
+
+### Paired measurements on the final runtime
+
+Chromium 144.0.7559.96, Node 22.16.0, Linux task container. Five paired trials,
+alternating variant order. Structural fixture: 4,000 paragraphs, 1,094,892
+normalized characters and 4,000 source runs. One untimed warm-up followed by five
+fresh index builds per trial: 25 timed samples per variant and mapping mode.
+Fragment stress fixtures have 1,200 repeated start/end pairs; one resolution per
+trial (five samples). Every normalized structural string and fragment match offset
+is checked for equivalence; no timing thresholds are used in regression tests.
+
+| Median operation | 0.1.28 baseline | 0.1.29 |
+| --- | ---: | ---: |
+| Build structural text/DOM map | 68.8 ms | 11.3 ms |
+| Build structural text only | 63.5 ms | 10.4 ms |
+| Repeated endpoints with no valid suffix context | 150.5 ms | 3.3 ms |
+| Repeated endpoints with a late qualifying prefix | 161.2 ms | 2.4 ms |
+| Ordinary short fragment hit | 0.1 ms | 0.1 ms |
+
+Approximately 6.1x faster structural mapping in this fixture. The fragment stress
+speedups are not a claim about ordinary quotations. Sub-millisecond measurements
+are timer-resolution-sensitive. These are foreground renderer measurements,
+including DOM indexing but excluding native parsing, clipboard/extension IPC,
+tab activation, full copy operations and live sites. No heap-in-bytes result or
+whole-application speedup is inferred. The previous benchmark's fixture differs;
+do not combine its timings with these figures.
+
+```
+node --test tests/text-hotpaths.test.cjs
+node --test tests/text-hotpaths-browser.test.cjs
+npm run benchmark:text -- /path/to/063ad13-checkout
+```
+
+The browser regression/benchmark use the same optional Playwright driver as the
+existing tools. `CHROME_PATH` and `PLAYWRIGHT_MODULE` select installed tools.
+The new Node checks also run under `npm test`; the browser check is included in
+`npm run test:pinpointer:browser`. The benchmark prints every raw observation.
+
+### Validation for this pass
+
+Three Node tests and one real-Chromium DOM regression passed. Differential checks
+cover 1,200 generated fragment searches against the previous matching contract,
+including self-overlapping endpoints. Operation-count assertions test removal of
+Cartesian endpoint rescans and one document case fold across multiple directives.
+The browser check compares every legacy/compact boundary in 160 generated DOM
+fixtures, including mixed inline/block nodes, breaks, whitespace, astral and lone
+surrogate code units, and hidden nodes. Original DOM nodes and selection remain
+unchanged. All new/modified JavaScript passes `node --check`.
+
+The baseline runtime, manifest, package and this historical report were verified
+against Git blob hashes. The manifest changes only version to 0.1.29; no runtime
+dependency or permission is added. Sonar, citation formatting, metadata extraction,
+clipboard fallback, provider adapters, parser assets and service worker are not
+modified. The full legacy/Sonar/native-parser suites, installed extension and live
+websites were not rerun in this pass. A complete checkout could not be downloaded
+from the task container; the changed runtime was read through the GitHub connector.
