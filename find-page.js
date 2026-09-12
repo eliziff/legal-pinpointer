@@ -4,14 +4,18 @@
   if (global.LegalPinpointerSearchPage) return;
   const core = global.LegalPinpointerFindCore;
   const HIT = 'legal-pinpointer-sonar-hits', ACTIVE = 'legal-pinpointer-sonar-active';
-  const MAX_CHARS = 4_000_000, MAX_NODES = 150_000, MAX_RESULTS = 200;
+  const MAX_CHARS = 4_000_000, MAX_NODES = 150_000, MAX_RESULTS = 200, MAX_PARAGRAPH = 65_536, MAX_PAINT = 2000;
   let revision = 0, index = null, indexing = null, expiry = 0, onChange = null;
-  const caches = new Map(), observers = [], sheets = new Map();
-  let returnHost = null, savedScroll = null;
-  const pause = () => new Promise(resolve => setTimeout(resolve, 0));
+  const caches = new Map(), jobs = new Map(), observers = [], sheets = new Map();
+  let returnHost = null, savedScroll = null, painted = null;
+  // Prefer scheduler continuations: chained timers are throttled in background tabs.
+  const pause = () => global.scheduler?.yield ? global.scheduler.yield()
+    : global.scheduler?.postTask ? global.scheduler.postTask(() => {})
+      : new Promise(resolve => setTimeout(resolve, 0));
   const ownUI = node => node.nodeType === 1 && node.hasAttribute('data-pinpointer-sonar');
 
   function clearPaint() {
+    painted = null;
     CSS.highlights?.delete(HIT); CSS.highlights?.delete(ACTIVE);
     for (const [root, sheet] of sheets) root.adoptedStyleSheets = root.adoptedStyleSheets.filter(s => s !== sheet);
     sheets.clear();
@@ -19,15 +23,16 @@
   function invalidate(records) {
     if (records?.every(r => ownUI(r.target) || (r.type === 'childList' &&
         [...r.addedNodes, ...r.removedNodes].every(ownUI)))) return;
-    revision++; index = null; clearPaint(); onChange?.();
+    const notify = Boolean(index || caches.size);
+    revision++; index = null; caches.clear(); clearPaint(); if (notify) onChange?.();
   }
-  function observe(roots) {
-    observers.splice(0).forEach(o => o.disconnect());
+  function observe(roots, reset = false) {
+    if (reset) observers.splice(0).forEach(o => o.disconnect());
+    const observer = observers[0] || new MutationObserver(invalidate);
+    if (!observers.length) observers.push(observer);
     for (const root of roots) {
-      const observer = new MutationObserver(invalidate);
       observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true,
-        attributeFilter: ['hidden', 'aria-hidden', 'class', 'style', 'open'] });
-      observers.push(observer);
+        attributeFilter: ['hidden', 'aria-hidden', 'class', 'style', 'open', 'inert', 'contenteditable', 'slot', 'name'] });
     }
   }
   function documentRoot() {
@@ -41,27 +46,51 @@
   async function buildIndex() {
     const root = documentRoot();
     if (!root || document.contentType === 'application/pdf') throw new Error('No searchable HTML text.');
-    const output = [], roots = new Set([root]);
-    observe(roots);
+    const output = [], roots = new Set([document.documentElement]), styles = new WeakMap();
+    const styleOf = node => {
+      if (!styles.has(node)) styles.set(node, getComputedStyle(node));
+      return styles.get(node);
+    };
+    observe(roots, true);
     const version = revision;
     let text = '', parts = [], treeRoot = null, chars = 0, visited = 0, lastBreak = false;
-    let deadline = performance.now() + 12, limited = false;
+    let deadline = performance.now() + 8, limited = false, oversized = false, budgetStopped = false;
     const flush = () => {
-      if (text.trim()) output.push({ text, parts, root: treeRoot });
-      text = ''; parts = []; treeRoot = null; lastBreak = false;
+      if (!oversized && text.trim()) output.push({ text, parts, root: treeRoot });
+      text = ''; parts = []; treeRoot = null; lastBreak = false; oversized = false;
     };
     const stack = [{ node: root, paragraph: false }];
     while (stack.length) {
       if (version !== revision) throw new Error('Page changed while reading; search again.');
-      if (++visited > MAX_NODES || chars >= MAX_CHARS) { limited = true; break; }
-      if (performance.now() > deadline) { await pause(); deadline = performance.now() + 12; }
+      if (++visited > MAX_NODES || chars >= MAX_CHARS) { limited = budgetStopped = true; break; }
+      if (performance.now() > deadline) {
+        await pause();
+        if (![...jobs.values()].some(job => !job.cancelled && Date.now() <= job.deadline)) throw new Error('Search cancelled or timed out.');
+        deadline = performance.now() + 8;
+      }
       const item = stack.pop();
+      // Keep one child iterator per depth instead of allocating a stack entry
+      // for every sibling on giant/hostile DOMs before the node budget is checked.
+      if (item.children) {
+        if (item.cursor < item.children.length) {
+          stack.push(item);
+          stack.push({ node: item.children[item.cursor++], paragraph: item.paragraph });
+        }
+        continue;
+      }
       if (item.exit) { flush(); continue; }
       const node = item.node;
       if (node.nodeType === Node.TEXT_NODE) {
-        const value = node.nodeValue.replace(/\s/g, ' ');
+        const raw = node.nodeValue;
+        if (oversized || text.length + raw.length > MAX_PARAGRAPH) {
+          // Never truncate a paragraph into a false NOT match or false sentence.
+          // Omit this whole pathological unit and explicitly report partial results.
+          oversized = limited = true; chars += raw.length; text = ''; parts = [];
+          continue;
+        }
+        const value = raw.replace(/\s/g, ' ');
         if (!value.trim() && !text) continue;
-        if (node.parentElement && getComputedStyle(node.parentElement).visibility !== 'visible') continue;
+        if (node.parentElement && styleOf(node.parentElement).visibility !== 'visible') continue;
         const nodeRoot = node.getRootNode();
         if (treeRoot && treeRoot !== nodeRoot) flush();
         treeRoot = nodeRoot;
@@ -81,7 +110,7 @@
         if (summary) stack.push({ node: summary, paragraph: false });
         continue;
       }
-      const style = getComputedStyle(node);
+      const style = styleOf(node);
       if (style.display === 'none' || style.contentVisibility === 'hidden') continue;
       if (node.tagName === 'BR') {
         if (lastBreak) flush(); else { text += ' '; lastBreak = true; }
@@ -92,15 +121,15 @@
       const block = !item.paragraph && (paragraph || /^(?:block|flow-root|flex|grid|list-item|table)/.test(style.display));
       if (block) { flush(); stack.push({ exit: true }); }
       let children;
-      if (node.shadowRoot) { roots.add(node.shadowRoot); children = node.shadowRoot.childNodes; }
+      if (node.shadowRoot) { roots.add(node.shadowRoot); observe([node.shadowRoot]); children = node.shadowRoot.childNodes; }
       else if (node.tagName === 'SLOT') { const assigned = node.assignedNodes({ flatten: true }); children = assigned.length ? assigned : node.childNodes; }
       else children = node.childNodes;
-      for (let i = children.length - 1; i >= 0; i--) stack.push({ node: children[i], paragraph: paragraph || item.paragraph });
+      stack.push({ children, cursor: 0, paragraph: paragraph || item.paragraph });
     }
+    if (budgetStopped) { oversized = true; } // Do not publish a budget-truncated final unit.
     flush();
     if (version !== revision) throw new Error('Page changed while reading; search again.');
-    observe(roots);
-    return { paragraphs: output, limited, version, url: location.href };
+    return { paragraphs: output, characters: Math.min(chars, MAX_CHARS), limited, version, url: location.href };
   }
   function rangeFor(paragraph, start, end) {
     const lookup = offset => {
@@ -119,46 +148,89 @@
     range.setStart(first.node, start - first.start); range.setEnd(last.node, end - last.start);
     return range;
   }
-  async function search({ query, mode, ticket }) {
+  function flushMutations() {
+    for (const observer of observers) {
+      const records = observer.takeRecords();
+      if (records.length) invalidate(records);
+    }
+  }
+  function rangesFor(result) {
+    if (!result.ranges) {
+      result.ranges = result.hits.map(h => rangeFor(result.paragraph, h.start, h.end)).filter(Boolean);
+      result.expected = result.ranges.map(r => r.toString());
+    }
+    return result.ranges;
+  }
+  async function search({ query, mode, ticket, deadline = Date.now() + 5000, refresh = false }) {
+    const job = { cancelled: false, deadline };
+    jobs.get(ticket)?.abort?.();
+    job.abort = () => { job.cancelled = true; };
+    jobs.set(ticket, job);
+    const check = () => {
+      if (job.cancelled || Date.now() > deadline) throw new Error('Search cancelled or timed out.');
+    };
     clearTimeout(expiry); expiry = setTimeout(releaseAll, 15 * 60_000);
-    const compiled = core.compile(query, mode);
-    if (!index || index.url !== location.href) {
-      if (!indexing) indexing = buildIndex().finally(() => { indexing = null; });
-      index = await indexing;
-    }
-    const snapshot = index, found = [];
-    let limited = snapshot.limited, deadline = performance.now() + 12;
-    outer: for (const paragraph of snapshot.paragraphs) {
-      if (performance.now() > deadline) { await pause(); deadline = performance.now() + 12; }
-      const units = compiled.mode === 'p' ? [{ start: 0, end: paragraph.text.length }]
-        : (paragraph.sentences ||= core.sentences(paragraph.text, document.documentElement.lang || 'en'));
-      for (const unit of units) {
-        const hits = core.matches(compiled.tree, paragraph.text.slice(unit.start, unit.end));
-        if (!hits.length) continue;
-        if (found.length === MAX_RESULTS) { limited = true; break outer; }
-        const ranges = hits.slice(0, 100).map(h => rangeFor(paragraph, unit.start + h.start, unit.start + h.end)).filter(Boolean);
-        if (!ranges.length) continue;
-        const start = Math.max(unit.start, unit.start + hits[0].start - 90), end = Math.min(unit.end, start + 460);
-        const container = ranges[0].startContainer.parentElement?.closest('p, li, [role="paragraph"]');
-        const marker = container?.querySelector('a[name^="par"], a[id^="par"], [id^="PARA_"]');
-        const number = /^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '');
-        found.push({ paragraph, ranges, expected: ranges.map(r => r.toString()),
-          preview: paragraph.text.slice(start, end), leading: start > unit.start, trailing: end < unit.end,
-          locator: number ? `para ${number[1]}` : '',
-          marks: hits.map(h => ({ start: unit.start + h.start - start, end: unit.start + h.end - start }))
-            .filter(h => h.start >= 0 && h.start < end - start).slice(0, 50) });
+    try {
+      const compiled = core.compile(query, mode);
+      flushMutations();
+      if (refresh) { revision++; index = null; caches.clear(); clearPaint(); }
+      check();
+      if (!index || index.url !== location.href) {
+        if (!indexing || indexing.version !== revision) {
+          const work = { version: revision };
+          work.promise = buildIndex().finally(() => { if (indexing === work) indexing = null; });
+          indexing = work;
+        }
+        const ready = await indexing.promise;
+        check();
+        if (ready.version !== revision) throw new Error('Page changed; refresh the search.');
+        index = ready;
       }
+      const snapshot = index, found = [];
+      let limited = snapshot.limited, hitCount = 0, sliceEnd = performance.now() + 8;
+      outer: for (const paragraph of snapshot.paragraphs) {
+        check();
+        if (performance.now() > sliceEnd) { await pause(); check(); sliceEnd = performance.now() + 8; }
+        const sentenceCache = compiled.mode === 's' && !paragraph.sentences ? [] : null;
+        const units = compiled.mode === 'p' ? [{ start: 0, end: paragraph.text.length }]
+          : (paragraph.sentences || core.sentenceUnits(paragraph.text, document.documentElement.lang || 'en'));
+        for (const unit of units) {
+          if (sentenceCache) sentenceCache.push(unit);
+          if (performance.now() > sliceEnd) { await pause(); check(); sliceEnd = performance.now() + 8; }
+          const hits = core.matches(compiled.tree, paragraph.text.slice(unit.start, unit.end), 100);
+          if (!hits.length) continue;
+          limited ||= hits.limited;
+          if (found.length === MAX_RESULTS) { limited = true; break outer; }
+          const first = rangeFor(paragraph, unit.start + hits[0].start, unit.start + hits[0].end);
+          if (!first) continue;
+          hitCount += hits.length;
+          const start = Math.max(unit.start, unit.start + hits[0].start - 90), end = Math.min(unit.end, start + 460);
+          const container = first.startContainer.parentElement?.closest('p, li, [role="paragraph"]');
+          const marker = container?.querySelector('a[name^="par"], a[id^="par"], [id^="PARA_"]');
+          const number = /^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '');
+          found.push({ paragraph, hits: hits.map(h => ({ start: unit.start + h.start, end: unit.start + h.end })),
+            preview: paragraph.text.slice(start, end), leading: start > unit.start, trailing: end < unit.end,
+            locator: number ? `para ${number[1]}` : '',
+            marks: hits.map(h => ({ start: unit.start + h.start - start, end: Math.min(end, unit.start + h.end) - start }))
+              .filter(h => h.start >= 0 && h.start < end - start).slice(0, 50) });
+        }
+        if (sentenceCache) paragraph.sentences = sentenceCache;
+      }
+      check();
+      if (snapshot.version !== revision || snapshot.url !== location.href) throw new Error('Page changed; refresh the search.');
+      caches.set(ticket, { results: found, version: revision, url: location.href });
+      while (caches.size > 3) caches.delete(caches.keys().next().value);
+      return { url: location.href, title: document.title, characters: snapshot.characters, limited: limited || hitCount > MAX_PAINT, results: found.map((r, i) => ({
+        index: i, preview: r.preview, leading: r.leading, trailing: r.trailing, marks: r.marks, locator: r.locator
+      })) };
+    } finally {
+      if (jobs.get(ticket) === job) jobs.delete(ticket);
     }
-    if (snapshot.version !== revision || snapshot.url !== location.href) throw new Error('Page changed; refresh the search.');
-    caches.set(ticket, { results: found, version: revision, url: location.href });
-    while (caches.size > 3) caches.delete(caches.keys().next().value);
-    return { url: location.href, title: document.title, limited, results: found.map((r, i) => ({
-      index: i, preview: r.preview, leading: r.leading, trailing: r.trailing, marks: r.marks, locator: r.locator
-    })) };
   }
   function selected(ticket, position) {
+    flushMutations();
     const cache = caches.get(ticket), result = cache?.results[position];
-    if (!result || cache.version !== revision || cache.url !== location.href || result.ranges.some((r, i) =>
+    if (!result || cache.version !== revision || cache.url !== location.href || !rangesFor(result).length || result.ranges.some((r, i) =>
       !r.startContainer.isConnected || !r.endContainer.isConnected || r.toString() !== result.expected[i])) {
       throw new Error('This passage changed or expired. Refresh the search before opening it.');
     }
@@ -166,17 +238,26 @@
   }
   function preview(ticket, position, scroll = false) {
     const { cache, result } = selected(ticket, position);
-    clearPaint();
-    const all = new Highlight(), active = new Highlight(); active.priority = 2;
-    for (const match of cache.results) {
-      for (const range of match.ranges) all.add(range);
-      if (!sheets.has(match.paragraph.root)) {
-        const sheet = new CSSStyleSheet(); sheet.replaceSync(`::highlight(${HIT}) {background:#ffe096;color:#24201a} ::highlight(${ACTIVE}) {background:#17685b;color:white}`);
-        match.paragraph.root.adoptedStyleSheets = [...match.paragraph.root.adoptedStyleSheets, sheet];
-        sheets.set(match.paragraph.root, sheet);
-      }
+    function ensureSheet(root) {
+      if (sheets.has(root)) return;
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(`::highlight(${HIT}) {background:#ffe096;color:#24201a} ::highlight(${ACTIVE}) {background:#17685b;color:white}`);
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+      sheets.set(root, sheet);
     }
-    result.ranges.forEach(r => active.add(r)); CSS.highlights.set(HIT, all); CSS.highlights.set(ACTIVE, active);
+    if (painted !== cache) {
+      clearPaint();
+      const all = new Highlight();
+      for (const match of cache.results) {
+        if (all.size >= MAX_PAINT) break;
+        for (const range of rangesFor(match)) { if (all.size >= MAX_PAINT) break; all.add(range); }
+        ensureSheet(match.paragraph.root);
+      }
+      CSS.highlights.set(HIT, all); painted = cache;
+    }
+    ensureSheet(result.paragraph.root);
+    const active = new Highlight(); active.priority = 2;
+    result.ranges.forEach(r => active.add(r)); CSS.highlights.set(ACTIVE, active);
     if (scroll) {
       const range = result.ranges[0], parent = range.startContainer.parentElement;
       if (!savedScroll) {
@@ -215,10 +296,19 @@
     shadow.append(button); document.documentElement.append(returnHost);
     return true;
   }
-  function release(ticket) { caches.delete(ticket); clearPaint(); returnHost?.remove(); returnHost = null; if (!caches.size) releaseAll(); }
+  function release(ticket, keepIndex = false) {
+    jobs.get(ticket)?.abort();
+    const cache = caches.get(ticket);
+    caches.delete(ticket);
+    if (cache && painted === cache) {
+      clearPaint(); returnHost?.remove(); returnHost = null;
+    }
+    if (!keepIndex && !caches.size && ![...jobs.values()].some(job => !job.cancelled)) releaseAll();
+  }
   function releaseAll() {
-    revision++; caches.clear(); index = null; savedScroll = null; clearTimeout(expiry);
+    revision++; jobs.forEach(job => job.abort()); caches.clear(); index = null; savedScroll = null; clearTimeout(expiry);
     observers.splice(0).forEach(o => o.disconnect()); clearPaint(); returnHost?.remove(); returnHost = null;
   }
-  global.LegalPinpointerSearchPage = { search, preview, reveal, restore, release, clearPaint, setOnChange(fn) { onChange = fn; } };
+  window.addEventListener('pagehide', releaseAll);
+  global.LegalPinpointerSearchPage = { search, preview, reveal, restore, release, releaseAll, clearPaint, setOnChange(fn) { onChange = fn; } };
 })(globalThis);
