@@ -9,8 +9,11 @@ const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 test('the extension permission and host surface is frozen to the minimum contract', () => {
-  assert.deepEqual(manifest.permissions, ['clipboardRead', 'clipboardWrite', 'storage']);
-  assert.equal(manifest.host_permissions, undefined);
+  assert.deepEqual(manifest.permissions, ['clipboardRead', 'clipboardWrite', 'storage', 'activeTab', 'scripting']);
+  assert.deepEqual(manifest.host_permissions, ['http://*/*', 'https://*/*']);
+  assert.equal(manifest.commands['find-in-page'].suggested_key.default, 'Ctrl+Shift+S');
+  assert.equal(manifest.commands['find-in-page'].suggested_key.mac, 'MacCtrl+Shift+S');
+  assert.equal(manifest.content_scripts.length, 1, 'Only provider citation scripts run automatically');
   assert.equal(manifest.optional_permissions, undefined);
   assert.equal(manifest.optional_host_permissions, undefined);
   assert.equal(manifest.externally_connectable, undefined);
@@ -32,7 +35,7 @@ test('the extension permission and host surface is frozen to the minimum contrac
 });
 
 test('runtime scripts contain no remote-code or network primitives', () => {
-  const ordinaryRuntime = ['canlii-courts.js', 'canlii-legislation.js', 'core.js', 'text-fragments.js', 'providers.js', 'content.js', 'popup.js']
+  const ordinaryRuntime = ['canlii-courts.js', 'canlii-legislation.js', 'core.js', 'text-fragments.js', 'providers.js', 'content.js', 'popup.js', 'find-core.js', 'find-page.js', 'find.js', 'find-worker.js', 'popup-find.js']
     .map((filename) => fs.readFileSync(path.join(root, filename), 'utf8'))
     .join('\n');
   assert.doesNotMatch(ordinaryRuntime, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|eval|Function|sendBeacon)\s*\(/);
@@ -45,7 +48,7 @@ test('runtime scripts contain no remote-code or network primitives', () => {
   assert.match(worker, /fetch\(chrome\.runtime\.getURL\('legal-structure\.wasm'\)\)/);
   assert.match(worker, /fetch\(chrome\.runtime\.getURL\('canlii-legislation\.tsv'\)\)/);
   assert.equal((worker.match(/\bimportScripts\s*\(/g) || []).length, 1);
-  assert.match(worker, /importScripts\('canlii-legislation\.js'\)/);
+  assert.match(worker, /importScripts\('canlii-legislation\.js', 'find-core\.js', 'find-worker\.js'\)/);
   assert.doesNotMatch(worker, /\b(?:XMLHttpRequest|WebSocket|EventSource|eval|Function|sendBeacon)\s*\(/);
 });
 
