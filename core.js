@@ -36,11 +36,21 @@
     return title.replace(/\s*\(CanLII\)\s*$/i, '').trim();
   }
 
+  // A browser title may put the citation before or after the case name. Only
+  // split at a recognized citation, never at a comma within a party's full name.
   function splitCaseHeading(value) {
     const heading = cleanPlatformTitle(value);
-    const match = heading.match(/^(.*?),\s*((?:\[(?:18|19|20)\d{2}\]|(?:18|19|20)\d{2}\s+[A-Za-z]).*)$/);
-    if (!match) return { name: heading, citation: '' };
-    return { name: match[1].trim(), citation: match[2].trim() };
+    const cite = /(?:\[(?:18|19|20)\d{2}\]|(?:18|19|20)\d{2}\s+(?:CanLII|[A-Z][A-Za-z0-9.-]*)\s+\d+\b)/;
+    const comma = /,\s*|\s+[|—–]\s+/g;
+    for (const match of heading.matchAll(comma)) {
+      const rest = heading.slice(match.index + match[0].length);
+      if (cite.test(rest) && cite.exec(rest).index === 0) {
+        return { name: heading.slice(0, match.index).trim(), citation: rest };
+      }
+    }
+    const prefix = heading.match(/^((?:18|19|20)\d{2}\s+(?:CanLII|[A-Z][A-Za-z0-9.-]*)\s+\d+(?:\s*\([^)]*\))?)\s*(?:\||[—–]|-\s)\s*(.+)$/);
+    if (prefix) return { name: prefix[2].trim(), citation: prefix[1].trim() };
+    return { name: heading, citation: '' };
   }
 
   function cleanCaseName(value) {
@@ -98,7 +108,7 @@
     const output = [];
     for (const match of matches) {
       const code = match[2];
-      if (code === 'CARSWELL' || code === 'CANLII') continue;
+      if (/^(?:CARSWELL|CANLII)$/i.test(code)) continue;
       const cite = `${match[1]} ${code} ${match[3]}`;
       if (!seen.has(cite)) {
         seen.add(cite);
@@ -106,6 +116,11 @@
       }
     }
     return output;
+  }
+
+  function canliiCitations(value) {
+    return [...String(value || '').matchAll(/\b((?:18|19|20)\d{2})\s+CanLII\s+(\d+)(?:\s*\(([A-Z][A-Z0-9. -]{1,24})\))?/gi)]
+      .map(match => `${match[1]} CanLII ${match[2]}${match[3] ? ` (${match[3]})` : ''}`);
   }
 
   function reporterCandidates(value) {
@@ -163,23 +178,24 @@
         .sort((left, right) => right.score - left.score || left.index - right.index)[0].cite;
     }
 
-    return normalizeCitation(fallback || '');
+    return canliiCitations([...texts, fallback || ''].join(' | '))[0] || normalizeCitation(fallback || '');
   }
 
   function makeCitation(documentType, title, citation) {
     const type = documentType || 'secondary';
     let rawTitle = type === 'case' ? cleanCaseName(title) : cleanPlatformTitle(title);
     let cite = normalizeCitation(citation);
-    if (type === 'legislation' && !cite) {
+    if (type === 'legislation') {
       const parts = splitLegislationHeading(rawTitle);
       rawTitle = parts.title;
-      cite = normalizeCitation(parts.citation);
+      cite ||= normalizeCitation(parts.citation);
     }
     if (type === 'legislation') cite = legislationCitationCore(cite);
-    const plain = cite ? `${rawTitle}, ${cite}` : rawTitle;
+    if (cite && normalizeCitation(rawTitle) === cite) rawTitle = '';
+    const plain = cite ? (rawTitle ? `${rawTitle}, ${cite}` : cite) : rawTitle;
     const italicize = type === 'case' || type === 'legislation';
     const titleHtml = italicize ? `<i>${escapeHtml(rawTitle)}</i>` : escapeHtml(rawTitle);
-    const html = cite ? `${titleHtml}, ${escapeHtml(cite)}` : titleHtml;
+    const html = cite ? (rawTitle ? `${titleHtml}, ${escapeHtml(cite)}` : escapeHtml(cite)) : titleHtml;
     return { title: rawTitle, citation: cite, plain, html };
   }
 
@@ -334,18 +350,18 @@
     if (kind === 'pilcrow') return '\u00b6 ';
     if (kind === 'silcrow') return '\u00a7 ';
     if (style !== 'full') return '';
-    if (kind === 'page') return `at ${count === 1 ? 'p.' : 'pp.'} `;
+    if (kind === 'page') return 'at ';
     if (kind === 'section') return `${count === 1 ? 's' : 'ss'} `;
     if (kind === 'rule') return `${count === 1 ? 'r' : 'rr'} `;
     if (kind === 'article') return `${count === 1 ? 'art' : 'arts'} `;
-    return `${count === 1 ? 'para' : 'paras'} `;
+    return `at ${count === 1 ? 'para' : 'paras'} `;
   }
 
   function formatPinpoint(kind, values, style) {
-    const locators = [];
+    const locators = [], seen = new Set();
     for (const value of values || []) {
       const locator = normalizeSpace(value);
-      if (locator && !locators.includes(locator)) locators.push(locator);
+      if (locator && !seen.has(locator)) { seen.add(locator); locators.push(locator); }
     }
     if (!locators.length) return '';
     const collapsed = collapseLocatorRanges(locators);
@@ -365,10 +381,27 @@
     return sameArray(ancestor.suffixes, descendant.suffixes.slice(0, ancestor.suffixes.length));
   }
 
+  // Enumerate strict ancestors once, instead of comparing every pair of nodes.
+  // Root spelling and suffix case intentionally retain parseLocator's semantics.
+  function provisionAncestors(value) {
+    const parsed = parseLocator(value);
+    if (!parsed) return [];
+    const ancestors = [];
+    let prefix = parsed.root;
+    for (const suffix of parsed.suffixes) {
+      ancestors.push(prefix);
+      prefix += `(${suffix})`;
+    }
+    return ancestors;
+  }
+
   function removeRedundantProvisionAncestors(nodes) {
-    return (nodes || []).filter((node, index, all) => !all.some((other, otherIndex) => (
-      otherIndex !== index && isProvisionAncestor(node.locator, other.locator)
-    )));
+    const input = nodes || [];
+    const ancestors = new Set();
+    for (const node of input) {
+      for (const ancestor of provisionAncestors(node.locator)) ancestors.add(ancestor);
+    }
+    return input.filter(node => !ancestors.has(normalizeSpace(node.locator)));
   }
 
   function makeTextFragment(value) {
@@ -461,6 +494,7 @@
   }
 
   const api = {
+    canliiCitations,
     canliiAnchorForLocator,
     canliiUrlForCitation,
     chooseCaseCitation,
@@ -484,6 +518,7 @@
     outputCitationLink,
     parseLocator,
     pinpointPrefix,
+    provisionAncestors,
     provisionDepth,
     removeRedundantProvisionAncestors,
     reporterCandidates,

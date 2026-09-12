@@ -18,15 +18,38 @@
   }
 
   function meta(document, name) {
-    const element = document.querySelector(`meta[name="${name}"]`);
+    const element = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
     return element ? core.normalizeSpace(element.getAttribute('content')) : '';
   }
 
-  function semanticTitle(document, selectors) {
-    const candidate = first(document, selectors);
-    if (candidate && textOf(candidate)) return textOf(candidate);
-    const parts = core.cleanPlatformTitle(document.title || '').split('|').map(core.normalizeSpace).filter(Boolean);
-    return parts.find((part) => /\s(?:v\.?|c\.?)\s/i.test(part)) || parts[0] || '';
+  function semanticTitle(document, selectors, type = 'case') {
+    const candidates = [meta(document, 'lbh-title'), meta(document, 'citation_title'),
+      meta(document, 'DC.title'), meta(document, 'dc.title'), meta(document, 'og:title')];
+    for (const selector of selectors) {
+      for (const element of document.querySelectorAll(selector)) {
+        const text = textOf(element);
+        const full = element.getAttribute('title');
+        candidates.push(/[.…]{3}|…/.test(text) && full && full.length > text.length ? full : text);
+      }
+    }
+    candidates.push(...core.cleanPlatformTitle(document.title || '').split('|'));
+    const names = candidates.map(core.cleanPlatformTitle).filter(Boolean);
+    function usable(value) {
+      if (/^(?:CanLII|Westlaw(?: Advantage)?(?: Canada)?|Lexis(?:Nexis|\+)?|Document|Judgment|Decision|Legislation|Statutes?)$/i.test(value)) return false;
+      if (/^(?:\d{4}\s+(?:CanLII|[A-Z][A-Za-z0-9.-]*)\s+\d+|\[\d{4}\])/i.test(value) && !/\s(?:v\.?|c\.?)\s/i.test(value)) return false;
+      if (type === 'legislation' && /^(?:s(?:ection)?s?|ss|arts?|articles?|rr?|rules?|§)\.?\s*\d/i.test(value)) return false;
+      return true;
+    }
+    // Prefer an actual style of cause over a provider's citation-only h1/title.
+    if (type === 'case') {
+      const named = names.find(value => usable(value) && /\s(?:v\.?|c\.?)\s|\(Re\)|^Reference\s/i.test(value));
+      if (named) return named;
+    }
+    if (type === 'legislation') {
+      const instrument = names.find(value => usable(value) && /\b(?:Act|Code|Regulations?|Rules?|Loi|Règlement|Règles)\b/i.test(value));
+      if (instrument) return instrument;
+    }
+    return names.find(usable) || names[0] || '';
   }
 
   function boundedTextBefore(root, marker, limit) {
@@ -179,7 +202,7 @@
 
   function canliiDocumentType(document, location) {
     const type = meta(document, 'lbh-type').toLowerCase();
-    if (type === 'case') return 'case';
+    if (type === 'case' || /^\/[a-z]{2}\/[a-z]{2}\/[^/]+\/doc\/\d{4}\//i.test(location.pathname)) return 'case';
     if (/legislation|statute|regulation|law/.test(type) || /\/laws\//i.test(location.pathname)) return 'legislation';
     return 'secondary';
   }
@@ -209,15 +232,15 @@
     return uniqueNodes(output);
   }
 
-  function inspectCanlii(document, location) {
+  function inspectCanlii(document, location, options = {}) {
     const documentType = canliiDocumentType(document, location);
-    const title = meta(document, 'lbh-title') || semanticTitle(document, ['h1.main-title', 'h1']);
-    const headerText = [meta(document, 'lbh-citation'), textOf(first(document, ['h1.main-title', '.documentMeta']))].filter(Boolean).join(' | ');
+    const title = semanticTitle(document, ['h1.main-title', 'h1'], documentType);
+    const headerText = [meta(document, 'lbh-citation'), meta(document, 'citation_reference'), document.title, textOf(first(document, ['h1.main-title', '.documentMeta']))].filter(Boolean).join(' | ');
     const citation = documentType === 'case'
       ? caseMetadata(document, title, headerText, meta(document, 'lbh-citation'))
-      : core.makeCitation(documentType, title, meta(document, 'lbh-citation'));
+      : core.makeCitation(documentType, title, meta(document, 'lbh-citation') || meta(document, 'citation_reference'));
     const root = first(document, ['#originalDocument', '#documentContent', '#docCont', 'main']) || document.body;
-    const nativeNodes = documentType === 'case'
+    const nativeNodes = options.metadataOnly ? [] : documentType === 'case'
       ? canliiParagraphNodes(document)
       : documentType === 'legislation'
         ? canliiProvisionNodes(document, citation.title)
@@ -284,7 +307,7 @@
         }
         body.appendChild(sibling.cloneNode(true));
       }
-      const text = fragments.buildStructureIndex(body).text;
+      const text = fragments.buildStructureIndex(body, 'text').text;
       if (text) sections.push([match[1], text]);
     }
     return sections;
@@ -293,6 +316,7 @@
   function lexisAliasText(root) {
     if (!root) return '';
     const boundary = root.querySelector('.SS_Heading, [id^="PARA_"]');
+    if (!boundary) return ''; // Do not promote citations from an unbounded body to document identity.
     const aliases = [];
     for (const block of root.querySelectorAll('.SS_LeftAlign > div')) {
       if (boundary && !(block.compareDocumentPosition(boundary) & 4)) continue;
@@ -339,19 +363,22 @@
     return [];
   }
 
-  function inspectLexis(document, location) {
+  function inspectLexis(document, location, options = {}) {
     const documentType = lexisDocumentType(location, document);
-    const title = semanticTitle(document, ['#SS_DocumentTitle', '[data-testid="document-title"]', 'h1']);
+    const title = semanticTitle(document, ['#SS_DocumentTitle', '[data-testid="document-title"]', '.SS_DocumentHeader .SS_DocumentInfo', 'h1'], documentType);
     const root = first(document, ['#document', '.document-text', '.SS_contentdocument', 'main']) || document.body;
     const firstParagraph = document.querySelector('[id^="PARA_"]');
-    const headerText = [lexisAliasText(root), boundedTextBefore(root, firstParagraph, 14000)].filter(Boolean).join(' | ');
+    const header = first(document, ['.SS_DocumentHeader', '[data-testid="document-header"]']);
+    const boundary = firstParagraph || root.querySelector('.SS_Heading, .SS_Heading2, [id^="SECTION_"]');
+    const headerText = [meta(document, 'citation_reference'), title, document.title, lexisAliasText(root),
+      header ? textOf(header) : boundary ? boundedTextBefore(root, boundary, 14000) : ''].filter(Boolean).join(' | ');
     const heading = core.splitCaseHeading(title);
     const citation = documentType === 'case'
       ? caseMetadata(document, heading.name, headerText, heading.citation)
       : documentType === 'secondary'
         ? lexisSecondaryCitation(document, title)
-        : core.makeCitation(documentType, title, '');
-    const nativeNodes = documentType === 'legislation'
+        : core.makeCitation(documentType, title, meta(document, 'citation_reference'));
+    const nativeNodes = options.metadataOnly ? [] : documentType === 'legislation'
       ? lexisProvisionNodes(document, citation.title)
       : documentType === 'secondary'
         ? lexisSecondaryNodes(document, root, title)
@@ -359,7 +386,7 @@
     const cleanUrl = core.cleanProviderUrl('lexis', location.href);
     return {
       provider: 'lexis', documentType, citation,
-      sectionMap: documentType === 'legislation' ? lexisSectionMap(document, root) : [],
+      sectionMap: !options.metadataOnly && documentType === 'legislation' ? lexisSectionMap(document, root) : [],
       canliiUrl: documentType === 'case'
         ? detectedCanliiUrl(document, root, firstParagraph, citation.citation, headerText, location.href)
         : '',
@@ -368,8 +395,8 @@
   }
 
   function westlawDocumentType(document) {
-    if (document.querySelector('.crsw_caselaw, [data-document-type="case"]')) return 'case';
-    if (document.querySelector('.crsw_legislation, [data-document-type="legislation"]')) return 'legislation';
+    if (document.querySelector('.crsw_caselaw, [data-document-type="case"], [id^="crsw_paragraph_num_"]')) return 'case';
+    if (document.querySelector('.crsw_legislation, [data-document-type="legislation"], [data-section-number], [data-rule-number], [data-article-number]')) return 'legislation';
     return 'secondary';
   }
 
@@ -397,18 +424,18 @@
     return uniqueNodes(output);
   }
 
-  function inspectWestlaw(document, location) {
+  function inspectWestlaw(document, location, options = {}) {
     const documentType = westlawDocumentType(document);
-    const title = semanticTitle(document, ['#co_docHeaderTitleLine', '#titleInfo', '.crsw_shortTitle', 'h1']);
+    const title = semanticTitle(document, ['#co_docHeaderTitleLine', '#titleInfo', '.crsw_shortTitle', 'h1'], documentType);
     const root = first(document, ['#co_document_0', '.co_document', 'main']) || document.body;
     const prelimElement = first(document, ['.crsw_prelim', '#co_docHeader']);
     const prelim = textOf(prelimElement);
     const toolbarCitation = textOf(first(document, ['#citeInfo', '.co_cites']));
-    const headerText = `${prelim} | ${toolbarCitation}`;
+    const headerText = `${prelim} | ${toolbarCitation} | ${document.title}`;
     const citation = documentType === 'case'
       ? caseMetadata(document, title, headerText, toolbarCitation)
       : core.makeCitation(documentType, title, toolbarCitation);
-    const nativeNodes = documentType === 'legislation'
+    const nativeNodes = options.metadataOnly ? [] : documentType === 'legislation'
       ? westlawProvisionNodes(document, citation.title)
       : westlawParagraphNodes(document);
     const cleanUrl = core.cleanProviderUrl('westlaw', location.href);
@@ -429,9 +456,9 @@
     return null;
   }
 
-  function inspectBase(document, location) {
+  function inspectBase(document, location, options) {
     const adapter = adapterFor(location);
-    return adapter ? adapter(document, location) : null;
+    return adapter ? adapter(document, location, options) : null;
   }
 
   function requestEngine(input) {
@@ -502,13 +529,13 @@
     return kind === 'paragraph' ? `[${locator}]` : locator;
   }
 
-  function engineNode(node, kind, plane, offsetMap, structureKind, provider) {
+  function engineNode(node, kind, plane, offsetAt, structureKind, provider) {
     const locator = locatorFromLabel(kind, node.label);
     if (!locator || !node.range || !Number.isInteger(node.range.start) || !Number.isInteger(node.range.end)) return null;
-    const start = offsetMap[node.range.start];
-    const end = offsetMap[node.range.end];
+    const start = offsetAt(node.range.start);
+    const end = offsetAt(node.range.end);
     if (!Number.isInteger(start) || !Number.isInteger(end) || end < start) return null;
-    const contentStart = node.content_start == null ? null : offsetMap[node.content_start];
+    const contentStart = node.content_start == null ? null : offsetAt(node.content_start);
     const startPoint = fragments.boundaryPoint(plane, start);
     const endPoint = fragments.boundaryPoint(plane, end);
     const contentStartPoint = Number.isInteger(contentStart) ? fragments.boundaryPoint(plane, contentStart) : null;
@@ -552,17 +579,17 @@
 
   function exactPageMarkerAt(text, start, locator) {
     const match = text.slice(start, start + 100)
-      .match(new RegExp(`^\[page[ \t]+${locator}\][ \t\r\n]*`, 'i'));
+      .match(new RegExp(`^\\[page[ \\t]+${locator}\\][ \\t\\r\\n]*`, 'i'));
     return match ? { start, end: start + match[0].length, text: `[page ${locator}]` } : null;
   }
 
-  function pageNodes(engine, plane, offsetMap) {
+  function pageNodes(engine, plane, offsetAt) {
     const raw = (engine.nodes || []).filter((node) => node.kind === 'page');
     const nodes = [];
     for (const node of raw) {
       const locator = locatorFromLabel('page', node.label);
-      const contentStart = node.range && offsetMap[node.range.start];
-      const end = node.range && offsetMap[node.range.end];
+      const contentStart = node.range && offsetAt(node.range.start);
+      const end = node.range && offsetAt(node.range.end);
       if (!locator || !Number.isInteger(contentStart) || !Number.isInteger(end)) continue;
       const marker = exactPageMarkerBefore(plane.text, contentStart, locator)
         || exactPageMarkerAt(plane.text, contentStart, locator);
@@ -604,14 +631,32 @@
     return consecutive ? nodes.map(({ endOffset, ...node }) => node) : [];
   }
 
+  function engineOffsets(text, engine) {
+    const valid = offset => Number.isInteger(offset) && offset >= 0 && offset <= text.length;
+    if (engine.offset_unit === 'utf16') return offset => valid(offset) ? offset : undefined;
+    if (engine.offset_unit !== 'unicode_scalar') return null;
+    const wanted = new Set();
+    for (const node of engine.nodes || []) {
+      for (const offset of [node.range?.start, node.range?.end, node.content_start]) {
+        if (valid(offset)) wanted.add(offset);
+      }
+    }
+    const mapped = new Map();
+    let scalar = 0, utf16 = 0;
+    for (const offset of [...wanted].sort((a, b) => a - b)) {
+      while (scalar < offset && utf16 < text.length) {
+        utf16 += text.codePointAt(utf16) > 0xffff ? 2 : 1;
+        scalar += 1;
+      }
+      if (scalar === offset) mapped.set(offset, utf16);
+    }
+    return offset => mapped.get(offset);
+  }
+
   function engineStructure(base, plane, engine) {
-    const offsetMap = engine.offset_unit === 'utf16'
-      ? Array.from({ length: plane.text.length + 1 }, (_value, index) => index)
-      : engine.offset_unit === 'unicode_scalar'
-        ? fragments.scalarToUtf16Map(plane.text)
-        : [];
-    if (!offsetMap.length) return { kind: '', nodes: [], source: 'none' };
-    const pages = pageNodes(engine, plane, offsetMap);
+    const offsetAt = engineOffsets(plane.text, engine);
+    if (!offsetAt) return { kind: '', nodes: [], source: 'none' };
+    const pages = pageNodes(engine, plane, offsetAt);
     if (pages.length) return { kind: 'page', nodes: pages, source: 'legal-structure' };
     if (base.documentType !== 'legislation' && base.nativeNodes.length) {
       return { kind: base.nativeNodes[0].kind, nodes: uniqueNodes(base.nativeNodes), source: 'provider-native' };
@@ -621,7 +666,7 @@
     const structureKind = engineKind === 'section' ? provisionKind('', base.citation.title) : 'paragraph';
     const nodes = (engine.nodes || [])
       .filter((node) => node.kind === engineKind)
-      .map((node) => engineNode(node, engineKind, plane, offsetMap, structureKind, base.provider))
+      .map((node) => engineNode(node, engineKind, plane, offsetAt, structureKind, base.provider))
       .filter(Boolean);
     const merged = base.documentType === 'legislation'
       ? mergeProvisionNodes(nodes, base.nativeNodes)
@@ -633,13 +678,17 @@
     };
   }
 
-  async function inspect(document, location, deriveEngine) {
-    const base = inspectBase(document, location);
+  async function inspect(document, location, deriveEngine, options = {}) {
+    const base = inspectBase(document, location, options);
     if (!base) return null;
 
     if (base.documentType === 'legislation' && base.provider !== 'canlii') {
       base.canliiUrl = await requestLegislationUrl(base.citation, document.documentElement.lang || 'en');
     }
+
+    // Citation copying/navigation and an unselected popup need metadata, not
+    // text-to-DOM maps, secondary markers, section clones, or a WASM parse.
+    if (options.metadataOnly) return base;
 
     if (base.documentType === 'secondary') {
       const symbols = symbolNodes(base.root);
@@ -649,7 +698,7 @@
       }
     }
 
-    const plane = fragments.buildStructureIndex(base.root);
+    const plane = fragments.buildStructureIndex(base.root, true);
     plane.root = base.root;
     const engine = await (deriveEngine || requestEngine)(engineInput(base, plane));
     return {

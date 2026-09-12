@@ -13,16 +13,18 @@ No build or package installation is required to use the extension.
 ## Workflows
 
 - **Ctrl+X** copies the hovered or selected pinpoint. It does not replace Cut in inputs, textareas, selects, or editable content.
-- **Ctrl+Shift+X** copies the pinpoint plus selected text.
-- **Alt+X** copies the cleaned McGill-style citation as a link.
+- **Ctrl+Shift+X** copies selected text with linked structural markers.
+- **Alt+X** copies the cleaned citation as a link.
 - **Alt+C** opens the reliably detected CanLII version.
-- The popup exposes the same actions. McGill pinpoints are the default (`para 12`, `paras 12-14`, `at p. 353`, `at pp. 553, 559`, `s 7(2)`, or `ss 7(2)-(4)`), with bare locators available as an option.
+- The popup exposes the same actions. Full pinpoints are the default (`at para 12`, `at paras 12-14`, `at 353`, `at 553, 559`, `s 7(2)`, or `ss 7(2)-(4)`), with bare locators available as an option. Pages use `at n`, never `at p. n` or `at pp. n`.
 
-If a supported document exposes no usable structure, copy actions fall back to the cleaned page link labelled with the citation title. Secondary-source section headings such as `§ 12.02` act as page-wide pinpoints, while citation copy uses the provider's separate source and author metadata without the pinpoint.
+If no structure is detected and text is selected, quote/pinpoint copy outputs literal **`[Link]: selected text`**. In rich text, only `[Link]` links to the source; selected text retains the safe inline-formatting allowlist. No paragraph number, provision or page is fabricated. With no selection, copy falls back to the cleaned page link labelled with the citation title. Citation-only copy still copies the citation.
 
-Citation links cover only the authoritative citation core, such as `2024 SCC 1` or `SA 2008, c. A-4.2`; the case or legislation title remains outside the link. A provision suffix exposed by a legislation page, such as `s. 1`, is treated as a page pinpoint rather than part of the legislation citation.
+Secondary-source section headings such as `§ 12.02` act as page-wide pinpoints, while citation copy uses the provider's separate source and author metadata without the pinpoint.
 
-A current-page text-fragment URL in the clipboard has precedence over both selection and hover. Its resolved range governs the pinpoint and quote, and the original fragment URL becomes every pinpoint endpoint link. The extension parses WICG text directives locally, including endpoint-only ranges and multiple `text=` directives.
+Citation links cover only the citation core, such as `2024 SCC 1`, `1934 CanLII 376 (AB QB)`, or `SA 2008, c. A-4.2`; the case or legislation title remains outside the link. A provision suffix exposed by a legislation page, such as `s. 1`, is treated as a page pinpoint rather than part of the legislation citation. Names come from document metadata and title fields, not an unrelated authority cited in the body. Missing full names are not invented from a citation number.
+
+A current-page text-fragment URL in the clipboard has precedence over both selection and hover, including the structureless fallback. Its resolved range governs the pinpoint and quote, and the original fragment URL becomes every pinpoint endpoint link. The extension parses WICG text directives locally, including endpoint-only ranges and multiple `text=` directives.
 
 Selections include every structural unit crossed. Rich clipboard output links the two ends of a collapsed range separately, such as `32-33` or `7(2)-(4)`. Quote output preserves a small safe set of inline formatting and emits real paragraph blocks, with one newline between units in plain text. Provisions use hanging paragraph indents so explicit and word-processor-wrapped continuation lines remain aligned beneath the provision text. An ellipsis is added only after the first marker when the selection omits substantive opening text; trailing ellipses are never emitted.
 
@@ -55,11 +57,13 @@ Provider-native anchors are used first, with one deliberate hierarchy rule: a pa
 - validation that inferred reporter pages correspond to literal `[page n]` DOM text, including the parser-bounded final page;
 - provider selectors, ordered native section evidence, and parallel-citation metadata extraction.
 
-Neutral citations found in bounded provider metadata replace proprietary citations. Case URLs use the exact court-route table synchronized from Beaver. Legislation URLs resolve against the packaged CanLII metadata snapshot by exact citation identity or a unique title-and-jurisdiction match. Both paths abstain when identity is uncertain. A direct provider-owned CanLII link wins when present. CanLII is preferred for native paragraph and provision anchors, but never replaces a generated provider text-fragment target.
+Neutral citations found in bounded provider metadata replace proprietary citations. Reporters retain their preference over CanLII-only fallbacks. Case URLs use the exact court-route table synchronized from Beaver. Legislation URLs resolve against the packaged CanLII metadata snapshot by exact citation identity or a unique title-and-jurisdiction match. Both paths abstain when identity is uncertain. A direct provider-owned CanLII link wins when present. CanLII is preferred for native paragraph and provision anchors, but never replaces a generated provider text-fragment target.
+
+Citation-only copy, CanLII navigation, and an unselected popup use metadata-only inspection: no full text map, section cloning, or WASM parse. Structured operations keep the same engine and precedence. Models are invalidated lazily by document/header changes; no parsing runs inside the observer. Pagehide drops model/clipboard references. Compact text maps and sparse engine offsets reduce allocation without changing UTF-16 source boundaries; legacy mapping APIs remain available to existing tools. See [PERFORMANCE-APP.md](PERFORMANCE-APP.md) for the measured follow-up and validation limits.
 
 ## Security and permissions
 
-Runtime code and metadata are fully packaged. There are no dependencies, CDNs, remote scripts, analytics, backend, or runtime network requests. The service worker fetches only the extension's own packaged WASM and CanLII legislation index files.
+Runtime code and metadata are fully packaged. There are no runtime dependencies, CDNs, remote scripts, analytics, backend, or external network requests. The service worker fetches only the extension's own packaged WASM and CanLII legislation index files.
 
 Rich clipboard HTML is rebuilt from escaped text and a fixed inline-formatting allowlist. Provider markup, attributes, event handlers, styles, scripts, and hidden controls are never passed through.
 
@@ -73,12 +77,12 @@ The manifest requests only:
 - exact automatic content-script matches for CanLII documents, Lexis document
   pages, and Westlaw document pages. The citation-copy surface is unchanged.
 
-Search queries are not written to local/sync storage. Bounded result previews
-and navigation handles live in Chrome's RAM-only, extension-private session
-storage. Closing the finder removes its session; abandoned session records
-older than 15 minutes are pruned when the finder next opens. Page caches have
-a separate 15-minute expiry. There is no network search, telemetry, or
-background crawling.
+Search queries are not written to local/sync storage. Only navigation handles
+and session metadata live in Chrome's RAM-only, extension-private session
+storage, not preview text. Closing the finder removes its session; abandoned
+session records older than 15 minutes are pruned when the finder next opens.
+Page caches have a separate 15-minute expiry. There is no network search,
+telemetry, or background crawling.
 
 Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast; search feedback stays in the finder.
 
@@ -112,4 +116,4 @@ npm test
 npm run test:browser
 ```
 
-The browser test covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.
+The browser fixture covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. The optional Playwright-backed `npm run test:pinpointer:browser` additionally checks compact-map equivalence, sparse offsets, metadata paths across provider-shaped fixtures, structureless selected quotes, and mutation safety. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.

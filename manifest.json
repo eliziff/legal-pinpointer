@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Legal Pinpointer",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "Canadian legal pinpoints and Tab Sonar: paragraph/sentence search across a page, all tabs, or a tab group.",
   "permissions": [
     "clipboardRead",

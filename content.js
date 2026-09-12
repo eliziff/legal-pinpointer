@@ -5,11 +5,20 @@
   const fragments = globalThis.LegalPinpointerTextFragments;
   const providers = globalThis.LegalPinpointerProviders;
   let lastHoverTarget = null;
-  let modelCache = null;
+  const modelCache = new Map();
+  const modelStamps = new WeakMap();
+  const modelLookups = new WeakMap();
+  let modelObserver = null, documentRevision = 0;
   let rememberedFragment = null;
   let toastTimer = 0;
   const MAX_CLIPBOARD_TEXT_LENGTH = 1_000_000;
   const COPY_MODES = new Set(['pinpoint', 'quote', 'citation']);
+  const QUOTE_INLINE = new Map([
+      ['B', 'strong'], ['STRONG', 'strong'], ['I', 'em'], ['EM', 'em'],
+      ['U', 'u'], ['S', 's'], ['STRIKE', 's'], ['SUB', 'sub'], ['SUP', 'sup'],
+      ['Q', 'q'], ['CODE', 'code']
+    ]);
+  const QUOTE_BLOCK = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DIV', 'DT', 'FIGCAPTION', 'FIGURE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'P', 'PRE', 'SECTION', 'TD', 'TH', 'TR']);
 
   document.addEventListener('pointerover', (event) => {
     lastHoverTarget = event.target instanceof Element ? event.target : event.target.parentElement;
@@ -19,25 +28,86 @@
     return new Promise((resolve) => chrome.storage.local.get(defaults, resolve));
   }
 
-  async function inspectPage() {
-    const key = window.location.href;
-    if (modelCache && modelCache.key === key && modelCache.promise) {
-      const cached = await modelCache.promise;
-      if (cached && cached.root && cached.root.isConnected) return cached;
-    }
+  function ownOverlay(node) {
+    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    return Boolean(element?.closest('#legal-pinpointer-status, [data-pinpointer-sonar]'));
+  }
 
-    const promise = providers.inspect(document, window.location);
-    modelCache = { key, promise };
+  function invalidateModels(records) {
+    if (!modelCache.size || !records.some(record => !ownOverlay(record.target) && (
+      record.type !== 'childList' || [...record.addedNodes, ...record.removedNodes].some(node => !ownOverlay(node))
+    ))) return;
+    documentRevision += 1;
+    modelCache.clear();
+  }
+
+  function flushModels() {
+    if (!modelObserver) {
+      modelObserver = new MutationObserver(invalidateModels);
+      // Arm only on first use, and invalidate cheaply; never parse in the observer.
+      // Headers and metadata outside the document root affect citation identity too.
+      modelObserver.observe(document.documentElement, {
+        subtree: true, childList: true, characterData: true, attributes: true,
+        attributeFilter: ['id', 'name', 'content', 'href', 'class', 'style', 'hidden', 'aria-hidden',
+          'lang', 'data-document-type', 'data-section-number', 'data-rule-number', 'data-article-number']
+      });
+    }
+    invalidateModels(modelObserver.takeRecords());
+  }
+
+  function assertCurrentModel(model) {
+    flushModels();
+    const stamp = modelStamps.get(model);
+    if (!stamp || stamp.revision !== documentRevision || stamp.url !== window.location.href || !model.root.isConnected) {
+      throw new Error('The document changed during this operation. Please try again.');
+    }
+  }
+
+  async function inspectPage(metadataOnly = false) {
+    flushModels();
+    const url = window.location.href, revision = documentRevision;
+    const level = metadataOnly ? 'metadata' : 'structure';
+    let entry = modelCache.get(level);
+    if (!entry || entry.url !== url || entry.revision !== revision) {
+      entry = { url, revision, promise: providers.inspect(document, window.location, undefined, { metadataOnly }) };
+      modelCache.set(level, entry);
+    }
     try {
-      const model = await promise;
-      if (!model || !model.citation || !model.citation.plain || !model.root || !model.root.isConnected) {
+      const model = await entry.promise;
+      if (!model?.citation?.plain || !model.root?.isConnected) {
         throw new Error('This page does not expose a supported legal document.');
       }
+      flushModels();
+      if (revision !== documentRevision || url !== window.location.href) {
+        throw new Error('The document changed during this operation. Please try again.');
+      }
+      modelStamps.set(model, { revision, url });
       return model;
     } catch (error) {
-      if (modelCache && modelCache.promise === promise) modelCache = null;
+      if (modelCache.get(level) === entry) modelCache.delete(level);
       throw error;
     }
+  }
+
+  window.addEventListener('pagehide', () => {
+    modelObserver?.disconnect(); modelObserver = null;
+    documentRevision += 1; modelCache.clear(); rememberedFragment = null; lastHoverTarget = null;
+    clearTimeout(toastTimer);
+  });
+
+  function modelLookup(model) {
+    const nodes = model.structure.nodes;
+    let cached = modelLookups.get(model);
+    if (cached?.nodes === nodes && cached.count === nodes.length) return cached;
+    const positions = new Map(), anchors = new Map();
+    nodes.forEach((node, index) => {
+      if (!positions.has(node)) positions.set(node, index);
+      const locator = core.parseLocator(node.locator);
+      if (node.anchor && locator && !anchors.has(locator.raw)) anchors.set(locator.raw, node);
+    });
+    cached = { nodes, count: nodes.length, positions, anchors };
+    modelLookups.set(model, cached);
+    return cached;
   }
 
   function editableTarget(target) {
@@ -99,7 +169,7 @@
       && node.element.matches('p, li, [id^="PARA_"], [id^="crsw_paragraph_num_"]')
       && ['paragraph', 'pilcrow', 'silcrow'].includes(node.kind);
     if (nativeBlock) return nodeBoundary(node, false);
-    const index = model.structure.nodes.indexOf(node);
+    const index = modelLookup(model).positions.get(node);
     const next = model.structure.nodes[index + 1];
     if (next) return nodeBoundary(next, true);
     if (node.endPoint && node.endPoint.node && node.endPoint.node.isConnected) {
@@ -149,8 +219,10 @@
   function nodeForTarget(model, target) {
     if (!target || !target.isConnected || !model.root.contains(target)) return null;
     const nodes = model.structure.nodes;
-    const containing = [...nodes].reverse().find((node) => node.element === target || node.element.contains(target));
-    if (containing) return containing;
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const node = nodes[index];
+      if (node.element === target || node.element.contains(target)) return node;
+    }
 
     const parent = target.parentNode;
     if (!parent) return null;
@@ -221,9 +293,9 @@
       if (canlii) return canlii;
     }
 
-    const anchoredNode = node.anchor ? node : model.structure.nodes
-      .filter((candidate) => candidate.anchor && core.isProvisionAncestor(candidate.locator, node.locator))
-      .sort((left, right) => core.provisionDepth(right.locator) - core.provisionDepth(left.locator))[0];
+    const anchors = node.anchor ? null : modelLookup(model).anchors;
+    const anchoredNode = node.anchor ? node : core.provisionAncestors(node.locator).reverse()
+      .map(locator => anchors.get(locator)).find(Boolean);
     const nativeFragment = anchoredNode && anchoredNode.anchor ? `#${encodeURIComponent(anchoredNode.anchor)}` : '';
     return core.withFragment(model.cleanUrl, nativeFragment || '');
   }
@@ -343,12 +415,7 @@
   }
 
   function renderSelectionFragment(fragment) {
-    const inline = new Map([
-      ['B', 'strong'], ['STRONG', 'strong'], ['I', 'em'], ['EM', 'em'],
-      ['U', 'u'], ['S', 's'], ['STRIKE', 's'], ['SUB', 'sub'], ['SUP', 'sup'],
-      ['Q', 'q'], ['CODE', 'code']
-    ]);
-    const block = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DIV', 'DT', 'FIGCAPTION', 'FIGURE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'P', 'PRE', 'SECTION', 'TD', 'TH', 'TR']);
+
 
     function render(node) {
       if (node.nodeType === Node.TEXT_NODE) {
@@ -365,9 +432,9 @@
       let plain = children.map((child) => child.plain).join('');
       let html = children.map((child) => child.html).join('');
       if (node.nodeType === Node.DOCUMENT_FRAGMENT_NODE) return { plain, html };
-      const tag = inline.get(node.tagName);
+      const tag = QUOTE_INLINE.get(node.tagName);
       if (tag) html = `<${tag}>${html}</${tag}>`;
-      if (block.has(node.tagName) && (plain || html)) {
+      if (QUOTE_BLOCK.has(node.tagName) && (plain || html)) {
         plain = `\n${plain}\n`;
         html = `<br>${html}<br>`;
       }
@@ -483,8 +550,9 @@
       copied = true;
     };
     document.addEventListener('copy', onCopy, { once: true, capture: true });
-    const executed = document.execCommand('copy');
-    document.removeEventListener('copy', onCopy, true);
+    let executed;
+    try { executed = document.execCommand('copy'); }
+    finally { document.removeEventListener('copy', onCopy, true); }
     if (!executed || !copied) throw new Error('The browser denied clipboard access.');
   }
 
@@ -509,7 +577,7 @@
   }
 
   async function copy(mode, showFeedback = true) {
-    const model = await inspectPage();
+    const model = await inspectPage(mode === 'citation');
     let payload;
     let message;
     let fragmentSource = null;
@@ -519,15 +587,32 @@
       payload = core.outputCitationLink(model.citation, target);
       message = `Copied citation: ${model.citation.plain}`;
     } else if (!model.structure || !model.structure.nodes.length) {
-      const target = model.canliiUrl || model.cleanUrl;
-      payload = core.outputCitationLink(model.citation, target);
-      message = `Copied page: ${model.citation.plain}`;
+      // No structure is not a reason to discard the user's selected quotation.
+      // Retain clipboard text-fragment precedence when it resolves on this page.
+      const fragment = await clipboardFragment(model);
+      assertCurrentModel(model);
+      const selected = fragment?.range || liveSelectionRange();
+      if (selected && !selected.collapsed && !ownOverlay(selected.startContainer)
+          && !ownOverlay(selected.endContainer)) {
+        const text = renderSelectionFragment(selected.cloneContents());
+        if (!text.plain) throw new Error('The selected range contains no copyable text.');
+        const target = fragment?.url || model.cleanUrl;
+        payload = { plain: `[Link]: ${text.plain}`, html: `${anchorHtml('[Link]', target)}: ${text.html}` };
+        message = 'Copied selected text with source link';
+        fragmentSource = fragment;
+      } else {
+        const target = model.canliiUrl || model.cleanUrl;
+        payload = core.outputCitationLink(model.citation, target);
+        message = `Copied page: ${model.citation.plain}`;
+      }
     } else {
       const sourceInfo = await copySource(model, mode);
+      assertCurrentModel(model);
       if (sourceInfo.kind === 'text-fragment') fragmentSource = sourceInfo;
       const nodes = sourceInfo.range ? nodesForRange(model, sourceInfo.range, mode === 'quote') : [sourceInfo.node];
       if (!nodes.length) throw new Error('No page, paragraph, or provision overlaps that range.');
       const settings = await storageGet({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false });
+      assertCurrentModel(model);
       const pinpoint = pinpointMarkup(
         model,
         sourceInfo,
@@ -547,6 +632,7 @@
       }
     }
 
+    assertCurrentModel(model);
     await clipboardWrite(payload);
     rememberedFragment = fragmentSource
       ? { url: fragmentSource.url, outputPlain: payload.plain }
@@ -555,11 +641,12 @@
     return { ok: true, message, plain: payload.plain };
   }
 
-  async function inspection() {
-    const model = await inspectPage();
+  async function inspection(metadataOnly = false) {
     const range = liveSelectionRange();
+    const model = await inspectPage(metadataOnly && !range);
     const selected = range ? nodesForRange(model, range) : [];
-    const settings = await storageGet({ pinpointStyle: 'full' });
+    const settings = range ? await storageGet({ pinpointStyle: 'full' }) : { pinpointStyle: 'full' };
+    assertCurrentModel(model);
     return {
       ok: true,
       provider: model.provider,
@@ -567,8 +654,8 @@
       citation: model.citation.plain,
       canliiAvailable: Boolean(model.canliiUrl),
       structureKind: model.structure ? model.structure.kind : '',
-      structureSource: model.structure ? model.structure.source : 'none',
-      structureCount: model.structure ? model.structure.nodes.length : 0,
+      structureSource: model.structure ? model.structure.source : metadataOnly ? 'not-inspected' : 'none',
+      structureCount: model.structure ? model.structure.nodes.length : metadataOnly ? null : 0,
       selectedPinpoint: model.structure
         ? core.formatPinpoint(model.structure.kind, selected.map((node) => node.locator), settings.pinpointStyle)
         : ''
@@ -580,7 +667,7 @@
   }
 
   async function openCanlii() {
-    const model = await inspectPage();
+    const model = await inspectPage(true);
     if (!model.canliiUrl) throw new Error('No reliable CanLII version was detected.');
     const target = new URL(model.canliiUrl);
     if (target.protocol !== 'https:' || !['canlii.org', 'www.canlii.org'].includes(target.hostname.toLowerCase())) {
@@ -590,13 +677,14 @@
   }
 
   document.addEventListener('keydown', (event) => {
-    if (event.repeat || editableTarget(event.target)) return;
+    if (event.repeat) return;
     const key = event.key.toLowerCase();
     const copyPinpoint = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === 'x';
     const copyQuote = event.ctrlKey && !event.altKey && !event.metaKey && event.shiftKey && key === 'x';
     const copyCitation = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && key === 'x';
     const goCanlii = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && key === 'c';
     if (!copyPinpoint && !copyQuote && !copyCitation && !goCanlii) return;
+    if (editableTarget(event.composedPath()[0] || event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     if (goCanlii) handleTask(openCanlii());
@@ -615,7 +703,7 @@
       ? copy(message.mode, showFeedback)
       : message.type === 'LEGAL_PINPOINTER_OPEN_CANLII'
         ? openCanlii().then(() => ({ ok: true }))
-        : inspection();
+        : inspection(message.metadataOnly === true);
     task.then(sendResponse).catch((error) => {
       const result = { ok: false, message: error.message || 'Legal Pinpointer could not complete the request.' };
       if (showFeedback) showToast(result.message, true);

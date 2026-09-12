@@ -130,7 +130,94 @@
     return result;
   }
 
-  function buildTextIndex(root) {
+  // Internal fast path: one mapping record per source run, not per character.
+  // The public default still exposes the legacy points array for existing tools.
+  function buildCompactIndex(root, structural, mapPoints = true) {
+    const chunks = [], runs = [], hiddenCache = new WeakMap();
+    const view = root.ownerDocument && root.ownerDocument.defaultView;
+    let length = 0, last = '', pending = null;
+    function append(text, point) {
+      if (point && mapPoints) {
+        const prior = runs.at(-1);
+        if (prior && prior.node === point.node && prior.to === length
+            && prior.offset + prior.to - prior.from === point.offset) prior.to += text.length;
+        else runs.push({ from: length, to: length + text.length, ...point });
+      }
+      chunks.push(text); length += text.length; last = text.slice(-1);
+    }
+    function separator() {
+      pending = null;
+      if (structural && last === ' ') {
+        chunks.pop(); length -= 1;
+        if (runs.at(-1)?.from === length) runs.pop();
+        last = chunks.at(-1)?.slice(-1) || '';
+      }
+      const value = structural ? '\n' : ' ';
+      if (length && last !== value) append(value);
+    }
+    function textNode(node) {
+      for (const match of (node.nodeValue || '').matchAll(/\s+|\S+/gu)) {
+        const text = match[0];
+        if (/^\s/u.test(text)) {
+          if (structural) pending ||= { node, offset: match.index };
+          else separator();
+        } else {
+          if (structural && pending && length && last !== ' ' && last !== '\n') append(' ', pending);
+          pending = null;
+          append(text, { node, offset: match.index });
+        }
+      }
+    }
+    const stack = [{ node: root }];
+    while (stack.length) {
+      const item = stack.pop();
+      if (item.children) {
+        if (item.at < item.children.length) {
+          stack.push(item);
+          stack.push({ node: item.children[item.at++] });
+        }
+        continue;
+      }
+      if (item.exit) { separator(); continue; }
+      const node = item.node;
+      if (node.nodeType === 3) {
+        if (!isHidden(node.parentElement, view, hiddenCache)) textNode(node);
+        continue;
+      }
+      if (node.nodeType !== 1 || isHidden(node, view, hiddenCache)) continue;
+      const block = BLOCK_TAGS.has(node.tagName);
+      if (block || node.tagName === 'BR') separator();
+      if (block) stack.push({ exit: true });
+      if (node.tagName !== 'BR') stack.push({ children: node.childNodes, at: 0 });
+    }
+    if (structural && last === '\n') { chunks.pop(); length -= 1; }
+    return { text: chunks.join(''), runs };
+  }
+
+  function compactBoundary(index, offset) {
+    const at = Math.max(0, Math.min(index.text.length, Number(offset) || 0));
+    if (!Number.isInteger(at)) return null;
+    const runs = index.runs;
+    let low = 0, high = runs.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (runs[middle].to <= at) low = middle + 1;
+      else high = middle;
+    }
+    const run = runs[low];
+    if (!run) {
+      const before = runs.at(-1);
+      return before ? { node: before.node, offset: before.offset + before.to - before.from } : null;
+    }
+    let position = run.offset + Math.max(0, at - run.from);
+    // Both code units of a surrogate pair map to its original start, as before.
+    const text = run.node.nodeValue;
+    if (position > run.offset && /[\uDC00-\uDFFF]/.test(text[position]) && /[\uD800-\uDBFF]/.test(text[position - 1])) position -= 1;
+    return { node: run.node, offset: position };
+  }
+
+  function buildTextIndex(root, compact = false) {
+    if (compact) return buildCompactIndex(root, false);
     const characters = [];
     const points = [];
     const view = root.ownerDocument && root.ownerDocument.defaultView;
@@ -179,7 +266,8 @@
     return { text: characters.join(''), points };
   }
 
-  function buildStructureIndex(root) {
+  function buildStructureIndex(root, compact = false) {
+    if (compact) return buildCompactIndex(root, true, compact !== 'text');
     const characters = [];
     const points = [];
     const view = root.ownerDocument && root.ownerDocument.defaultView;
@@ -312,6 +400,7 @@
   }
 
   function boundaryPoint(index, offset) {
+    if (index.runs) return compactBoundary(index, offset);
     const at = Math.max(0, Math.min(index.points.length, Number(offset) || 0));
     const after = mappedPoint(index.points, at, 1);
     if (after) return { node: after.node, offset: after.start };
@@ -332,7 +421,7 @@
   function resolveUrl(value, root) {
     const directives = directivesFromUrl(value);
     if (!directives.length || !root) return null;
-    const index = buildTextIndex(root);
+    const index = buildTextIndex(root, true);
     const matches = directives.map((directive) => matchDirective(index, directive)).filter(Boolean);
     if (!matches.length) return null;
     const combined = {
