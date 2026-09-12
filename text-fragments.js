@@ -130,7 +130,110 @@
     return result;
   }
 
-  function buildTextIndex(root) {
+  // Internal fast path: one mapping record per source run, not per character.
+  // The public default still exposes the legacy points array for existing tools.
+  function buildCompactIndex(root, structural, mapPoints = true) {
+    const chunks = [], runs = [], hiddenCache = new WeakMap();
+    const view = root.ownerDocument && root.ownerDocument.defaultView;
+    let length = 0, last = '', pending = null;
+    function append(text, point) {
+      if (point && mapPoints) {
+        const prior = runs.at(-1);
+        if (prior && prior.node === point.node && prior.to === length
+            && prior.offset + prior.to - prior.from === point.offset) prior.to += text.length;
+        else runs.push({ from: length, to: length + text.length, ...point });
+      }
+      chunks.push(text); length += text.length; last = text.slice(-1);
+    }
+    function separator() {
+      pending = null;
+      if (structural && last === ' ') {
+        chunks.pop(); length -= 1;
+        if (runs.at(-1)?.from === length) runs.pop();
+        last = chunks.at(-1)?.slice(-1) || '';
+      }
+      const value = structural ? '\n' : ' ';
+      if (length && last !== value) append(value);
+    }
+    function textNode(node) {
+      const value = node.nodeValue || '';
+      // Ordinary prose already has single ASCII spaces. Append that source run
+      // once rather than allocating a regex result and chunk for every word.
+      // Irregular/Unicode whitespace retains the exact normalization path below.
+      if (structural && value && !/[^\S ]| {2}/u.test(value)) {
+        const from = value[0] === ' ' ? 1 : 0;
+        const to = value.endsWith(' ') ? value.length - 1 : value.length;
+        if (from) pending ||= { node, offset: 0 };
+        if (to > from) {
+          if (pending && length && last !== ' ' && last !== '\n') append(' ', pending);
+          pending = null;
+          append(value.slice(from, to), { node, offset: from });
+        }
+        if (to < value.length) pending ||= { node, offset: Math.max(0, to) };
+        return;
+      }
+      for (const match of value.matchAll(/\s+|\S+/gu)) {
+        const text = match[0];
+        if (/^\s/u.test(text)) {
+          if (structural) pending ||= { node, offset: match.index };
+          else separator();
+        } else {
+          if (structural && pending && length && last !== ' ' && last !== '\n') append(' ', pending);
+          pending = null;
+          append(text, { node, offset: match.index });
+        }
+      }
+    }
+    const stack = [{ node: root }];
+    while (stack.length) {
+      const item = stack.pop();
+      if (item.children) {
+        if (item.at < item.children.length) {
+          stack.push(item);
+          stack.push({ node: item.children[item.at++] });
+        }
+        continue;
+      }
+      if (item.exit) { separator(); continue; }
+      const node = item.node;
+      if (node.nodeType === 3) {
+        if (!isHidden(node.parentElement, view, hiddenCache)) textNode(node);
+        continue;
+      }
+      if (node.nodeType !== 1 || isHidden(node, view, hiddenCache)) continue;
+      const block = BLOCK_TAGS.has(node.tagName);
+      if (block || node.tagName === 'BR') separator();
+      if (block) stack.push({ exit: true });
+      if (node.tagName !== 'BR') stack.push({ children: node.childNodes, at: 0 });
+    }
+    if (structural && last === '\n') { chunks.pop(); length -= 1; }
+    return { text: chunks.join(''), runs };
+  }
+
+  function compactBoundary(index, offset) {
+    const at = Math.max(0, Math.min(index.text.length, Number(offset) || 0));
+    if (!Number.isInteger(at)) return null;
+    const runs = index.runs;
+    let low = 0, high = runs.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (runs[middle].to <= at) low = middle + 1;
+      else high = middle;
+    }
+    const run = runs[low];
+    if (!run) {
+      const before = runs.at(-1);
+      return before ? { node: before.node, offset: before.offset + before.to - before.from } : null;
+    }
+    let position = run.offset + Math.max(0, at - run.from);
+    // Both code units of a surrogate pair map to its original start, as before.
+    const text = run.node.nodeValue;
+    if (position > run.offset && /[\uDC00-\uDFFF]/.test(text[position]) && /[\uD800-\uDBFF]/.test(text[position - 1])) position -= 1;
+    return { node: run.node, offset: position };
+  }
+
+  function buildTextIndex(root, compact = false) {
+    if (compact) return buildCompactIndex(root, false);
     const characters = [];
     const points = [];
     const view = root.ownerDocument && root.ownerDocument.defaultView;
@@ -179,7 +282,8 @@
     return { text: characters.join(''), points };
   }
 
-  function buildStructureIndex(root) {
+  function buildStructureIndex(root, compact = false) {
+    if (compact) return buildCompactIndex(root, true, compact !== 'text');
     const characters = [];
     const points = [];
     const view = root.ownerDocument && root.ownerDocument.defaultView;
@@ -259,41 +363,48 @@
     return map;
   }
 
-  function occurrences(haystack, needle, from) {
-    const output = [];
-    if (!needle) return output;
-    let index = haystack.indexOf(needle, from || 0);
-    while (index >= 0) {
-      output.push(index);
-      index = haystack.indexOf(needle, index + Math.max(needle.length, 1));
-    }
-    return output;
-  }
-
-  function contextMatches(text, start, end, directive) {
-    const prefix = normalizeTerm(directive.prefix).toLocaleLowerCase();
-    const suffix = normalizeTerm(directive.suffix).toLocaleLowerCase();
-    const before = text.slice(0, start).trimEnd();
-    const after = text.slice(end).trimStart();
-    return (!prefix || before.endsWith(prefix)) && (!suffix || after.startsWith(suffix));
-  }
-
-  function matchDirective(index, directive) {
-    const searchable = index.text.toLocaleLowerCase();
+  function matchDirective(searchable, directive) {
     const startTerm = normalizeTerm(directive.start).toLocaleLowerCase();
     const endTerm = normalizeTerm(directive.end).toLocaleLowerCase();
-    const starts = occurrences(searchable, startTerm, 0);
-
-    for (const start of starts) {
+    const prefix = normalizeTerm(directive.prefix).toLocaleLowerCase();
+    const suffix = normalizeTerm(directive.suffix).toLocaleLowerCase();
+    if (!startTerm) return null;
+    // buildTextIndex normalizes whitespace to ASCII spaces. Inspect only the
+    // context-sized window, not a slice of the whole document for each candidate.
+    const hasPrefix = start => {
+      if (!prefix) return true;
+      while (start > 0 && searchable[start - 1] === ' ') start -= 1;
+      return start >= prefix.length && searchable.slice(start - prefix.length, start) === prefix;
+    };
+    const hasSuffix = end => {
+      if (!suffix) return true;
+      while (searchable[end] === ' ') end += 1;
+      return searchable.startsWith(suffix, end);
+    };
+    // Memoize dead endpoint chains. Repeated starts no longer rescan every end
+    // when suffix context is absent. Exact non-overlapping occurrence order is
+    // preserved even for self-overlapping terms (e.g. "aa" in "aaaaa").
+    const failedEnds = new Set();
+    let firstEnd = -1;
+    for (let start = searchable.indexOf(startTerm); start >= 0;
+      start = searchable.indexOf(startTerm, start + startTerm.length)) {
+      if (!hasPrefix(start)) continue;
       const startEnd = start + startTerm.length;
       if (!endTerm) {
-        if (contextMatches(searchable, start, startEnd, directive)) return { start, end: startEnd };
+        if (hasSuffix(startEnd)) return { start, end: startEnd };
         continue;
       }
-      for (const endStart of occurrences(searchable, endTerm, startEnd)) {
-        const end = endStart + endTerm.length;
-        if (contextMatches(searchable, start, end, directive)) return { start, end };
+      if (firstEnd < startEnd) firstEnd = searchable.indexOf(endTerm, startEnd);
+      if (firstEnd < 0) return null; // Later starts cannot have an endpoint either.
+      if (failedEnds.has(firstEnd)) continue;
+      const visited = [];
+      for (let at = firstEnd; at >= 0 && !failedEnds.has(at);
+        at = searchable.indexOf(endTerm, at + endTerm.length)) {
+        const end = at + endTerm.length;
+        if (hasSuffix(end)) return { start, end };
+        visited.push(at);
       }
+      for (const at of visited) failedEnds.add(at);
     }
     return null;
   }
@@ -312,6 +423,7 @@
   }
 
   function boundaryPoint(index, offset) {
+    if (index.runs) return compactBoundary(index, offset);
     const at = Math.max(0, Math.min(index.points.length, Number(offset) || 0));
     const after = mappedPoint(index.points, at, 1);
     if (after) return { node: after.node, offset: after.start };
@@ -332,13 +444,16 @@
   function resolveUrl(value, root) {
     const directives = directivesFromUrl(value);
     if (!directives.length || !root) return null;
-    const index = buildTextIndex(root);
-    const matches = directives.map((directive) => matchDirective(index, directive)).filter(Boolean);
+    const index = buildTextIndex(root, true);
+    // All directives share this single case-folded view; it is not retained.
+    const searchable = index.text.toLocaleLowerCase();
+    const matches = directives.map((directive) => matchDirective(searchable, directive)).filter(Boolean);
     if (!matches.length) return null;
-    const combined = {
-      start: Math.min(...matches.map((match) => match.start)),
-      end: Math.max(...matches.map((match) => match.end))
-    };
+    const combined = { start: matches[0].start, end: matches[0].end };
+    for (const match of matches) {
+      combined.start = Math.min(combined.start, match.start);
+      combined.end = Math.max(combined.end, match.end);
+    }
     const range = domRange(root.ownerDocument, index, combined);
     if (!range) return null;
     return { range, matches, url: String(value).trim(), text: range.toString() };

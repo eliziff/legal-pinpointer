@@ -1,97 +1,131 @@
 # Legal Pinpointer
 
-A local Manifest V3 extension for copying Canadian legal citations and exact
-pinpoints from CanLII, Lexis+ and Westlaw Advantage Canada.
+A small, local-first Manifest V3 extension for structure-aware Canadian legal citations and persistent proximity search across open webpages.
 
-## Install and use
+## Install
 
-Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**
-and select this repository folder. The extension is already packaged: no npm
-installation or build is needed to use it.
+1. Open `chrome://extensions` in Chrome 116 or newer.
+2. Turn on Developer mode.
+3. Choose **Load unpacked** and select this folder.
 
-| Shortcut | Action |
-| --- | --- |
-| Ctrl+X | Copy the selected or hovered pinpoint; ordinary Cut remains available in editable controls |
-| Ctrl+Shift+X | Copy the pinpoint and selected text |
-| Alt+X | Copy the cleaned McGill-style citation as a link |
-| Alt+C | Open a reliably identified CanLII version |
+No build or package installation is required to use the extension. After updating, reload the extension and previously injected pages. Shortcut conflicts can be resolved at `chrome://extensions/shortcuts`; the popup reports unassigned search bindings.
 
-The popup offers the same actions. McGill pinpoints are the default, with bare
-locators available as a setting. When usable structure is absent, copying falls
-back to a cleaned page link labelled with the citation title.
+## Workflows
 
-A copied current-page text-fragment URL takes precedence over selection and
-hover: its resolved range governs the quote and pinpoint, and its original URL
-is preserved. Selections include each structural unit crossed; collapsed ranges
-link their endpoints separately. Rich quotes retain safe inline formatting and
-paragraph breaks, with hanging provision indents. Leading omissions can receive
-an ellipsis; no trailing ellipsis is invented.
+- **Ctrl+X** copies the hovered or selected pinpoint. It does not replace Cut in inputs, textareas, selects, or editable content.
+- **Ctrl+Shift+X** copies selected text with linked structural markers.
+- **Alt+X** copies the cleaned citation as a link.
+- **Alt+C** opens the reliably detected CanLII version.
+- The popup exposes the same actions. Full pinpoints are the default (`at para 12`, `at paras 12-14`, `at 353`, `at 553, 559`, `s 7(2)`, or `ss 7(2)-(4)`), with bare locators available as an option. Pages use `at n`, never `at p. n` or `at pp. n`.
 
-Only the authoritative citation core is linked; case/legislation titles remain
-outside it. A provision suffix is a pinpoint, not part of the legislation's
-identity. Secondary-source section markers can supply page-wide pinpoints while
-citation copy uses separate source/author metadata.
+If no structure is detected and text is selected, quote/pinpoint copy outputs literal **`[Link]: selected text`**. In rich text, only `[Link]` links to the source; selected text retains the safe inline-formatting allowlist. No paragraph number, provision or page is fabricated. With no selection, copy falls back to the cleaned page link labelled with the citation title. Citation-only copy still copies the citation.
 
-## Source identity and structure
+Secondary-source section headings such as `§ 12.02` act as page-wide pinpoints, while citation copy uses the provider's separate source and author metadata without the pinpoint.
 
-The extension consumes the unchanged
-[Legal Structure Parser](https://github.com/eliziff/legal-structure-parser)
-through the small ABI in [engine-src/](engine-src/). Browser code owns provider
-selectors, DOM linearization and explicit engine-offset-to-DOM mapping—not a
-parallel legal structure engine.
+Citation links cover only the citation core, such as `2024 SCC 1`, `1934 CanLII 376 (AB QB)`, or `SA 2008, c. A-4.2`; the case or legislation title remains outside the link. A provision suffix exposed by a legislation page, such as `s. 1`, is treated as a page pinpoint rather than part of the legislation citation. Names come from document metadata and title fields, not an unrelated authority cited in the body. Missing full names are not invented from a citation number.
 
-Native anchors are preferred except that engine-confirmed reporter pages outrank
-native case paragraphs. Reporter-page matches must correspond to literal DOM
-page markers. Legislation uses provisions; pilcrow/silcrow markers govern supported
-secondary sources. Uncertain identities are not guessed.
+A current-page text-fragment URL in the clipboard has precedence over both selection and hover, including the structureless fallback. Its resolved range governs the pinpoint and quote, and the original fragment URL becomes every pinpoint endpoint link. The extension parses WICG text directives locally, including endpoint-only ranges and multiple `text=` directives.
 
-The packaged court routes come from
-[Beaver](https://github.com/eliziff/Beaver); legislation links use an exact citation
-or unique title/jurisdiction match in the packaged metadata snapshot. A direct
-provider-owned CanLII link wins when present, but never replaces an explicit
-provider text-fragment target. Packaged data is a snapshot, not a live lookup.
+Selections include every structural unit crossed. Rich clipboard output links the two ends of a collapsed range separately, such as `32-33` or `7(2)-(4)`. Quote output preserves a small safe set of inline formatting and emits real paragraph blocks, with one newline between units in plain text. Provisions use hanging paragraph indents so explicit and word-processor-wrapped continuation lines remain aligned beneath the provision text. An ellipsis is added only after the first marker when the selection omits substantive opening text; trailing ellipses are never emitted.
+
+## Tab Sonar — persistent results across websites and windows
+
+**Ctrl+Shift+S** opens Chrome's native side panel. **Tab** cycles `/p` (same
+paragraph) and `/s` (same sentence). **Shift+Tab** cycles **Current tab → All
+tabs → Current tab group**. Start with `privileg* waiv*`; quoted phrases,
+Boolean groups and explicit `/p` or `/s` also work. **Enter / Shift+Enter**
+preview passages. **Click a result or Ctrl+Enter** to jump to its exact source
+text while the query/results remain visible. Alt+wheel previews; release Alt
+to open. **Back to start** restores the source scroll position. **Use active
+tab** explicitly changes the pinned search origin.
+
+Other-window results open that window's panel
+and hand off the search without moving tabs. All tabs includes other windows in
+the same normal/incognito context; an ungrouped origin's Group scope is empty,
+not all ungrouped tabs. Restricted/unavailable pages and partial results are
+reported, not silently counted as zero-hit documents.
+
+**Alt+Shift+C** opens **CanLII document-text search from any browser tab,
+including blank/new tabs**. The browser command needs no source-page injection.
+Type a query and press Enter: CanLII results open in a new tab, leaving the
+starting tab untouched. Nothing is sent while typing. Open-tab and CanLII
+queries have separate drafts. Both launchers are also available in the popup.
+
+Read [FIND.md](FIND.md) for controls, access, resource limits and cleanup, and
+[WORKSPACE.md](WORKSPACE.md) for tests and native Chrome validation gaps.
+
+## Structure and citation policy
+
+Provider-native anchors are used first, with one deliberate hierarchy rule: a page-delimited case confirmed by the exact legal-structure engine outranks native paragraphs. Cases otherwise use paragraphs; legislation uses provisions; and pilcrow or silcrow markers are definitive in secondary sources.
+
+`legal-structure.wasm` is the unmodified `legal-structure` Rust parser and grammar tables, linked behind the small C ABI in `engine-src/src/lib.rs`. The browser-only adaptations are:
+
+- line-oriented DOM linearization and declared engine-offset-to-DOM mapping;
+- validation that inferred reporter pages correspond to literal `[page n]` DOM text, including the parser-bounded final page;
+- provider selectors, ordered native section evidence, and parallel-citation metadata extraction.
+
+Neutral citations found in bounded provider metadata replace proprietary citations. Reporters retain their preference over CanLII-only fallbacks. Case URLs use the exact court-route table synchronized from Beaver. Legislation URLs resolve against the packaged CanLII metadata snapshot by exact citation identity or a unique title-and-jurisdiction match. Both paths abstain when identity is uncertain. A direct provider-owned CanLII link wins when present. CanLII is preferred for native paragraph and provision anchors, but never replaces a generated provider text-fragment target.
+
+## Security and permissions
+
+Runtime code and metadata are fully packaged. There are no runtime dependencies,
+CDNs, remote scripts, analytics or backend. The service worker fetches only the
+packaged WASM and CanLII legislation index. **Submitting a CanLII search opens a
+remote CanLII URL containing the query**; it is an explicit navigation, not local
+search, and may be recorded in normal browser history.
+
+Rich clipboard HTML is rebuilt from escaped text and a fixed inline-formatting allowlist. Provider markup, attributes, event handlers, styles, scripts, and hidden controls are never passed through.
+
+The manifest requests only:
+
+- `clipboardRead`, to recognize a copied current-page text-fragment URL;
+- `clipboardWrite`, for plain and rich clipboard output;
+- `storage`, for settings and extension-private RAM navigation/handoff state;
+- `activeTab` and `scripting`, for user-invoked search injection;
+- `sidePanel`, for the persistent native search interface;
+- HTTP/HTTPS host access, to search other open tabs without activating them;
+- exact automatic content-script matches for CanLII documents, Lexis document
+  pages, and Westlaw document pages. The citation-copy surface is unchanged.
+
+Local search queries are not written to disk or sync. Navigation handles use
+Chrome's private RAM session storage. A deliberate cross-window handoff also
+stores a one-shot bounded query/result snapshot there; the receiving panel
+consumes/removes it. Unconsumed snapshots older than 60 seconds are pruned on
+next launch. Clear in Open tabs releases its shared search session. Native panel
+X closure relies on the existing 15-minute page-cache/session expiry, rather
+than destroying a workspace open in another window. Browser suspension can
+delay timers. There is no background crawling, polling or worker keepalive.
+
+Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast; search feedback stays in the native workspace.
 
 ## Maintenance
 
-Run these commands from this repository's root with your local source/data paths.
+Refresh the exact parser after changing `legal-structure`:
 
 ```powershell
 .\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
+```
+
+The refresh script builds a disposable offline WASM project from the checked-in ABI and the supplied parser source, then replaces only `legal-structure.wasm`.
+
+Refresh the exact CanLII court-route table:
+
+```powershell
 .\tools\sync-canlii-courts.ps1 -SourcePath 'C:\path\to\Beaver\backend\src\lib\canliiUrls.ts'
+```
+
+Refresh the packaged CanLII legislation metadata from the existing local snapshot:
+
+```powershell
 python .\tools\build-canlii-legislation-index.py 'C:\path\to\canlii.db'
 ```
 
-The engine refresh makes a disposable offline WASM build from the supplied parser
-and checked-in ABI, replacing `legal-structure.wasm`. Record the source revision
-used and validate the resulting packaged engine; updating source elsewhere does
-not update this extension automatically. Keep provider captures and local corpus
-files outside the repository.
+Run focused tests:
 
-With Node.js available:
-
-```sh
+```powershell
 npm test
 npm run test:browser
-npm run audit:legislation
+npm run test:workspace
 ```
 
-The browser test launches Chrome directly. Set `CHROME_PATH` when Chrome is not at
-the default Windows installation path. `npm run check` combines all three checks;
-[package.json](package.json) is the command source of truth.
-[tools/](tools/) also contains saved HTML/MHTML inspection and local-cache audits.
-Browser fixtures do not replace checking changed selectors against real provider
-pages.
-
-## Privacy and notices
-
-Runtime code, WASM and metadata are packaged locally: no analytics, remote scripts,
-CDNs or backend. The worker fetches only extension-owned assets. Opening a provider
-link is ordinary browser navigation, not a claim that the destination is offline.
-
-The extension requests clipboard read/write and setting storage, with exact
-provider content-script matches; see [manifest.json](manifest.json). Clipboard
-HTML is reconstructed from escaped text and an inline-formatting allowlist, not
-copied as arbitrary provider markup. Popup actions report in the popup; keyboard
-actions use one in-page notification.
-
-Retain [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) with distributions.
+The browser fixture covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. The optional Playwright-backed `npm run test:pinpointer:browser` additionally checks compact-map equivalence, sparse offsets, metadata paths across provider-shaped fixtures, structureless selected quotes, and mutation safety. `npm run test:workspace` checks native-panel markup and routing with simulated Chrome APIs, not installed keyboard dispatch. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.
