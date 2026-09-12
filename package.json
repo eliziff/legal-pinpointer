@@ -1,12 +1,19 @@
 {
   "name": "legal-pinpointer",
-  "version": "0.1.24",
+  "version": "0.1.30",
   "private": true,
   "description": "Dependency-free source and tests for the Legal Pinpointer browser extension.",
   "scripts": {
-    "test": "node --test tests/core.test.cjs tests/engine.test.cjs tests/legislation.test.cjs tests/security.test.cjs tests/text-fragments.test.cjs",
+    "test": "node --test tests/core.test.cjs tests/engine.test.cjs tests/legislation.test.cjs tests/security.test.cjs tests/text-fragments.test.cjs tests/find.test.cjs tests/sonar.test.cjs tests/performance-citations.test.cjs tests/text-hotpaths.test.cjs tests/workspace.test.cjs",
     "test:browser": "node --test tests/browser-clipboard.test.cjs",
     "audit:legislation": "node tools/audit-canlii-legislation-index.cjs",
-    "check": "npm test && npm run test:browser && npm run audit:legislation"
+    "check": "npm test && npm run test:browser && npm run audit:legislation",
+    "test:sonar": "node --test tests/find.test.cjs tests/sonar.test.cjs tests/workspace.test.cjs",
+    "test:sonar:browser": "node --test tests/sonar-browser.test.cjs tests/workspace-browser.test.cjs",
+    "benchmark:sonar": "node tools/benchmark-sonar.cjs",
+    "test:pinpointer:browser": "node --test tests/pinpointer-browser.test.cjs tests/text-hotpaths-browser.test.cjs",
+    "benchmark:pinpointer": "node tools/benchmark-pinpointer.cjs",
+    "benchmark:text": "node tools/benchmark-text-hotpaths.cjs",
+    "test:workspace": "node --test tests/workspace.test.cjs tests/workspace-browser.test.cjs"
   }
 }
