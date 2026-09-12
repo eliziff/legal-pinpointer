@@ -1,353 +1,186 @@
 'use strict';
 
-(function exposeFind(global) {
-  const WORD = '[\\p{L}\\p{N}\\p{M}_]';
-  const BLOCK = 'p, li, dd, dt, td, th, pre, blockquote, h1, h2, h3, h4, h5, h6, div, section';
-  const segmenters = new Map();
-  const HIGHLIGHTS = ['legal-pinpointer-find-hits', 'legal-pinpointer-find-current'];
-
-  function parseQuery(value) {
-    const query = String(value || '').replace(/[“”]/g, '"');
-    if (query.length > 2048) throw new Error('Use a query of at most 2,048 characters.');
-    const tokens = query.match(/"[^"\n]*"|\S+/gu) || [];
-    const terms = [];
-    let mode = '';
-    for (const token of tokens) {
-      if (/^\/[ps]$/i.test(token)) {
-        const next = token.slice(1).toLowerCase();
-        if (mode && mode !== next) throw new Error('Use one proximity mode; Tab switches /p and /s.');
-        mode = next;
-        continue;
-      }
-      const quoted = token.startsWith('"') && token.endsWith('"') && token.length > 1;
-      if (token.includes('"') && !quoted) throw new Error('Close the quotation marks around your phrase.');
-      const text = (quoted ? token.slice(1, -1) : token).trim();
-      if (!text) continue;
-      if (!quoted && /^(?:AND|OR|NOT|\/.*)$/.test(text)) {
-        throw new Error('Use words, "quoted phrases", and trailing *; combine all terms with /p or /s.');
-      }
-      const prefix = text.endsWith('*');
-      const literal = prefix ? text.slice(0, -1) : text;
-      if (!literal || literal.includes('*')) throw new Error('Use * only at the end of a word or phrase.');
-      let pattern = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
-      if (/^[\p{L}\p{N}\p{M}_]/u.test(literal)) pattern = `(?<!${WORD})${pattern}`;
-      if (prefix) pattern += `${WORD}*`;
-      if (prefix || /[\p{L}\p{N}\p{M}_]$/u.test(literal)) pattern += `(?!${WORD})`;
-      terms.push(new RegExp(pattern, 'giu'));
-    }
-    if (terms.length > 32) throw new Error('Use at most 32 search terms.');
-    return { terms, mode };
+(function installSonarUI(global) {
+  if (global.LegalPinpointerFind) return;
+  const core = global.LegalPinpointerFindCore, page = global.LegalPinpointerSearchPage;
+  const scopes = ['current', 'all', 'group'], labels = ['Current tab', 'All tabs', 'Current tab group'];
+  let host, shadow, input, status, modeButton, scopeButton, preview, title, counter, openButton, skipped, controls;
+  let opened = false, mode = 'p', scope = 'current', query = '', result = null, current = -1;
+  let sequence = Date.now(), timer = 0, busy = false, scrubbing = false, lastWheel = 0, focusBefore;
+  const css = `
+    :host {color-scheme:light dark} * {box-sizing:border-box}
+    section {width:min(580px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;
+      padding:14px;background:#fff;color:#172e28;border:1px solid #cad6d0;border-radius:13px;
+      box-shadow:0 12px 45px #152c3035;font:13px/1.5 system-ui,sans-serif;text-align:left}
+    header,.row,footer {display:flex;align-items:center;gap:7px} header {margin-bottom:9px}
+    strong {flex:1;letter-spacing:.2px} input {min-width:0;flex:1;padding:9px 10px;font:15px system-ui;
+      border:1px solid #9cafa5;border-radius:7px;background:#fff;color:#142d25}
+    button {font:inherit;cursor:pointer;border:0;border-radius:6px;padding:7px 10px;background:#edf3ef;color:#175749}
+    button:hover {background:#dae9e1} button:disabled {opacity:.45;cursor:default}
+    :focus-visible {outline:2px solid #1d8067;outline-offset:2px} #mode {font-weight:750;min-width:41px}
+    #status {margin:9px 0 4px;font-size:12px} .error {color:#a32222} #preview {margin:10px 0;
+      border-top:1px solid #dce5df;padding-top:10px} #title {font-weight:650;overflow-wrap:anywhere}
+    blockquote {font:15px/1.65 Georgia,serif;margin:8px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere;
+      max-height:210px;overflow:auto} mark {background:#ffdf86;color:#332600}
+    footer {justify-content:space-between} #help,summary {font-size:11px;color:#566d62}
+    #help {margin:9px 0 0;white-space:pre-line} details {margin-top:5px} ul {padding-left:18px;font-size:12px}
+    [hidden] {display:none!important}
+    @media(prefers-color-scheme:dark) {section {background:#142920;color:#eaf4ee;border-color:#496455}
+      input {background:#0c1c15;color:#ecf6ee;border-color:#597364} button {background:#294939;color:#e2f7e9}
+      button:hover {background:#365f49} #help,summary {color:#b8cbbb} .error {color:#ffbbb0}}
+    @media(forced-colors:active) {section,input,button {border:1px solid CanvasText} }
+  `;
+  function make(tag, text = '', attrs = {}) {
+    const node = document.createElement(tag); node.textContent = text;
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    return node;
   }
-
-  // Intl handles punctuation/locale; join common legal-reference and title splits.
-  // This is sentence detection, not a reproduction of CanLII's server tokenizer.
-  function sentenceSpans(text, locale = 'en') {
-    if (!global.Intl || !Intl.Segmenter) throw new Error('Sentence mode requires a Chrome version with Intl.Segmenter.');
-    if (!segmenters.has(locale)) segmenters.set(locale, new Intl.Segmenter(locale, { granularity: 'sentence' }));
-    const segments = Array.from(segmenters.get(locale).segment(text));
-    const spans = [];
-    for (const segment of segments) {
-      const previous = spans[spans.length - 1];
-      const before = previous ? text.slice(previous.start, previous.end).trimEnd() : '';
-      const after = segment.segment.trimStart();
-      const title = /\b(?:Mr|Mrs|Ms|Dr|Mme|Mlle|Hon|Me)\.$/u.test(before);
-      const reference = /\b(?:ss?|pp?|paras?|arts?|nos?|par)\.$/iu.test(before) && /^[\d([]/u.test(after);
-      const versus = /\b(?:v|c)\.$/u.test(before);
-      const initials = /(?:\b[A-Z]\.){2,}$/u.test(before) && /^[\d([]/u.test(after);
-      if (previous && (title || reference || versus || initials)) previous.end = segment.index + segment.segment.length;
-      else spans.push({ start: segment.index, end: segment.index + segment.segment.length });
-    }
-    return spans;
+  function setup() {
+    host = make('div', '', { 'data-pinpointer-sonar': '', popover: 'manual' });
+    host.style.cssText = 'all:initial!important;position:fixed!important;inset:12px 12px auto auto!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;z-index:2147483647!important;overflow:visible!important';
+    shadow = host.attachShadow({ mode: 'closed' }); const sheet = new CSSStyleSheet(); sheet.replaceSync(css); shadow.adoptedStyleSheets = [sheet];
+    const panel = make('section', '', { role: 'dialog', 'aria-label': 'Tab Sonar find in page', 'aria-modal': 'false' });
+    const header = make('header'), dismiss = make('button', '×', { type: 'button', 'aria-label': 'Close (Escape)' });
+    scopeButton = make('button', '', { type: 'button', id: 'scope' });
+    header.append(make('strong', 'Tab Sonar'), scopeButton, dismiss);
+    input = make('input', '', { id: 'query', type: 'text', placeholder: 'privileg* waiv*', autocomplete: 'off',
+      spellcheck: 'false', maxlength: '1024', 'aria-label': 'Search words or quoted phrases', 'aria-describedby': 'status help' });
+    modeButton = make('button', '/p', { type: 'button', id: 'mode' });
+    const previous = make('button', '↑', { type: 'button', 'aria-label': 'Previous match (Shift+Enter)' });
+    const next = make('button', '↓', { type: 'button', 'aria-label': 'Next match (Enter)' });
+    const row = make('div', '', { class: 'row' }); row.append(input, modeButton, previous, next);
+    status = make('p', '', { id: 'status', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
+    skipped = make('details');
+    preview = make('div', '', { id: 'preview', hidden: '' }); title = make('div', '', { id: 'title' });
+    const quote = make('blockquote', '', { id: 'quote' }); counter = make('span');
+    openButton = make('button', 'Open passage ↵', { type: 'button', id: 'open', title: 'Ctrl+Enter opens the selected passage' });
+    const footer = make('footer'); footer.append(counter, openButton); preview.append(title, quote, footer);
+    const refresh = make('button', 'Refresh', { type: 'button', title: 'Re-read open tabs and group membership' });
+    const help = make('p', 'Tab: /p ↔ /s · Shift+Tab: scope · Enter: next · Ctrl+Enter: open\nAlt+wheel: preview; release Alt to open · F6: controls · Esc: close', { id: 'help' });
+    panel.append(header, row, status, skipped, preview, refresh, help); shadow.append(panel);
+    controls = [input, modeButton, scopeButton, previous, next, openButton, refresh, dismiss];
+    dismiss.onclick = close; modeButton.onclick = toggleMode; scopeButton.onclick = toggleScope;
+    previous.onclick = () => move(-1); next.onclick = () => move(1); openButton.onclick = openSelected;
+    refresh.onclick = () => schedule(0); input.oninput = () => { query = input.value; schedule(); };
   }
-
-  function searchParagraphs(paragraphs, parsed, mode, locale = 'en') {
-    const results = [];
-    if (!parsed.terms.length) return results;
-    for (const paragraph of paragraphs) {
-      const spans = mode === 's'
-        ? (paragraph.sentences || (paragraph.sentences = sentenceSpans(paragraph.text, locale)))
-        : [{ start: 0, end: paragraph.text.length }];
-      for (const span of spans) {
-        const text = paragraph.text.slice(span.start, span.end);
-        const hits = [];
-        let matches = true;
-        for (const term of parsed.terms) {
-          term.lastIndex = 0;
-          const occurrences = Array.from(text.matchAll(term));
-          if (!occurrences.length) { matches = false; break; }
-          for (const hit of occurrences) hits.push({ start: span.start + hit.index, end: span.start + hit.index + hit[0].length });
-        }
-        if (matches) results.push({ paragraph, ...span, hits });
-      }
-    }
-    return results;
+  function label() {
+    modeButton.textContent = `/${mode}`; modeButton.title = `Same ${mode === 'p' ? 'paragraph' : 'sentence'} (Tab to switch)`;
+    modeButton.setAttribute('aria-label', modeButton.title);
+    scopeButton.textContent = labels[scopes.indexOf(scope)]; scopeButton.title = 'Shift+Tab: Current tab → All tabs → Current tab group';
+    scopeButton.setAttribute('aria-label', `${scopeButton.textContent}; ${scopeButton.title}`);
   }
-
-  function collectParagraphs(base, fragments) {
-    const root = base.root;
-    const document = root.ownerDocument;
-    const index = fragments.buildTextIndex(root);
-    const cuts = new Set([0, index.text.length]);
-    const owners = new WeakMap();
-    let previous = null;
-    let previousNode = null;
-    const positions = [];
-    // Physical paragraphs remain separate, including unnumbered quotations.
-    // Inline markup does not introduce a boundary. No document nodes are edited.
-    for (let i = 0; i < index.points.length; i += 1) {
-      const point = index.points[i];
-      if (!point || point.node === previousNode) continue;
-      previousNode = point.node;
-      positions.push({ point, offset: i });
-      let owner = owners.get(point.node);
-      if (!owner) {
-        owner = point.node.parentElement.closest(BLOCK) || root;
-        owners.set(point.node, owner);
-      }
-      if (previous && owner !== previous) cuts.add(i);
-      previous = owner;
-    }
-    // Older CanLII documents can expose standalone anchors instead of <p> tags.
-    for (const marker of base.nativeNodes || []) {
-      if (marker.kind !== 'paragraph' || !root.contains(marker.element)) continue;
-      const boundary = document.createRange();
-      boundary.setStartBefore(marker.element);
-      boundary.collapse(true);
-      let low = 0;
-      let high = positions.length;
-      while (low < high) {
-        const mid = (low + high) >>> 1;
-        const { point } = positions[mid];
-        if (boundary.comparePoint(point.node, point.start) < 0) low = mid + 1;
-        else high = mid;
-      }
-      if (low < positions.length) cuts.add(positions[low].offset);
-    }
-    const sorted = Array.from(cuts).sort((a, b) => a - b);
-    const paragraphs = [];
-    for (let i = 0; i < sorted.length - 1; i += 1) {
-      const start = sorted[i];
-      const text = index.text.slice(start, sorted[i + 1]);
-      if (text.trim()) paragraphs.push({ text, start, index });
-    }
-    return paragraphs;
+  function tell(text, error = false) { status.textContent = text; status.classList.toggle('error', error); }
+  async function send(message) {
+    const reply = await chrome.runtime.sendMessage(message);
+    if (!reply?.ok) throw new Error(reply?.message || 'Extension unavailable. Reload this page after updating Pinpointer.');
+    return reply;
   }
-
-  function domRange(document, paragraph, hit) {
-    const points = paragraph.index.points;
-    let start = paragraph.start + hit.start;
-    let end = paragraph.start + hit.end - 1;
-    while (start <= end && !points[start]) start += 1;
-    while (end >= start && !points[end]) end -= 1;
-    if (start > end || !points[start].node.isConnected || !points[end].node.isConnected) return null;
-    const range = document.createRange();
-    range.setStart(points[start].node, points[start].start);
-    range.setEnd(points[end].node, points[end].end);
-    return range;
+  function toggleMode() {
+    mode = mode === 'p' ? 's' : 'p'; query = core.switchScope(input.value, mode); input.value = query;
+    label(); schedule(0); input.focus({ preventScroll: true });
   }
-
-  function install(document, location) {
-    if (!['canlii.org', 'www.canlii.org'].includes(location.hostname.toLowerCase())) return;
-    if (document.getElementById('legal-pinpointer-find')) return;
-    const view = document.defaultView;
-    let panel, input, modeButton, status, previousButton, nextButton;
-    let open = false, mode = 'p', current = -1, results = [], paragraphs = [];
-    let root = null, observer = null, dirty = true, timer = 0, returnFocus = null;
-    const locale = /^fr\b/i.test(document.documentElement.lang) ? 'fr' : 'en';
-
-    function clearHighlights() {
-      for (const name of HIGHLIGHTS) view.CSS?.highlights?.delete(name);
-    }
-
-    function make(tag, className, text, parent) {
-      const element = document.createElement(tag);
-      element.className = className;
-      if (text) element.textContent = text;
-      parent.appendChild(element);
-      return element;
-    }
-
-    function updateMode() {
-      modeButton.textContent = `/${mode}`;
-      modeButton.setAttribute('aria-label', `${mode === 'p' ? 'Same paragraph' : 'Same sentence'}; switch mode`);
-      input.placeholder = mode === 'p' ? 'Terms in the same paragraph' : 'Terms in the same sentence';
-    }
-
-    function showCurrent(scroll = true) {
-      const result = results[current];
-      previousButton.disabled = nextButton.disabled = !result;
-      view.CSS?.highlights?.delete(HIGHLIGHTS[1]);
-      if (!result) return;
-      const active = new view.Highlight();
-      active.priority = 2;
-      for (const hit of result.hits) {
-        const range = domRange(document, result.paragraph, hit);
-        if (range) active.add(range);
-      }
-      view.CSS.highlights.set(HIGHLIGHTS[1], active);
-      status.textContent = `${current + 1} of ${results.length} ${mode === 'p' ? 'paragraph' : 'sentence'}${results.length === 1 ? '' : 's'}`;
-      const first = active.values().next().value;
-      if (scroll && first) {
-        const rect = first.getBoundingClientRect();
-        view.scrollBy({ top: rect.top - Math.max(140, view.innerHeight / 3), behavior: 'instant' });
-      }
-    }
-
-    function refreshIndex() {
-      const base = global.LegalPinpointerProviders.inspectCanlii(document, location);
-      if (!base?.root || base.root === document.body || !base.root.isConnected) {
-        throw new Error('No CanLII document text found on this page.');
-      }
-      root = base.root;
-      paragraphs = collectParagraphs(base, global.LegalPinpointerTextFragments);
-      dirty = false;
-      observer?.disconnect();
-      observer = new view.MutationObserver(() => {
-        dirty = true;
-        clearHighlights();
-        schedule();
-      });
-      observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-hidden', 'class', 'style'] });
-    }
-
-    function search(scroll = true) {
-      view.clearTimeout(timer);
-      timer = 0;
-      if (!open) return;
-      clearHighlights();
-      results = [];
-      current = -1;
-      previousButton.disabled = nextButton.disabled = true;
-      input.removeAttribute('aria-invalid');
-      try {
-        const parsed = parseQuery(input.value);
-        if (parsed.mode) mode = parsed.mode;
-        updateMode();
-        if (!parsed.terms.length) { status.textContent = 'Enter words or "quoted phrases"; trailing * matches word endings.'; return; }
-        if (!view.CSS?.highlights || !view.Highlight) throw new Error('Update Chrome to use in-page search highlighting.');
-        if (dirty || !root?.isConnected) refreshIndex();
-        results = searchParagraphs(paragraphs, parsed, mode, locale);
-        if (!results.length) { status.textContent = `No matching ${mode === 'p' ? 'paragraphs' : 'sentences'}`; return; }
-        const all = new view.Highlight();
-        for (const result of results) {
-          for (const hit of result.hits) {
-            const range = domRange(document, result.paragraph, hit);
-            if (range) all.add(range);
-          }
-        }
-        view.CSS.highlights.set(HIGHLIGHTS[0], all);
-        current = 0;
-        showCurrent(scroll);
-      } catch (error) {
-        clearHighlights();
-        results = [];
-        current = -1;
-        input.setAttribute('aria-invalid', 'true');
-        status.textContent = error.message || 'Search could not read this document.';
-      }
-    }
-
-    function schedule() {
-      view.clearTimeout(timer);
-      timer = view.setTimeout(() => search(), 100);
-    }
-
-    function toggleMode() {
-      mode = mode === 'p' ? 's' : 'p';
-      // Update explicit operators too, but never text inside a quoted phrase.
-      input.value = input.value.replace(/[“”]/g, '"').replace(/"[^"\n]*"|(?:^|\s)\/[ps](?=\s|$)/gi, token => token.startsWith('"') ? token : token.replace(/\/[ps]$/i, `/${mode}`));
-      search();
-      input.focus({ preventScroll: true });
-    }
-
-    function move(delta) {
-      if (timer || dirty || !root?.isConnected) { search(); return; }
-      if (!results.length) return;
-      current = (current + delta + results.length) % results.length;
-      showCurrent();
-    }
-
-    function close() {
-      const restoreFocus = panel.contains(document.activeElement);
-      open = false;
-      panel.hidden = true;
-      view.clearTimeout(timer);
-      timer = 0;
-      observer?.disconnect();
-      clearHighlights();
-      results = [];
-      paragraphs = [];
-      root = null;
-      dirty = true;
-      if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
-    }
-
-    function show() {
-      if (!panel) {
-        panel = make('section', 'legal-pinpointer-find', '', document.documentElement);
-        panel.id = 'legal-pinpointer-find';
-        panel.setAttribute('role', 'dialog');
-        panel.setAttribute('aria-label', 'Legal Pinpointer find in page');
-        const row = make('div', 'legal-pinpointer-find__row', '', panel);
-        input = make('input', 'legal-pinpointer-find__input', '', row);
-        input.type = 'text';
-        input.maxLength = 2048;
-        input.autocomplete = 'off';
-        input.spellcheck = false;
-        input.setAttribute('aria-label', 'Find terms in this CanLII document');
-        input.setAttribute('aria-describedby', 'legal-pinpointer-find-status legal-pinpointer-find-help');
-        modeButton = make('button', 'legal-pinpointer-find__mode', '/p', row);
-        previousButton = make('button', 'legal-pinpointer-find__button', '↑', row);
-        nextButton = make('button', 'legal-pinpointer-find__button', '↓', row);
-        const dismiss = make('button', 'legal-pinpointer-find__button', '×', row);
-        for (const [button, label, action] of [
-          [modeButton, 'Switch paragraph/sentence mode (Tab)', toggleMode],
-          [previousButton, 'Previous match (Shift+Enter)', () => move(-1)],
-          [nextButton, 'Next match (Enter)', () => move(1)],
-          [dismiss, 'Close (Escape)', close]
-        ]) {
-          button.type = 'button';
-          button.title = label;
-          button.setAttribute('aria-label', label);
-          button.addEventListener('click', action);
-        }
-        status = make('div', 'legal-pinpointer-find__status', '', panel);
-        status.id = 'legal-pinpointer-find-status';
-        status.setAttribute('role', 'status');
-        status.setAttribute('aria-live', 'polite');
-        const help = make('div', 'legal-pinpointer-find__help', 'Tab: /p ↔ /s · Enter: next · Shift+Enter: previous · Esc: close', panel);
-        help.id = 'legal-pinpointer-find-help';
-        input.addEventListener('input', schedule);
-      }
-      if (!open) returnFocus = document.activeElement;
-      open = true;
-      panel.hidden = false;
-      updateMode();
-      search(false);
-      input.focus({ preventScroll: true });
-      input.select();
-    }
-
-    document.addEventListener('keydown', event => {
-      if (event.isComposing) return;
-      const shortcut = event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 's';
-      const inside = open && panel.contains(event.target);
-      let action = null;
-      if (shortcut) action = show;
-      else if (open && event.key === 'Escape') action = close;
-      else if (inside && !event.ctrlKey && !event.altKey && !event.metaKey) {
-        if (event.key === 'Tab' && !event.shiftKey && event.target === input) action = toggleMode;
-        if (event.key === 'Enter' && event.target === input) action = () => move(event.shiftKey ? -1 : 1);
-      }
-      if (!action) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (!event.repeat) action();
-    }, true);
+  function toggleScope() { scope = scopes[(scopes.indexOf(scope) + 1) % scopes.length]; label(); schedule(0); input.focus({ preventScroll: true }); }
+  function schedule(delay = 140) {
+    clearTimeout(timer); sequence++; busy = true; scrubbing = false; current = -1;
+    preview.hidden = true; page.clearPaint(); tell('Searching…');
+    const token = sequence; timer = setTimeout(() => search(token), delay);
   }
-
-  const api = { parseQuery, sentenceSpans, searchParagraphs, collectParagraphs, domRange, install };
-  global.LegalPinpointerFind = api;
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else if (global.document) install(global.document, global.location);
+  async function search(token) {
+    try {
+      const compiled = core.compile(input.value, mode); mode = compiled.mode; label();
+      const response = await send({ type: 'SONAR_SEARCH', query: input.value, mode, scope, sequence: token });
+      if (!opened || token !== sequence || response.stale) return;
+      result = response; busy = false; current = result.results.length ? 0 : -1;
+      const unit = mode === 'p' ? 'paragraphs' : 'sentences';
+      tell(!input.value.trim() ? 'Enter words or "quoted phrases"; trailing * matches word endings.' :
+        `${result.results.length}${result.limited ? '+' : ''} matching ${unit} · ${result.searched}/${result.total} tabs searched` +
+        (result.skipped.length ? ` · ${result.skipped.length} skipped` : '') + (result.limited ? ' · Partial search / result limit.' : '') +
+        (result.note ? ` · ${result.note}` : ''));
+      skipped.replaceChildren(); skipped.hidden = !result.skipped.length;
+      if (result.skipped.length) {
+        skipped.append(make('summary', 'Skipped tabs — details'));
+        const list = make('ul'); for (const item of result.skipped) list.append(make('li', `${item.title}: ${item.reason}`)); skipped.append(list);
+      }
+      render();
+    } catch (error) {
+      if (!opened || token !== sequence) return;
+      busy = false; current = -1; preview.hidden = true; skipped.hidden = true; page.clearPaint(); tell(error.message, true);
+    }
+  }
+  function render() {
+    const selected = result?.results[current]; preview.hidden = !selected;
+    if (!selected) return;
+    let site = ''; try { site = new URL(selected.url).hostname; } catch (_) { /* Display only. */ }
+    title.textContent = `${selected.title} · ${selected.locator || site || 'Page text'}`;
+    const quote = shadow.querySelector('#quote'); quote.replaceChildren();
+    if (selected.leading) quote.append(document.createTextNode('…'));
+    let offset = 0;
+    for (const mark of selected.marks) {
+      quote.append(document.createTextNode(selected.preview.slice(offset, mark.start)));
+      quote.append(make('mark', selected.preview.slice(mark.start, mark.end))); offset = mark.end;
+    }
+    quote.append(document.createTextNode(selected.preview.slice(offset))); if (selected.trailing) quote.append(document.createTextNode('…'));
+    counter.textContent = `${current + 1} / ${result.results.length}`;
+    if (scope === 'current') {
+      try { page.preview(result.ticket, selected.index, true); } catch (error) { tell(error.message, true); }
+    }
+  }
+  function move(delta) {
+    if (busy || !result?.results.length) return;
+    current = (current + delta + result.results.length) % result.results.length; render();
+  }
+  async function openSelected() {
+    if (busy || current < 0 || !result) return;
+    const token = sequence;
+    try {
+      await send({ type: 'SONAR_GO', session: result.session, ticket: result.ticket, id: current });
+    } catch (error) { if (token === sequence && opened) tell(error.message, true); }
+  }
+  function onKey(event) {
+    if (!opened || event.isComposing) return;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); close(); return; }
+    if (!event.composedPath().includes(host)) return;
+    // Isolate the search input from Pinpointer's source-copy shortcuts, not native editing.
+    event.stopImmediatePropagation();
+    if (event.key === 'F6') {
+      event.preventDefault(); const index = controls.indexOf(shadow.activeElement);
+      controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus();
+    } else if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault(); event.shiftKey ? toggleScope() : toggleMode();
+    } else if (event.key === 'Enter' && shadow.activeElement === input && !event.altKey && !event.metaKey) {
+      event.preventDefault(); event.ctrlKey ? openSelected() : move(event.shiftKey ? -1 : 1);
+    }
+  }
+  function onWheel(event) {
+    if (!opened || !event.altKey || event.ctrlKey || busy || !result?.results.length || !event.deltaY) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (performance.now() - lastWheel < 85) return;
+    lastWheel = performance.now(); scrubbing = true; move(event.deltaY > 0 ? 1 : -1);
+  }
+  function onKeyUp(event) {
+    if (event.key === 'Alt' && scrubbing) { event.preventDefault(); event.stopImmediatePropagation(); scrubbing = false; openSelected(); }
+  }
+  function onBlur() { scrubbing = false; }
+  function focus() { if (opened) { input.focus({ preventScroll: true }); } }
+  function open() {
+    if (opened) { focus(); input.select(); return; }
+    if (!host) setup();
+    focusBefore = document.activeElement; opened = true; result = null;
+    input.value = query; label(); document.documentElement.append(host);
+    try { host.showPopover(); } catch (_) { /* Fixed-position fallback. */ }
+    focus(); input.select();
+    window.addEventListener('keydown', onKey, true); window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false }); window.addEventListener('blur', onBlur);
+    page.setOnChange(() => { if (opened && scope === 'current') schedule(220); });
+    schedule(0);
+  }
+  function close() {
+    if (!opened) return;
+    opened = false; sequence++; clearTimeout(timer); scrubbing = false; page.setOnChange(null); page.clearPaint();
+    host.remove(); window.removeEventListener('keydown', onKey, true); window.removeEventListener('keyup', onKeyUp, true);
+    window.removeEventListener('wheel', onWheel, true); window.removeEventListener('blur', onBlur);
+    send({ type: 'SONAR_CLOSE', sequence }).catch(() => {});
+    result = null; if (focusBefore?.isConnected) focusBefore.focus({ preventScroll: true });
+  }
+  global.LegalPinpointerFind = { open, close, focus };
 })(globalThis);

@@ -9,6 +9,9 @@
 <body>
   <main>
     <h1>Legal Pinpointer</h1>
+    <div class="actions" aria-label="Page search">
+      <button id="find-in-page" type="button">Tab Sonar / Find · Ctrl+Shift+S</button>
+    </div>
     <p id="document-summary" class="summary">Checking this document…</p>
 
     <div class="actions" aria-label="Copy actions">
@@ -37,6 +40,7 @@
     <details>
       <summary>Keyboard shortcuts</summary>
       <dl>
+        <div><dt>Ctrl+Shift+S</dt><dd>Tab Sonar / Find; Tab switches /p and /s</dd></div>
         <div><dt>Ctrl+X</dt><dd>Copy pinpoint</dd></div>
         <div><dt>Ctrl+Shift+X</dt><dd>Copy with selected quote</dd></div>
         <div><dt>Alt+X</dt><dd>Copy citation</dd></div>
@@ -47,5 +51,6 @@
     <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
   </main>
   <script src="popup.js"></script>
+  <script src="popup-find.js"></script>
 </body>
 </html>

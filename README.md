@@ -26,15 +26,24 @@ A current-page text-fragment URL in the clipboard has precedence over both selec
 
 Selections include every structural unit crossed. Rich clipboard output links the two ends of a collapsed range separately, such as `32-33` or `7(2)-(4)`. Quote output preserves a small safe set of inline formatting and emits real paragraph blocks, with one newline between units in plain text. Provisions use hanging paragraph indents so explicit and word-processor-wrapped continuation lines remain aligned beneath the provision text. An ellipsis is added only after the first marker when the selection omits substantive opening text; trailing ellipses are never emitted.
 
-## Find within a CanLII document
+## Tab Sonar — proximity find on any website
 
-**Ctrl+Shift+S** opens a compact find-in-page dialog. Type `privileg* waiv*`, or use explicit syntax such as `privilege /p waiver`. **Tab**, while typing in the search field, switches between **/p** (all terms in one paragraph) and **/s** (all terms in one sentence), retaining the query. The mode button does the same. **Enter** / **Shift+Enter** move to the next / previous matching unit and wrap; **Escape** closes the dialog and clears its highlights. Shift+Tab retains ordinary focus navigation, and input Cut/Copy shortcuts remain native.
+**Ctrl+Shift+S** opens the same finder on ordinary webpages, including CanLII,
+Lexis, Westlaw, and non-legal sites. **Tab** cycles `/p` (same paragraph) and
+`/s` (same sentence). **Shift+Tab** cycles **Current tab → All tabs → Current
+tab group**. Start with `privileg* waiv*`; quoted phrases and explicit `/p` or
+`/s` also work. **Enter / Shift+Enter** preview the next / previous passage;
+**Ctrl+Enter** opens it. Hold **Alt** and turn the wheel to preview passages,
+then release Alt to open the selected one. A return button takes you back to
+the search and restores the destination's previous scroll position.
 
-Words are case-insensitive, whole-word matches in either order. Double quotes group an exact phrase; a trailing `*` matches word endings. Spaces combine all terms using the selected mode. Mixed proximity operators, Boolean operators, and arbitrary word-distance operators are not supported. The counter counts matching paragraphs or sentences, not combinations of word occurrences.
-
-Search uses the existing CanLII document adapter and text-to-DOM mapper. Physical paragraphs and unnumbered block quotations remain separate; standalone native paragraph anchors provide additional boundaries on older pages. Inline emphasis and line breaks do not by themselves split a paragraph. Sentence detection uses English/French browser segmentation with common legal-abbreviation guards; it is not an exact reproduction of CanLII's server-side search engine. Poorly structured HTML or unusual abbreviations can affect boundaries. Native PDF viewers and scans are not searched.
-
-The page stays intact: highlights use CSS text ranges rather than replacing document nodes or the user's selection. Queries stay in memory on the current page; there are no new permissions, dependencies, network calls, or saved query history. The index is built on demand and refreshed after document edits while the dialog is open. Existing citation/quote-copy behavior is unchanged. After updating an unpacked installation, reload the extension and the CanLII page.
+This replaces the earlier CanLII-only finder; it is not a separate extension.
+All tabs means all windows in the same normal/incognito context; an ungrouped
+tab's Group scope is empty, not all ungrouped tabs. Search remains local and
+on demand, with explicit skipped-tab and partial-result counts. Cross-tab
+search requires HTTP/HTTPS site access, declared in the manifest; restrict
+site access in Chrome to narrow what it can search. Read [FIND.md](FIND.md)
+for controls, permissions, boundaries, and validation commands.
 
 ## Structure and citation policy
 
@@ -59,9 +68,19 @@ The manifest requests only:
 - `clipboardRead`, to recognize a copied current-page text-fragment URL;
 - `clipboardWrite`, for plain and rich clipboard output;
 - `storage`, for the pinpoint-style setting;
-- exact content-script matches for CanLII documents, Lexis document pages, and Westlaw document pages.
+- `activeTab` and `scripting`, for user-invoked search injection;
+- HTTP/HTTPS host access, to search other open tabs without activating them;
+- exact automatic content-script matches for CanLII documents, Lexis document
+  pages, and Westlaw document pages. The citation-copy surface is unchanged.
 
-Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast. Find actions report in the find dialog.
+Search queries are not written to local/sync storage. Bounded result previews
+and navigation handles live in Chrome's RAM-only, extension-private session
+storage. Closing the finder removes its session; abandoned session records
+older than 15 minutes are pruned when the finder next opens. Page caches have
+a separate 15-minute expiry. There is no network search, telemetry, or
+background crawling.
+
+Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast; search feedback stays in the finder.
 
 ## Maintenance
 
@@ -93,4 +112,4 @@ npm test
 npm run test:browser
 ```
 
-The browser tests cover full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, non-duplicated toast feedback, and the CanLII find dialog's matching, keyboard, mutation, and cleanup workflows. Set `CHROME_PATH` when Chrome is not at the launcher's default Windows path. The find fixture isolates its UI with a provider-model stub and the real text mapper; it does not validate live provider layouts or an installed extension. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.
+The browser test covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. `tools/inspect-capture.cjs` runs the real provider adapter, DOM bridge, and packaged Rust engine over a saved HTML/MHTML page without copying it into this project. `tools/audit-canlii-cache.ps1` audits a supplied CanLII cache with incremental reports.
