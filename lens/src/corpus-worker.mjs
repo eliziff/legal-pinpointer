@@ -5,7 +5,14 @@ let db,conn,current=null;const liveFiles=new Map();let lane=Promise.resolve();
 const check=job=>{if(job?.cancelled)throw new DOMException('Cancelled','AbortError');};
 const notify=(job,info)=>postMessage({event:true,id:job.id,...info});
 const identity=async s=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(x=>x.toString(16).padStart(2,'0')).join('');
-async function init(assets){const w=new Worker(assets['duckdb-browser-eh.worker.js']);db=new duckdb.AsyncDuckDB(new duckdb.VoidLogger(),w);await db.instantiate(assets['duckdb-eh.wasm']);conn=await db.connect();await conn.query("SET memory_limit='512MB'; SET threads=1; SET preserve_insertion_order=true; SET autoinstall_known_extensions=false; SET autoload_known_extensions=false;");return all('files');}
+async function init(assets){
+  const w=new Worker(assets['duckdb-browser-eh.worker.js']);db=new duckdb.AsyncDuckDB(new duckdb.VoidLogger(),w);
+  await db.instantiate(assets['duckdb-eh.wasm']);conn=await db.connect();
+  const repository=new URL('.',assets['duckdb-eh.wasm']).href.replace(/\/$/,'');
+  await conn.query(`SET custom_extension_repository=${sqlValue(repository)}; LOAD parquet;`);
+  await conn.query("SET memory_limit='512MB'; SET threads=1; SET preserve_insertion_order=true; SET autoinstall_known_extensions=false; SET autoload_known_extensions=false;");
+  return all('files');
+}
 function schemaProjection(names,path){
   const map=new Map(names.map(n=>[n.toLowerCase(),n]));const field=(...keys)=>{const found=keys.map(k=>map.get(k.toLowerCase())).filter(Boolean);return found.length?`COALESCE(${found.map(x=>`NULLIF(CAST(${sqlName(x)} AS VARCHAR),'')`).join(',')},'')`:"''";};
   let en=field('unofficial_text_en','text_en'),fr=field('unofficial_text_fr','text_fr');
@@ -64,7 +71,6 @@ async function search({query,queryId,filters},job){
     check(job);let opened=false;
     try{
       file=await register(file);opened=true;const candidates=await termSet(compiled.tree,file);
-      // Row IDs avoid a giant IN list; every unindexed tail remains searchable.
       await conn.query('CREATE OR REPLACE TEMP TABLE chosen (row_id BIGINT)');
       if(candidates!==null)for(let at=0,ids=[...candidates];at<ids.length;at+=2048){check(job);await conn.query('INSERT INTO chosen VALUES '+ids.slice(at,at+2048).map(id=>`(${id})`).join(','));}
       const where=candidates===null?'TRUE':`(file_row_number IN (SELECT row_id FROM chosen)${file.indexed?'':` OR file_row_number>=${file.processed}`})`;

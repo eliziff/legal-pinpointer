@@ -21,10 +21,29 @@ jobs:
         working-directory: lens
       - run: npm test
         working-directory: lens
+      - run: tar -czf /tmp/lens-node-deps.tar.gz -C lens node_modules package-lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lens-build-dependencies
+          path: /tmp/lens-node-deps.tar.gz
+          compression-level: 0
+          retention-days: 3
       - run: npm run build
         working-directory: lens
         env:
           NODE_OPTIONS: --max-old-space-size=6144
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lens-extension-package
+          path: lens/dist/legal-pinpointer-lens.zip
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: event-strip-html
+          path: lens/dist/event-strip.html
+          compression-level: 1
+          retention-days: 7
       - run: python -m pip install pyarrow==21.0.0 pillow==11.3.0 && python lens/test/fixtures.py
       - run: npx playwright install --with-deps chromium
         working-directory: lens
