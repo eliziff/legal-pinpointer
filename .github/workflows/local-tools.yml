@@ -23,9 +23,15 @@ jobs:
         run: npm install --prefix .build --ignore-scripts --no-audit --no-fund @duckdb/duckdb-wasm@1.30.0 onnxruntime-web@1.22.0 pdfjs-dist@4.10.38 @huggingface/transformers@3.7.2 tesseract.js@6.0.1 tesseract.js-core@6.0.0 @tesseract.js-data/eng@1.0.0 @tesseract.js-data/fra@1.0.0 esbuild@0.25.9 postal-mime@2.4.3 jszip@3.10.1
       - name: Assemble and hash assets
         run: node tools/vendor-assets.mjs
+      - name: Validate dynamic model choices
+        run: |
+          python -m pip install onnx==1.19.1 onnxruntime==1.23.2 tokenizers==0.22.1
+          python local-tools/repair-model.py
       - name: Archive source snapshot
+        if: always()
         run: git archive HEAD -o vendor/repository.tar
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: local-runtime-assets
           path: |
