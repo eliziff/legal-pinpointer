@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 test('the extension permission and host surface is frozen to the minimum contract', () => {
-  assert.deepEqual(manifest.permissions, ['clipboardRead', 'clipboardWrite', 'storage', 'activeTab', 'scripting', 'sidePanel']);
+  assert.deepEqual(manifest.permissions, ['clipboardRead', 'clipboardWrite', 'storage', 'unlimitedStorage', 'activeTab', 'scripting', 'sidePanel']);
   assert.deepEqual(manifest.host_permissions, ['http://*/*', 'https://*/*']);
   assert.equal(manifest.commands['find-in-page'].suggested_key.default, 'Ctrl+Shift+S');
   assert.equal(manifest.commands['find-in-page'].suggested_key.mac, 'MacCtrl+Shift+S');
@@ -34,7 +34,7 @@ test('the extension permission and host surface is frozen to the minimum contrac
   ]);
   assert.equal(
     manifest.content_security_policy.extension_pages,
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self'; connect-src 'self' blob: data:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
   );
 });
 

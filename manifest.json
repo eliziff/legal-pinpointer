@@ -12,7 +12,7 @@
     "js": ["canlii-courts.js", "core.js", "text-fragments.js", "providers.js", "content.js"],
     "css": ["content.css"], "run_at": "document_idle"
   }],
-  "content_security_policy": {"extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' blob: data:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"},
+  "content_security_policy": {"extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self'; connect-src 'self' blob: data:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"},
   "commands": {
     "find-in-page": {"suggested_key": {"default": "Ctrl+Shift+S", "mac": "MacCtrl+Shift+S"}, "description": "Tab Sonar: find in page, all tabs or current tab group"},
     "canlii-text-search": {"suggested_key": {"default": "Alt+Shift+C", "mac": "Alt+Shift+C"}, "description": "CanLII document text search (including from new tabs)"}
