@@ -22,15 +22,19 @@ function pack(state,q) {
 }
 async function initialize(assets) {
   postMessage({status:'Loading local Laya weights…'});
-  const json=async key=>{const r=await fetch(assets[key]);if(!r.ok)throw new Error(`Missing packaged asset: ${key}`);return r.json();};
+  const read=async key=>{const item=assets[key];if(item instanceof Blob)return item;try{const r=await fetch(item);if(!r.ok)throw new Error(String(r.status));return await r.blob();}catch(e){throw new Error(`Cannot read packaged ${key}: ${e.message}`);}};
+  const json=async key=>JSON.parse(await(await read(key)).text());
   const [tokenizer,tc,c]=await Promise.all(['tokenizer.json','tokenizer_config.json','rl_agent_config.json'].map(json));config=c;
   tok=new Tokenizer(tokenizer,tc);
   const token=(name,fallback)=>typeof tc[name]==='string'?tc[name]:tc[name]?.content||fallback;
   const special=(name,fallback)=>{const text=token(name,fallback),id=tok.token_to_id(text);if(id==null)throw new Error(`Missing ${name} in packaged tokenizer`);return [text,id];};
   const mask=special('mask_token','[MASK]');ids={cls:special('cls_token','[CLS]')[1],sep:special('sep_token','[SEP]')[1],pad:special('pad_token','[PAD]')[1],mask:mask[1],maskText:mask[0]};
   ort.env.wasm.numThreads=1;ort.env.wasm.proxy=false;
-  ort.env.wasm.wasmPaths={mjs:assets['ort-wasm-simd-threaded.mjs'],wasm:assets['ort-wasm-simd-threaded.wasm']};
-  const bytes=new Uint8Array(await (await fetch(assets['model.onnx'])).arrayBuffer());
+  const runtime=assets['ort-wasm-simd-threaded.mjs'];
+  const runtimeURL=runtime instanceof Blob?URL.createObjectURL(runtime):runtime;
+  ort.env.wasm.wasmPaths={mjs:runtimeURL};
+  ort.env.wasm.wasmBinary=await(await read('ort-wasm-simd-threaded.wasm')).arrayBuffer();
+  const bytes=new Uint8Array(await(await read('model.onnx')).arrayBuffer());
   session=await ort.InferenceSession.create(bytes,{executionProviders:['wasm'],graphOptimizationLevel:'basic'});
   for(const key of ['input_ids','attention_mask','marker_pos','marker_mask','qtype'])if(!session.inputNames.includes(key))throw new Error(`Incompatible model: missing ${key}`);
   postMessage({status:'Laya multilingual · local INT8 · ready'});return {model:'Laya multilingual INT8',maxTokens:config.max_len};
@@ -50,4 +54,4 @@ async function decide(state,q) {
   cache.set(key,result);if(cache.size>512)cache.delete(cache.keys().next().value);
   for(const tensor of Object.values(feeds))tensor.dispose?.();for(const tensor of Object.values(out))tensor.dispose?.();return result;
 }
-self.onmessage=({data})=>{lane=lane.catch(()=>{}).then(async()=>{try{const result=data.type==='init'?await initialize(data.assets):await decide(data.state,data.question);postMessage({id:data.id,result});}catch(e){postMessage({id:data.id,error:e.message||String(e)});}});};
+self.onmessage=({data})=>{lane=lane.catch(()=>{}).then(async()=>{try{const result=data.type==='init'?await initialize(data.assets):await decide(data.state,data.question);postMessage({id:data.id,result});}catch(e){postMessage({id:data.id,error:e.stack||e.message||String(e)});}});};
