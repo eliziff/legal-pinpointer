@@ -1,0 +1,41 @@
+name: Local legal tools
+on:
+  push:
+    branches: [feat/local-lens-event-strip]
+    paths: ['local-tools/**', 'tools/vendor-assets.mjs', '.github/workflows/local-tools.yml', 'manifest.json', 'sonar.html', 'sonar-launcher.js']
+  pull_request:
+    paths: ['local-tools/**', 'tools/vendor-assets.mjs', '.github/workflows/local-tools.yml']
+permissions:
+  contents: read
+concurrency:
+  group: local-tools-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned build dependencies
+        run: npm install --prefix .build --ignore-scripts --no-audit --no-fund @duckdb/duckdb-wasm@1.30.0 onnxruntime-web@1.22.0 pdfjs-dist@4.10.38 @huggingface/transformers@3.7.2 tesseract.js@6.0.1 tesseract.js-core@6.0.0 @tesseract.js-data/eng@1.0.0 @tesseract.js-data/fra@1.0.0 esbuild@0.25.9 postal-mime@2.4.3 jszip@3.10.1
+      - name: Assemble and hash assets
+        run: node tools/vendor-assets.mjs
+      - name: Archive source snapshot
+        run: git archive HEAD -o vendor/repository.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-runtime-assets
+          path: |
+            vendor/**
+            !vendor/laya_int8.onnx
+          compression-level: 6
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: laya-weights
+          path: vendor/laya_int8.onnx
+          compression-level: 1
+          retention-days: 7
