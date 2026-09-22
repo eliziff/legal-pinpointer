@@ -1,0 +1,59 @@
+name: Event Strip general chronology
+on:
+  push:
+    branches: [codex/pinpointer-lens-event-strip]
+    paths: ['lens/src/chronology.mjs', 'lens/src/event-strip*', 'lens/src/documents.mjs', 'lens/src/zip.mjs', 'lens/src/assets.mjs', 'lens/src/decision-worker.mjs', 'lens/test/chronology*', 'lens/event-build.mjs', '.github/workflows/event-strip.yml']
+permissions:
+  contents: write
+concurrency:
+  group: event-strip-chronology
+  cancel-in-progress: true
+jobs:
+  chronology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: lens
+      - name: Retrieve the pinned, previously published offline assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download lens-preview-13 --pattern legal-pinpointer-lens.zip --dir /tmp/event-assets
+          echo '08c1001a66898ab5f60b5470759b14b66c006a5413011d73d659da85b43220ec  /tmp/event-assets/legal-pinpointer-lens.zip' | sha256sum -c -
+          unzip -q /tmp/event-assets/legal-pinpointer-lens.zip 'lens-dist/assets/*'
+          echo 'd389d2304822a59569387e257067360a84e016aed43b407f1cfde87dadb7e485  lens-dist/assets/model.onnx' | sha256sum -c -
+      - run: npm test
+        working-directory: lens
+      - name: General event discovery, dates and matching with the actual model
+        run: node test/chronology-runtime.mjs
+        working-directory: lens
+      - name: Build the one-file chronology product
+        run: node event-build.mjs
+        working-directory: lens
+      - run: python -m pip install pyarrow==21.0.0 pillow==11.3.0 && python lens/test/fixtures.py
+      - run: npx playwright install --with-deps chromium
+        working-directory: lens
+      - name: Exercise the standalone file with the real model and original files
+        run: node test/chronology-browser.mjs
+        working-directory: lens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: event-strip-chronology-evidence
+          path: |
+            lens/dist/chronology-validation.json
+            lens/dist/chronology-browser.json
+            lens/dist/chronology.png
+            lens/dist/event-build-info.json
+          if-no-files-found: ignore
+      - name: Publish experimental chronology package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="event-strip-chronology-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" lens/dist/event-strip.html lens/dist/event-SHA256SUMS.txt lens/dist/event-build-info.json lens/dist/chronology-validation.json lens/dist/chronology-browser.json lens/dist/chronology.png --target "$GITHUB_SHA" --prerelease --title "Event Strip 0.4.0 — general chronology (${GITHUB_RUN_NUMBER})" --notes 'Drop documents, make a general chronology, inspect Date / Event / Sources. Actual model and offline-browser gates passed. This release updates Event Strip only; it makes no new claim about Tab Sonar or Lens.'

@@ -1,0 +1,22 @@
+{
+  "description":"Authored general-purpose chronology cases. These are not a legal benchmark. Event descriptions must remain source-addressed and no event-type taxonomy is supplied.",
+  "sources":[
+    {"id":"project","name":"Project note.txt","language":"en","blocks":[{"id":"one","text":"Construction commenced on 3 May 2026 and was substantially complete by 18 September 2026.","locator":"Paragraph 1"}]},
+    {"id":"progress","name":"Progress note.txt","language":"en","blocks":[{"id":"one","text":"Work on the building began on 3 May 2026.","locator":"Paragraph 1"}]},
+    {"id":"inspection","name":"Inspection.txt","language":"en","blocks":[{"id":"one","text":"Jones inspected the property on 4 April 2026.","locator":"Paragraph 1"}]},
+    {"id":"undated","name":"Equipment.txt","language":"en","blocks":[{"id":"one","text":"The pump failed.","locator":"Paragraph 1"}]},
+    {"id":"header","name":"Boilerplate.txt","language":"en","blocks":[{"id":"one","text":"14 March 2026","locator":"Heading"},{"id":"two","text":"This document is confidential.","locator":"Paragraph 1"},{"id":"three","text":"Kind regards.","locator":"Signature"}]},
+    {"id":"dates","name":"Retrospective.txt","language":"en","blocks":[{"id":"one","text":"The report dated 1 May 2026 states that construction began on 3 May 2026.","locator":"Paragraph 1"}]},
+    {"id":"medical","name":"Discharge note.txt","language":"en","blocks":[{"id":"one","text":"Morgan stayed in hospital from 10 June 2026 to 12 June 2026.","locator":"Paragraph 1"}]},
+    {"id":"job","name":"Employment.txt","language":"en","blocks":[{"id":"one","text":"Patel resigned from the company on 7 July 2026.","locator":"Paragraph 1"}]},
+    {"id":"french","name":"Compte rendu.txt","language":"fr","blocks":[{"id":"one","text":"Le 8 août 2026, Dupont a rencontré Martin à Montréal.","locator":"Paragraphe 1"}]},
+    {"id":"ambiguous","name":"Payment.txt","language":"en","blocks":[{"id":"one","text":"The payment cleared on 04/05/2026.","locator":"Paragraph 1"}]},
+    {"id":"missing-year","name":"Meeting.txt","language":"en","communicated":"2026-09-22","blocks":[{"id":"one","text":"The board met on 12 March.","locator":"Paragraph 1"}]}
+  ],
+  "pairs":[
+    {"a":{"text":"Construction commenced on 3 May 2026.","date":"2026-05-03"},"b":{"text":"Work on the building began on 3 May 2026.","date":"2026-05-03"},"same":true},
+    {"a":{"text":"Jones inspected the property on 4 April 2026.","date":"2026-04-04"},"b":{"text":"Jones inspected the property on 8 April 2026.","date":"2026-04-08"},"same":false},
+    {"a":{"text":"Alice paid invoice 17 on 3 May 2026.","date":"2026-05-03"},"b":{"text":"Bob paid invoice 93 on 3 May 2026.","date":"2026-05-03"},"same":false},
+    {"a":{"text":"The recipient received the notice on 13 March 2026.","date":"2026-03-13"},"b":{"text":"The recipient did not receive the notice on 13 March 2026.","date":"2026-03-13"},"same":false}
+  ]
+}
