@@ -108,7 +108,21 @@ export async function discoverEvents(sources,catalogue,decisions,{signal,onProgr
 }
 const stop=new Set('the a an and or to of in on at by for from with was were is are has had have been it this that as its be'.split(' '));
 function terms(text){return new Set((normalized(text).match(/[\p{L}\p{N}]+/gu)||[]).filter(w=>w.length>2&&!stop.has(w)));}
-function compatible(a,b){return !(a.date&&b.date&&(a.date!==b.date||(a.dateEnd||'')!==(b.dateEnd||'')));}
+const literalCache=new WeakMap();
+function numericFacts(mention){
+  const cached=literalCache.get(mention);if(cached?.text===mention.text)return cached.value;
+  let text=mention.text;
+  for(const d of dateCandidates(text).reverse())text=text.slice(0,d.start)+' '+text.slice(d.end);
+  const value=[...new Set(text.match(/\d+(?:[.,]\d+)*/g)||[])].sort().join(' ');
+  literalCache.set(mention,{text:mention.text,value});return value;
+}
+function compatible(a,b){
+  if(a.date&&b.date&&(a.date!==b.date||(a.dateEnd||'')!==(b.dateEnd||'')))return false;
+  const x=numericFacts(a),y=numericFacts(b);
+  // A neural similarity judgment cannot override conflicting explicit invoice,
+  // account, participant or amount numbers. Missing detail alone is not conflict.
+  return !x||!y||x===y;
+}
 export async function sameEvent(a,b,decisions,signal){
   if(!compatible(a,b))return false;
   if(normalized(a.text)===normalized(b.text))return true;
