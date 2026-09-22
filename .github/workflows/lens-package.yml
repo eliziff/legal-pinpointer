@@ -1,0 +1,47 @@
+name: Pinpointer Lens offline package
+on:
+  push:
+    branches: [codex/pinpointer-lens-event-strip]
+    paths: ['lens/**', '.github/workflows/lens-package.yml', 'manifest.json', 'sonar.html', 'lens-launcher.js']
+permissions:
+  contents: write
+concurrency:
+  group: pinpointer-lens-preview
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: lens
+      - run: npm test
+        working-directory: lens
+      - run: npm run build
+        working-directory: lens
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - run: python -m pip install pyarrow==21.0.0 pillow==11.3.0 && python lens/test/fixtures.py
+      - run: npx playwright install --with-deps chromium
+        working-directory: lens
+      - run: npm run acceptance
+        working-directory: lens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pinpointer-lens-validation
+          path: |
+            lens/dist/validation.json
+            lens/dist/event-strip-preview.png
+            lens/dist/build-info.json
+          if-no-files-found: ignore
+      - name: Publish downloadable preview files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="lens-preview-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" lens/dist/event-strip.html lens/dist/legal-pinpointer-lens.zip lens/dist/SHA256SUMS.txt lens/dist/build-info.json lens/dist/validation.json lens/dist/event-strip-preview.png --target "$GITHUB_SHA" --prerelease --title "Pinpointer Lens / Event Strip preview ${GITHUB_RUN_NUMBER}" --notes "Offline build from ${GITHUB_SHA}. Both applications package their runtime and model. See validation.json for exactly what was tested."
