@@ -45,6 +45,7 @@ try{
       await lens.click('#passage .close');await lens.locator('#use-corpus').check();
       await lens.fill('#query','receipt');await lens.click('#search');await finishSearch();
       assert.equal(await lens.locator('.result').count(),4,'Two tab paragraphs plus two corpus passages');
+      await lens.bringToFront();
       await lens.screenshot({path:path.join(root,'dist/lens-preview.png'),fullPage:true});
     }finally{await source.close();}
   });
