@@ -1,6 +1,7 @@
 import { assetURL } from './assets.mjs';
 import { cancelled, compileQuery, pause } from './core.mjs';
 import { externalCopy } from './copy.mjs';
+import { loadEmbeddings, TopK } from './embeddings.mjs';
 
 export class A2AJConnector {
   constructor() { this.id='a2aj'; this.pending=new Map(); this.next=0; this.ready=null; this.worker=null; }
@@ -57,7 +58,8 @@ async function execute(tabId,documentId,method,args,bridge='LegalPinpointerLensB
 }
 
 export class TabsConnector {
-  constructor(originId) {this.id='tabs';this.originId=originId;}
+  constructor(originId) {this.id='tabs';this.originId=originId;this.embeddingPromise=null;}
+  embeddings(){return this.embeddingPromise ||= loadEmbeddings(new URL('assets/potion/',import.meta.url));}
   async search({query,exact=false,scope='all',signal,onProgress}) {
     const tabs=await chrome.tabs.query({});
     let origin=tabs.find(t=>t.id===this.originId);
@@ -95,6 +97,14 @@ export class TabsConnector {
         }
         onProgress?.({phase:'tabs',count:items.length});await pause();
       }catch(e){errors.push({path:tab.title,error:e.message});}
+    }
+    if(!exact&&items.length>96){
+      // Dense retrieval is only candidate generation: all structural units were
+      // considered, while Laya remains the relevance judge for the returned set.
+      const model=await this.embeddings(),q=model.encode(query),top=new TopK(96);
+      for(const item of items){cancelled(signal);const v=model.encode(item.text);let dot=0;for(let i=0;i<q.length;i++)dot+=q[i]*v[i];top.add({value:dot,item});}
+      const chosen=top.sorted().map(x=>x.item);
+      return {items:chosen,errors,total:items.length,more:false};
     }
     return {items,errors,total:items.length,more:false};
   }
