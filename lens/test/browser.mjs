@@ -20,8 +20,8 @@ try{
 
  await check('Tab Sonar packaged workspace actually searches an installed-extension tab',async()=>{
   const sonar=await context.newPage();await sonar.goto(`chrome-extension://${id}/sonar.html`);await sonar.waitForSelector('#query');
-  const tab=await context.newPage();await tab.goto(sourceURL);await tab.bringToFront();await sonar.bringToFront();
-  await sonar.click('#use-active');await sonar.fill('#query','fundamental breach');
+  const tab=await context.newPage();await tab.goto(sourceURL);await tab.bringToFront();
+  await sonar.evaluate(()=>document.querySelector('#use-active').click());await sonar.locator('#query').fill('fundamental breach');
   await sonar.waitForFunction(()=>document.querySelector('#summary').textContent!=='Searching…',{},{timeout:30000});
   const state=await sonar.evaluate(()=>({summary:document.querySelector('#summary').textContent,notice:document.querySelector('#notice').textContent,rows:document.querySelectorAll('#result-rows [role=option],#result-rows .result-row').length}));
   assert.doesNotMatch(state.summary,/could not/i);assert.equal(state.notice,'');assert.match(state.summary,/1 matching paragraph/);
