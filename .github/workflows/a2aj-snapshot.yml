@@ -1,0 +1,81 @@
+name: Complete local A2AJ snapshots
+on:
+  push:
+    branches: [codex/pinpointer-lens-event-strip]
+    paths: ['.github/workflows/a2aj-snapshot.yml']
+permissions:
+  contents: read
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        dataset: [canadian-case-law, canadian-laws, hansard]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyarrow==21.0.0
+      - name: Download every original Parquet file at one pinned revision
+        env:
+          DATASET: ${{ matrix.dataset }}
+        shell: python
+        run: |
+          import concurrent.futures, hashlib, json, os, pathlib, time, urllib.request, urllib.parse
+          import pyarrow.parquet as pq
+          dataset=os.environ['DATASET']; repo='a2aj/'+dataset
+          root=pathlib.Path('/tmp/A2AJ')/dataset;root.mkdir(parents=True,exist_ok=True)
+          def request(url):
+              return urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Pinpointer-local-corpus-snapshot/1.0'}),timeout=180)
+          with request('https://huggingface.co/api/datasets/'+repo) as response: info=json.load(response)
+          revision=info['sha']; entries=[]
+          url=f'https://huggingface.co/api/datasets/{repo}/tree/{revision}?recursive=true&limit=1000'
+          while url:
+              with request(url) as response:
+                  entries.extend(json.load(response)); link=response.headers.get('Link','')
+              url=next((part.split('>')[0].strip().lstrip('<') for part in link.split(',') if 'rel="next"' in part),None)
+          parquets=[e for e in entries if e['type']=='file' and e['path'].lower().endswith('.parquet')]
+          auxiliary=[e for e in entries if e['type']=='file' and pathlib.PurePosixPath(e['path']).name.lower() in ('readme.md','license','license.md','license.txt','copying','notice')]
+          assert parquets, f'No Parquet files discovered for {repo}'
+          print(json.dumps({'repository':repo,'revision':revision,'files':len(parquets),'bytes':sum(e['size'] for e in parquets)},indent=2),flush=True)
+          def download(entry):
+              rel=pathlib.PurePosixPath(entry['path']);assert '..' not in rel.parts and not rel.is_absolute()
+              target=root/rel;target.parent.mkdir(parents=True,exist_ok=True)
+              url=f'https://huggingface.co/datasets/{repo}/resolve/{revision}/'+urllib.parse.quote(str(rel))+'?download=true'
+              error=None
+              for attempt in range(4):
+                  try:
+                      sha=hashlib.sha256();size=0
+                      with request(url+f'&attempt={attempt}') as response,target.with_suffix(target.suffix+'.tmp').open('wb') as output:
+                          while chunk:=response.read(4*1024*1024):output.write(chunk);sha.update(chunk);size+=len(chunk)
+                      assert size==entry['size'], f'Size mismatch {rel}: {size} != {entry["size"]}'
+                      expected=entry.get('lfs',{}).get('oid');actual=sha.hexdigest()
+                      if expected and len(expected)==64:assert actual==expected, f'Hash mismatch {rel}'
+                      target.with_suffix(target.suffix+'.tmp').replace(target)
+                      result={'path':str(rel),'bytes':size,'sha256':actual,'upstream_sha256':expected,'source':url}
+                      if target.suffix.lower()=='.parquet':
+                          meta=pq.ParquetFile(target);result.update(rows=meta.metadata.num_rows,row_groups=meta.metadata.num_row_groups,columns=meta.schema_arrow.names)
+                      print('VERIFIED',str(rel),size,flush=True);return result
+                  except Exception as e:error=e;time.sleep(2**attempt)
+              raise error
+          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool: files=list(pool.map(download,parquets+auxiliary))
+          manifest={'repository':repo,'revision':revision,'downloaded_utc':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'parquet_files':len(parquets),'parquet_rows':sum(f.get('rows',0) for f in files),'parquet_bytes':sum(f['bytes'] for f in files if 'rows' in f),'files':files,'complete':True,'note':'Original published bytes, no rows, languages, columns or dataset partitions removed. Original upstream document licenses remain in the data.'}
+          (root/'SNAPSHOT.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+          (root/'SHA256SUMS.txt').write_text('\n'.join(f'{f["sha256"]}  {f["path"]}' for f in files)+'\n',encoding='utf-8')
+          print('COMPLETE',json.dumps({k:v for k,v in manifest.items() if k!='files'}),flush=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-${{ matrix.dataset }}
+          path: /tmp/A2AJ/${{ matrix.dataset }}/
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-manifest-${{ matrix.dataset }}
+          path: |
+            /tmp/A2AJ/${{ matrix.dataset }}/SNAPSHOT.json
+            /tmp/A2AJ/${{ matrix.dataset }}/SHA256SUMS.txt
+          retention-days: 7
