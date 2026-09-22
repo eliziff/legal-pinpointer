@@ -1,0 +1,34 @@
+import {chromium} from 'playwright';import {mkdtemp,writeFile} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import assert from 'node:assert/strict';
+const root=path.resolve(import.meta.dirname,'..'),repo=path.resolve(root,'..'),profile=await mkdtemp(path.join(os.tmpdir(),'lens-'));
+const context=await chromium.launchPersistentContext(profile,{channel:'chromium',headless:true,args:[`--disable-extensions-except=${repo}`,`--load-extension=${repo}`,'--no-sandbox'],timeout:120000});
+const errors=[],network=[];context.on('page',p=>{p.on('pageerror',e=>errors.push(e.message));p.on('console',m=>{if(m.type()==='error')console.error('BROWSER',m.text());});});context.on('request',r=>{if(/^https?:/.test(r.url()))network.push(r.url());});
+try{
+  let service=context.serviceWorkers()[0];if(!service)service=await context.waitForEvent('serviceworker',{timeout:30000});const extensionId=new URL(service.url()).host;
+  const lens=await context.newPage();await lens.goto(`chrome-extension://${extensionId}/lens-dist/lens.html`);
+  await lens.click('#corpus-mode');await lens.waitForFunction(()=>window.PinpointerLens,{},{timeout:30000});
+  await lens.locator('#parquets').setInputFiles(['cases.parquet','laws.parquet','hansard.parquet'].map(n=>path.join(root,'test/fixtures',n)));
+  await lens.waitForFunction(()=>document.querySelector('#catalog-status').textContent.includes('3 local Parquet files'),{},{timeout:120000});
+  await lens.click('#index-all');await lens.waitForFunction(()=>document.querySelector('#catalog-status').textContent.includes('3 fully indexed'),{},{timeout:240000});
+  await lens.click('#catalog .close');await lens.fill('#query','indemni*');await lens.click('#search');await lens.waitForFunction(()=>document.querySelector('#status').textContent.includes('Search complete'),{},{timeout:120000});
+  assert.equal(await lens.locator('.result').count(),2,'Both languages of the late document must be found after row 230');
+  await lens.fill('#query','receipt');await lens.click('#search');await lens.waitForFunction(()=>document.querySelector('#status').textContent.includes('Search complete'),{},{timeout:120000});assert.equal(await lens.locator('.result').count(),2,'Legislation and Hansard are both searched');
+  const event=await context.newPage();await event.goto('file://'+path.join(root,'dist/event-strip.html'),{timeout:180000,waitUntil:'domcontentloaded'});await event.waitForFunction(()=>window.EventStrip,{},{timeout:120000});
+  await event.locator('#ocr').uncheck();await event.locator('#files').setInputFiles(path.join(root,'test/fixtures/sample.eml'));await event.waitForFunction(()=>window.EventStrip.rows.length===2,{},{timeout:30000});
+  const dates=await event.evaluate(()=>window.EventStrip.rows.map(r=>[r.date,r.communicated]));assert.deepEqual(dates,[['2026-03-10','2026-03-12'],['2026-03-13','2026-03-12']]);
+  await event.locator('#files').setInputFiles(['sample.pdf','sample.docx'].map(n=>path.join(root,'test/fixtures',n)));
+  await event.waitForFunction(()=>EventStrip.sources.length===3,{},{timeout:60000});
+  const parsed=await event.evaluate(()=>EventStrip.sources.map(s=>({kind:s.kind,text:s.blocks.map(b=>b.text).join('\n'),warnings:s.warnings})));
+  assert.match(parsed.find(s=>s.kind==='pdf').text,/10 March 2026/);
+  assert.match(parsed.find(s=>s.kind==='docx').text,/13 March 2026/);
+  assert.doesNotMatch(parsed.find(s=>s.kind==='docx').text,/15 March 2026/);
+  await event.locator('#ocr').check();await event.locator('#files').setInputFiles(path.join(root,'test/fixtures/scan.pdf'));
+  await event.waitForFunction(()=>EventStrip.sources.length===4,{},{timeout:180000});
+  const scan=await event.evaluate(()=>EventStrip.sources.at(-1).blocks);
+  assert.ok(scan.some(b=>b.ocr&&/13 March 2026/.test(b.text)),'Scanned PDF is recognized by the embedded OCR');
+  const answer=await event.evaluate(async()=>EventStrip.decisions.decide('Delivery is scheduled for 13 March 2026.',{type:'choice',instructions:'What is the status of delivery?',criteria:{planned:'Scheduled for the future',completed:'Already occurred'}}));
+  assert.equal(Object.keys(answer.probabilities).length,2);assert.ok(Object.values(answer.probabilities).every(Number.isFinite));assert.equal(answer.choice,'planned','Basic plan/completion fixture');
+  await event.screenshot({path:path.join(root,'dist/event-strip-preview.png'),fullPage:true});
+  assert.deepEqual(network,[],'The packaged applications must not issue HTTP(S) requests');
+  const evidence={passed:true,checked:['All registered case/law/Hansard fixtures','late row 230','English and French','local EML/PDF/DOCX import','DOCX current revision view','offline scanned PDF OCR','separate event and communication dates','real Laya WASM inference','offline runtime network audit'],modelFixture:answer,pageErrors:errors,networkRequests:network};
+  await writeFile(path.join(root,'dist/validation.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));if(errors.length)throw new Error(errors.join('\n'));
+}finally{await context.close();}
