@@ -1,0 +1,42 @@
+name: Download full A2AJ snapshot
+on:
+  push:
+    branches: [feat/local-lens-event-strip]
+    paths: ['tools/a2aj-snapshot.py', '.github/workflows/a2aj-snapshot.yml']
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    outputs:
+      groups: ${{ steps.inventory.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: inventory
+        run: python tools/a2aj-snapshot.py inventory
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-snapshot-manifest
+          path: snapshot-manifest.json
+          retention-days: 7
+  download:
+    needs: inventory
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        group: ${{ fromJson(needs.inventory.outputs.groups) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: A2AJ-snapshot-manifest
+      - run: python tools/a2aj-snapshot.py download '${{ matrix.group }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-${{ matrix.group }}
+          path: snapshot/**
+          compression-level: 0
+          retention-days: 7
