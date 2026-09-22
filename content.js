@@ -662,6 +662,119 @@
     };
   }
 
+  function lensRange(model, node) {
+    const start = nodeBoundary(node, true);
+    const end = nodeUnitEnd(model, node);
+    if (!start || !end) return null;
+    try {
+      const range = document.createRange();
+      range.setStart(start.startContainer, start.startOffset);
+      range.setEnd(end.startContainer, end.startOffset);
+      return range.collapsed ? null : range;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function lensCollect() {
+    const model = await inspectPage(false);
+    assertCurrentModel(model);
+    const settings = await storageGet({ pinpointStyle: 'full' });
+    const units = [];
+    for (let index = 0; index < model.structure.nodes.length; index += 1) {
+      const node = model.structure.nodes[index];
+      const range = lensRange(model, node);
+      if (!range) continue;
+      const text = normalizeQuoteText(range.toString());
+      if (!text) continue;
+      units.push({
+        index,
+        locator: node.locator,
+        pinpoint: core.formatPinpoint(model.structure.kind, [node.locator], settings.pinpointStyle),
+        kind: model.structure.kind,
+        text,
+        target: targetForNode(model, { kind: 'lens' }, node)
+      });
+    }
+    return {
+      revision: documentRevision,
+      url: window.location.href,
+      title: document.title,
+      citation: model.citation.plain,
+      documentType: model.documentType,
+      provider: model.provider,
+      structureKind: model.structure.kind,
+      structureSource: model.structure.source,
+      units
+    };
+  }
+
+  async function lensResolve(index, expected) {
+    const model = await inspectPage(false);
+    assertCurrentModel(model);
+    const node = model.structure.nodes[index];
+    if (!node) throw new Error('The structural passage no longer exists.');
+    const range = lensRange(model, node);
+    if (!range) throw new Error('The structural passage is no longer readable.');
+    const text = normalizeQuoteText(range.toString());
+    if (expected && text !== expected) throw new Error('The passage changed. Search again before copying or opening it.');
+    return { model, node, range, text };
+  }
+
+  async function lensCopy(index, expected, mode) {
+    if (!COPY_MODES.has(mode)) throw new Error('The requested copy mode is invalid.');
+    const { model, node, range } = await lensResolve(index, expected);
+    let payload, message;
+    if (mode === 'citation') {
+      const target = model.canliiUrl || model.cleanUrl;
+      payload = core.outputCitationLink(model.citation, target);
+      message = `Copied citation: ${model.citation.plain}`;
+    } else {
+      const settings = await storageGet({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false });
+      assertCurrentModel(model);
+      const sourceInfo = { kind: 'lens', range };
+      const pinpoint = pinpointMarkup(model, sourceInfo, [node], settings.pinpointStyle, settings.linkFullTextFragmentPinpoint);
+      if (mode === 'quote') {
+        payload = quoteMarkup(model, sourceInfo, range, [node]);
+        if (!payload.plain) throw new Error('The passage contains no copyable text.');
+        message = `Copied quote from ${pinpoint.plain}`;
+      } else {
+        payload = pinpoint;
+        message = `Copied pinpoint: ${pinpoint.plain}`;
+      }
+    }
+    assertCurrentModel(model);
+    await clipboardWrite(payload);
+    showToast(message, false);
+    return { ok: true, message, plain: payload.plain };
+  }
+
+  async function lensOpen(index, expected) {
+    const { model, node, range } = await lensResolve(index, expected);
+    if (CSS.highlights) {
+      CSS.highlights.set('pinpointer-lens', new Highlight(range));
+      if (!document.getElementById('legal-pinpointer-lens-style')) {
+        const style = document.createElement('style');
+        style.id = 'legal-pinpointer-lens-style';
+        style.textContent = '::highlight(pinpointer-lens){background:#f2df8a;color:inherit}';
+        document.documentElement.appendChild(style);
+      }
+    }
+    const rect = range.getBoundingClientRect();
+    window.scrollBy({ top: rect.top - window.innerHeight * 0.3, behavior: 'instant' });
+    return {
+      ok: true,
+      target: targetForNode(model, { kind: 'lens' }, node),
+      pinpoint: core.formatPinpoint(model.structure.kind, [node.locator], 'full')
+    };
+  }
+
+  globalThis.LegalPinpointerLensBridge = {
+    collect: lensCollect,
+    copy: lensCopy,
+    open: lensOpen
+  };
+
   function handleTask(task) {
     task.catch((error) => showToast(error.message || 'Legal Pinpointer could not complete the request.', true));
   }
