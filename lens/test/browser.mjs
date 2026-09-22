@@ -17,6 +17,16 @@ async function search(query){await lens.fill('#query',query);await lens.click('#
 const fixture=n=>path.join(root,'test/fixtures',n);
 try{
  const sw=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker',{timeout:30000}),id=new URL(sw.url()).host;
+
+ await check('Tab Sonar packaged workspace actually searches an installed-extension tab',async()=>{
+  const sonar=await context.newPage();await sonar.goto(`chrome-extension://${id}/sonar.html`);await sonar.waitForSelector('#query');
+  const tab=await context.newPage();await tab.goto(sourceURL);await tab.bringToFront();await sonar.bringToFront();
+  await sonar.click('#use-active');await sonar.fill('#query','fundamental breach');
+  await sonar.waitForFunction(()=>document.querySelector('#summary').textContent!=='Searching…',{},{timeout:30000});
+  const state=await sonar.evaluate(()=>({summary:document.querySelector('#summary').textContent,notice:document.querySelector('#notice').textContent,rows:document.querySelectorAll('#result-rows [role=option],#result-rows .result-row').length}));
+  assert.doesNotMatch(state.summary,/could not/i);assert.equal(state.notice,'');assert.match(state.summary,/1 matching paragraph/);
+  await tab.close();await sonar.close();
+ });
  lens=await context.newPage();await lens.goto(`chrome-extension://${id}/lens-dist/lens.html`);await lens.waitForFunction(()=>window.PinpointerLens);
  await check('Independent A2AJ connector: all three dataset schemas, exact search and late bilingual row',async()=>{
   await lens.locator('#use-tabs').uncheck();await lens.locator('#use-corpus').check();await lens.click('#files-button');
