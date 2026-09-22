@@ -1,0 +1,178 @@
+name: Lens semantic resources
+on:
+  push:
+    branches: [codex/pinpointer-lens-event-strip]
+    paths: ['.github/workflows/lens-resources.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tar --exclude=.git --exclude=node_modules --exclude=lens-dist --exclude=lens/dist -czf /tmp/lens-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lens-source
+          path: /tmp/lens-source.tar.gz
+          retention-days: 7
+  embeddings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install numpy safetensors tokenizers
+      - name: Convert pinned multilingual Model2Vec weights for browser lookup
+        shell: python
+        run: |
+          import urllib.request,json,pathlib,hashlib,numpy as np
+          from safetensors.numpy import load_file
+          from tokenizers import Tokenizer
+          root=pathlib.Path('/tmp/semantic-assets');root.mkdir()
+          repo='minishlab/potion-multilingual-128M'
+          def read(url):
+              with urllib.request.urlopen(url,timeout=180) as response:return response.read()
+          info=json.loads(read('https://huggingface.co/api/models/'+repo));revision=info['sha'];files=[]
+          for name in ('model.safetensors','tokenizer.json','config.json','README.md'):
+              data=read(f'https://huggingface.co/{repo}/resolve/{revision}/{name}?download=true')
+              (root/name).write_bytes(data);files.append({'path':name,'sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data)})
+          tensors=load_file(root/'model.safetensors');print({k:(v.shape,str(v.dtype)) for k,v in tensors.items()},flush=True)
+          candidates=[(k,v) for k,v in tensors.items() if v.ndim==2];assert len(candidates)==1
+          key,original=candidates[0];matrix=original.astype(np.float32);rows,dimensions=matrix.shape
+          scales=np.maximum(np.max(np.abs(matrix),axis=1)/127,np.finfo(np.float32).tiny).astype('<f4')
+          quant=np.clip(np.rint(matrix/scales[:,None]),-127,127).astype('int8')
+          quant.tofile(root/'potion.i8');scales.tofile(root/'potion.scales')
+          tokenizer=Tokenizer.from_file(str(root/'tokenizer.json'));cfg=json.loads((root/'config.json').read_text())
+          texts=['A party is not responsible for loss caused by its own negligence.','The indemnity includes the protected party’s own negligent acts.','Notice takes effect when it is received, rather than sent.','The Minister discusses actual receipt of notice.','The courier collected the notice.','The indemnity does not cover losses caused by the indemnitee’s negligence.','L’avis prend effet à sa réception et non à son envoi.','Cette indemnité vise la négligence de la partie protégée.']
+          reference=[];cosines=[]
+          for text in texts:
+              ids=tokenizer.encode(text,add_special_tokens=False).ids
+              ids=[i for i in ids if i!=tokenizer.token_to_id('[UNK]')]
+              a=matrix[ids].mean(0);a/=max(np.linalg.norm(a),1e-12)
+              b=(quant[ids].astype(np.float32)*scales[ids,None]).mean(0);b/=max(np.linalg.norm(b),1e-12)
+              cosine=float(a@b);cosines.append(cosine);reference.append({'text':text,'ids':ids,'vector':b.tolist(),'fidelityCosine':cosine})
+          assert min(cosines)>.999,cosines
+          (root/'potion.json').write_text(json.dumps({'repository':repo,'revision':revision,'dimensions':dimensions,'vocabulary':rows,'tensor':key,'config':cfg,'quantization':'per-row symmetric int8 with float32 scale','minimumFixtureCosine':min(cosines),'sources':files},indent=2))
+          (root/'potion.reference.json').write_text(json.dumps(reference))
+          (root/'model.safetensors').unlink()
+          print((root/'potion.json').read_text(),flush=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lens-semantic-assets
+          path: /tmp/semantic-assets/
+          compression-level: 1
+          retention-days: 7
+  corpus-parts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dataset: [canadian-case-law, canadian-laws, hansard]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 35685097292
+          name: A2AJ-${{ matrix.dataset }}
+          path: /tmp/original
+      - name: Make transport parts without changing any original corpus bytes
+        env:
+          DATASET: ${{ matrix.dataset }}
+        shell: python
+        run: |
+          import pathlib,zipfile,os,hashlib,json,shutil
+          root=pathlib.Path('/tmp/original');out=pathlib.Path('/tmp/parts');out.mkdir()
+          name='A2AJ-'+os.environ['DATASET']+'.zip';archive=pathlib.Path('/tmp')/name
+          with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED,allowZip64=True) as z:
+              for p in sorted(root.rglob('*')):
+                  if p.is_file():z.write(p,str(p.relative_to(root)))
+          hashes=[];total=hashlib.sha256()
+          with archive.open('rb') as source:
+              number=1
+              while data:=source.read(400*1024*1024):
+                  part=f'{name}.part{number:02d}';(out/part).write_bytes(data);total.update(data)
+                  hashes.append({'path':part,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()});number+=1
+          (out/'PARTS.json').write_text(json.dumps({'archive':name,'sha256':total.hexdigest(),'parts':hashes,'originalManifest':json.loads((root/'SNAPSHOT.json').read_text())},indent=2))
+          print(json.dumps({'name':name,'parts':len(hashes),'bytes':sum(x['bytes'] for x in hashes)}))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-01
+          path: /tmp/parts/*.part01
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-02
+          path: /tmp/parts/*.part02
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-03
+          path: /tmp/parts/*.part03
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-04
+          path: /tmp/parts/*.part04
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-05
+          path: /tmp/parts/*.part05
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-06
+          path: /tmp/parts/*.part06
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-07
+          path: /tmp/parts/*.part07
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-08
+          path: /tmp/parts/*.part08
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-09
+          path: /tmp/parts/*.part09
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-10
+          path: /tmp/parts/*.part10
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-${{ matrix.dataset }}-11
+          path: /tmp/parts/*.part11
+          compression-level: 0
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: A2AJ-parts-manifest-${{ matrix.dataset }}
+          path: /tmp/parts/PARTS.json
+          retention-days: 7
