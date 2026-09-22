@@ -1,3 +1,5 @@
+import {boundedZip} from './zip.mjs';
+export {boundedZip} from './zip.mjs';
 import JSZip from 'jszip';
 import PostalMime from 'postal-mime';
 import * as pdfjs from 'pdfjs-dist/build/pdf.mjs';
@@ -8,20 +10,12 @@ pdfjs.GlobalWorkerOptions.workerSrc=assetURL('pdf.worker.min.mjs');
 let ocr=null;const pdfs=new Map();
 const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 function htmlText(html){const doc=new DOMParser().parseFromString(html,'text/html');for(const n of doc.querySelectorAll('script,style,iframe,object,svg,math,form'))n.remove();for(const n of doc.querySelectorAll('br'))n.replaceWith('\n');for(const n of doc.querySelectorAll('p,div,li,tr,blockquote'))n.append('\n');return doc.body.textContent||'';}
-export function boundedZip(bytes){
-  const view=new DataView(bytes);let count=0,total=0;
-  for(let p=Math.max(0,bytes.byteLength-65557);p+22<=bytes.byteLength;p++)if(view.getUint32(p,true)===0x06054b50){
-    const n=view.getUint16(p+10,true),offset=view.getUint32(p+16,true);let at=offset;
-    if(n===65535||offset===0xffffffff)throw new Error('ZIP64 document packages are not supported.');
-    for(let i=0;i<n;i++){if(at+46>bytes.byteLength||view.getUint32(at,true)!==0x02014b50)throw new Error('Invalid ZIP directory.');const size=view.getUint32(at+24,true);total+=size;if(size>128*1024*1024||total>512*1024*1024)throw new Error('Expanded document package exceeds the 512 MB safety budget.');at+=46+view.getUint16(at+28,true)+view.getUint16(at+30,true)+view.getUint16(at+32,true);count++;}if(count>10000)throw new Error('Document package has more than 10,000 parts.');return;
-  }throw new Error('Missing ZIP directory.');
-}
 function paragraphs(text){const blocks=[];let quoted=false;for(const part of text.split(/\r?\n\s*\r?\n/)){if(/^\s*(?:On .+wrote:|Le .+écrit\s*:|[-_]{3,}\s*(?:Original Message|Forwarded)|From:\s+.+\nSent:)/im.test(part))quoted=true;if(part.trim())blocks.push({id:uid(),text:part,locator:`Body paragraph ${blocks.length+1}`,quoted:quoted||/^\s*>/m.test(part)});}return blocks;}
 function communicationDate(raw){if(!raw)return '';const found=dateCandidates(String(raw));return found.find(x=>x.date)?.date||(/^\d{4}-\d{2}-\d{2}/.test(raw)?String(raw).slice(0,10):'');}
 function wordParagraph(node,revision){let text='';const walk=n=>{if(n.nodeType!==1)return;const tag=n.localName;if((revision==='current'&&tag==='del')||(revision==='original'&&tag==='ins'))return;if(tag==='t'||(tag==='delText'&&revision==='original'))text+=n.textContent;else if(tag==='tab')text+='\t';else if(tag==='br'||tag==='cr')text+='\n';else for(const child of n.children)walk(child);};walk(node);return text;}
 export async function pdfDocument(source){if(!pdfs.has(source.id)){const bytes=new Uint8Array(await source.file.arrayBuffer());pdfs.set(source.id,pdfjs.getDocument({data:bytes,useSystemFonts:true,disableFontFace:true,isEvalSupported:false}).promise);}return pdfs.get(source.id);}
 async function recognize(canvas,progress){
-  if(!ocr){progress('Loading packaged OCR…');ocr=await createWorker('eng',1,{workerPath:assetURL('tesseract-worker.js'),corePath:assetURL('tesseract-core-simd-lstm.wasm.js')+'#core.js',langPath:'https://offline.invalid',workerBlobURL:false,gzip:true,logger:m=>{if(m.status)progress(`OCR · ${m.status} ${Math.round((m.progress||0)*100)}%`);}});}
+  if(!ocr){progress('Reading scanned page…');ocr=await createWorker('eng',1,{workerPath:assetURL('tesseract-worker.js'),corePath:assetURL('tesseract-core-simd-lstm.wasm.js')+'#core.js',langPath:'https://offline.invalid',workerBlobURL:false,gzip:true});}
   const {data}=await ocr.recognize(canvas,{}, {text:true,blocks:true});return data;
 }
 export async function closeDocuments(){await ocr?.terminate();ocr=null;for(const p of pdfs.values()){const doc=await p.catch(()=>null);await doc?.destroy();}pdfs.clear();}
@@ -63,7 +57,7 @@ export async function renderSource(source,block,container,selection){
   container.replaceChildren();const heading=document.createElement('h3');heading.textContent=`${source.name} · ${block.locator}`;container.append(heading);
   const pre=document.createElement('pre');pre.className='source-text';const text=block.text,start=selection?.start??0,end=selection?.end??0;
   if(end>start){pre.append(document.createTextNode(text.slice(0,start)));const mark=document.createElement('mark');mark.textContent=text.slice(start,end);pre.append(mark,document.createTextNode(text.slice(end)));}else pre.textContent=text;container.append(pre);
-  const open=document.createElement('button');open.textContent='Open original file';open.onclick=()=>{const url=URL.createObjectURL(source.file);window.open(url+(block.page?`#page=${block.page}`:''),'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60_000);};container.append(open);
+  const open=document.createElement('button');open.textContent='Open original file';open.onclick=()=>{const url=URL.createObjectURL(source.file);window.open(url+(block.page?`#page=${block.page}`:''),'_blank','noopener');setTimeout(()=>URL.revokeObjectURL(url),60000);};container.append(open);
   if(source.kind==='pdf'&&block.page){const canvas=document.createElement('canvas');canvas.className='pdf-page';container.append(canvas);const page=await(await pdfDocument(source)).getPage(block.page),viewport=page.getViewport({scale:1.15});canvas.width=viewport.width;canvas.height=viewport.height;await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;}
   pre.querySelector('mark')?.scrollIntoView({block:'center'});
 }
