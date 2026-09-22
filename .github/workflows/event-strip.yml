@@ -29,6 +29,9 @@ jobs:
           echo 'd389d2304822a59569387e257067360a84e016aed43b407f1cfde87dadb7e485  lens-dist/assets/model.onnx' | sha256sum -c -
       - run: npm test
         working-directory: lens
+      - name: Inspect actual event-discovery prompt behavior
+        run: node test/chronology-diagnostic.mjs
+        working-directory: lens
       - name: General event discovery, dates and matching with the actual model
         run: node test/chronology-runtime.mjs
         working-directory: lens
