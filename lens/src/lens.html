@@ -5,22 +5,23 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pinpointer Lens</title>
   <link rel="stylesheet" href="ui.css">
+<style>
+.lens-app .workspace{display:flex;flex:1;min-height:0}.lens-app .left{width:100%}.lens-app .result p{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}.connector-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px}.connector{display:flex;gap:5px;align-items:center}.quiet{border:0;padding:5px}.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.passage-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.7 ui-serif,Georgia,serif}.passage-dialog h3{margin-right:75px;font-size:15px}.passage-dialog .tools{justify-content:flex-start}.lens-app .empty{padding:30px;font-size:14px}.lens-app .empty h2{font-size:22px}
+</style>
 </head>
 <body>
 <main class="app lens-app">
   <header class="topbar">
-    <div class="brand"><span class="brand-symbol">◎</span><div><span class="eyebrow">LEGAL PINPOINTER</span><h1>Lens</h1></div></div>
+    <div class="brand"><h1>Pinpointer search</h1></div>
     <div class="tools"><a class="button" href="../sonar.html">Tab Sonar</a><button id="wide">Open wide</button></div>
   </header>
-
   <section class="controls lens-search">
     <form id="semantic-form">
       <label class="sr-only" for="query">Semantic search</label>
       <div class="field semantic-query">
-        <input id="query" type="text" autocomplete="off" spellcheck="false"
-          placeholder="Describe the passage you want to find…">
+        <input id="query" type="text" autocomplete="off" spellcheck="false" placeholder="Describe the passage you want to find…">
         <button class="primary" id="search" type="submit">Search</button>
-        <button id="stop" type="button" disabled>Stop</button>
+        <button id="stop" type="button" disabled hidden>Stop</button>
       </div>
       <div class="connector-row" aria-label="Search sources">
         <label class="connector"><input id="use-tabs" type="checkbox" checked> Open tabs</label>
@@ -30,37 +31,25 @@
       </div>
     </form>
   </section>
-
   <section class="statusbar">
     <span id="status" role="status" aria-live="polite">Ready.</span>
   </section>
-
   <section class="workspace">
     <div class="left">
-      <div class="list-head">
-        <h2>PASSAGES</h2>
-        <span id="count" class="count"></span>
-      </div>
-      <div class="scroll" id="results">
-        <div class="empty">
-          <h2>Find the passage you mean.</h2>
-          <p>Search the legal structure of your open tabs, your local A2AJ corpus, or both.</p>
-        </div>
-      </div>
+      <div class="list-head"><h2>Results</h2><span id="count" class="count"></span></div>
+      <div class="scroll" id="results"><div class="empty"><p>Enter a question to find relevant passages.</p></div></div>
       <div class="pager" id="pager" hidden>
         <button id="prev" aria-label="Previous page">←</button>
         <span id="page-info"></span>
         <button id="next" aria-label="Next page">→</button>
       </div>
     </div>
-
-    <aside class="preview">
-      <h2>PASSAGE</h2>
-      <div id="preview"><p class="small">Select a result.</p></div>
-    </aside>
   </section>
 </main>
-
+<dialog id="passage" class="passage-dialog">
+  <button class="close" type="button">Close</button>
+  <div id="preview"></div>
+</dialog>
 <dialog id="options">
   <button class="close" type="button">Close</button>
   <h2>Search options</h2>
@@ -80,7 +69,6 @@
   <label>From <input id="from" type="date"></label>
   <label>To <input id="to" type="date"></label>
 </dialog>
-
 <dialog id="catalog">
   <button class="close" type="button">Close</button>
   <h2>Local A2AJ</h2>
@@ -93,7 +81,6 @@
   <p id="catalog-status" class="small"></p>
   <div id="file-list"></div>
 </dialog>
-
 <input id="parquets" type="file" multiple accept=".parquet" hidden>
 <script type="module" src="lens.mjs"></script>
 </body>
