@@ -17,22 +17,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # BEGIN NATIVE SOURCE TRANSPORT
       - name: Commit the checked native bridge update
+        if: hashFiles('lens/native.patch') != ''
         run: |
           git apply --check lens/native.patch
           git apply lens/native.patch
-          python - <<'PYCODE'
-          from pathlib import Path
-          p=Path('.github/workflows/lens-package.yml');s=p.read_text()
-          a=s.index('      # BEGIN NATIVE SOURCE TRANSPORT');b=s.index('      # END NATIVE SOURCE TRANSPORT')+len('      # END NATIVE SOURCE TRANSPORT\n')
-          p.write_text(s[:a]+s[b:])
-          PYCODE
           git rm lens/native.patch
-          git add content.js .github/workflows/lens-package.yml
+          git add content.js
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Integrate native Pinpointer range and clipboard bridge'
           git push origin HEAD:codex/pinpointer-lens-event-strip
-      # END NATIVE SOURCE TRANSPORT
       - run: npm test
       - run: npm install
         working-directory: lens
