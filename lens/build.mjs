@@ -55,11 +55,10 @@ await writeFile(path.join(assets,'NOTICES.txt'),notices);
 const info={application:'Pinpointer Lens + Event Strip',version:'0.1.0',gitCommit:process.env.GITHUB_SHA||'local',built:new Date().toISOString(),model:{repository:hfRepo,revision,max_len:config.max_len,head_max_len:config.head_max_len},assets:manifest,dependencies:sourcePackage.dependencies};
 await writeFile(path.join(assets,'build-info.json'),JSON.stringify(info,null,2));
 const template=await readFile(path.join(root,'src/event-strip.html'),'utf8'),css=await readFile(path.join(root,'src/ui.css'),'utf8'),script=event.outputFiles[0].text.replaceAll('</script','<\\/script');
-// Function replacers preserve literal $&, $' and $` occurring inside bundled libraries.
 const prepared=template.replace('/* INLINE_CSS */',()=>css).replace('/* INLINE_APP */',()=>script),[before,after]=prepared.split('<!-- PACKAGED_ASSETS -->');
 const htmlFile=path.join(dist,'event-strip.html'),stream=createWriteStream(htmlFile);async function emit(text){if(!stream.write(text))await new Promise(resolve=>stream.once('drain',resolve));}
 await emit(before);
-const eventAssets=(await readdir(assets)).filter(n=>!n.startsWith('duckdb')&&n!=='corpus-worker.js');
+const eventAssets=(await readdir(assets,{withFileTypes:true})).filter(e=>e.isFile()&&!e.name.startsWith('duckdb')&&e.name!=='corpus-worker.js').map(e=>e.name);
 for(const name of eventAssets){let part=0;for await(const chunk of createReadStream(path.join(assets,name),{highWaterMark:3*256*1024}))await emit(`<script type="application/octet-stream" data-asset="${name}" data-part="${part++}">${chunk.toString('base64')}</script>\n`);}
 await emit(after);await new Promise(resolve=>stream.end(resolve));
 const zip=new JSZip();async function addDirectory(directory,prefix){for(const entry of await readdir(directory,{withFileTypes:true})){if(['.git','node_modules','lens'].includes(entry.name))continue;const full=path.join(directory,entry.name),name=prefix+entry.name;if(entry.isDirectory())await addDirectory(full,name+'/');else zip.file(name,createReadStream(full));}}
