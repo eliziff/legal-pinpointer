@@ -1,87 +1,11 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Pinpointer Lens</title>
-  <link rel="stylesheet" href="ui.css">
-<style>
-.lens-app .workspace{display:flex;flex:1;min-height:0}.lens-app .left{width:100%}.lens-app .result p{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}.connector-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px}.connector{display:flex;gap:5px;align-items:center}.quiet{border:0;padding:5px}.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.passage-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.7 ui-serif,Georgia,serif}.passage-dialog h3{margin-right:75px;font-size:15px}.passage-dialog .tools{justify-content:flex-start}.lens-app .empty{padding:30px;font-size:14px}.lens-app .empty h2{font-size:22px}
-</style>
-</head>
-<body>
-<main class="app lens-app">
-  <header class="topbar">
-    <div class="brand"><h1>Pinpointer search</h1></div>
-    <div class="tools"><a class="button" href="../sonar.html">Tab Sonar</a><button id="wide">Open wide</button></div>
-  </header>
-  <section class="controls lens-search">
-    <form id="semantic-form">
-      <label class="sr-only" for="query">Semantic search</label>
-      <div class="field semantic-query">
-        <input id="query" type="text" autocomplete="off" spellcheck="false" placeholder="Describe the passage you want to find…">
-        <button class="primary" id="search" type="submit">Search</button>
-        <button id="stop" type="button" disabled hidden>Stop</button>
-      </div>
-      <div class="connector-row" aria-label="Search sources">
-        <label class="connector"><input id="use-tabs" type="checkbox" checked> Open tabs</label>
-        <label class="connector"><input id="use-corpus" type="checkbox"> Local A2AJ</label>
-        <button id="options-button" type="button" class="quiet">Options</button>
-        <button id="files-button" type="button" class="quiet">A2AJ files</button>
-      </div>
-    </form>
-  </section>
-  <section class="statusbar">
-    <span id="status" role="status" aria-live="polite">Ready.</span>
-  </section>
-  <section class="workspace">
-    <div class="left">
-      <div class="list-head"><h2>Results</h2><span id="count" class="count"></span></div>
-      <div class="scroll" id="results"><div class="empty"><p>Enter a question to find relevant passages.</p></div></div>
-      <div class="pager" id="pager" hidden>
-        <button id="prev" aria-label="Previous page">←</button>
-        <span id="page-info"></span>
-        <button id="next" aria-label="Next page">→</button>
-      </div>
-    </div>
-  </section>
-</main>
-<dialog id="passage" class="passage-dialog">
-  <button class="close" type="button">Close</button>
-  <div id="preview"></div>
-</dialog>
-<dialog id="options">
-  <button class="close" type="button">Close</button>
-  <h2>Search options</h2>
-  <label>Tabs
-    <select id="scope">
-      <option value="group">Current tab group</option>
-      <option value="all">All windows</option>
-      <option value="current">Current tab</option>
-    </select>
-  </label>
-  <button id="origin" type="button">Use active tab as origin</button>
-  <hr>
-  <label>Language
-    <select id="language"><option value="both">English + French</option><option value="en">English</option><option value="fr">French</option></select>
-  </label>
-  <label>Dataset <input id="dataset" placeholder="All"></label>
-  <label>From <input id="from" type="date"></label>
-  <label>To <input id="to" type="date"></label>
-</dialog>
-<dialog id="catalog">
-  <button class="close" type="button">Close</button>
-  <h2>Local A2AJ</h2>
-  <p>Select the folder containing your A2AJ Parquet files. Subfolders are included.</p>
-  <div class="tools">
-    <button id="add-folder" class="primary">Choose folder</button>
-    <button id="add-parquet">Choose files</button>
-    <button id="index-all">Build / resume index</button>
-  </div>
-  <p id="catalog-status" class="small"></p>
-  <div id="file-list"></div>
-</dialog>
-<input id="parquets" type="file" multiple accept=".parquet" hidden>
-<script type="module" src="lens.mjs"></script>
-</body>
-</html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pinpointer Lens</title><link rel="stylesheet" href="ui.css"><style>
+.lens-app .workspace{display:flex;flex:1;min-height:0}.lens-app .left{width:100%}.lens-app .result p{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}.connector-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px}.connector{display:flex;gap:5px;align-items:center}.quiet{border:0;padding:5px}.sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}.lens-app .empty{padding:30px;font-size:14px}.result.expanded p{display:block!important;white-space:pre-wrap}.result .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.actions details{width:100%}.actions details label{display:inline-flex;align-items:center;gap:5px;margin:6px}.result small{color:var(--muted)}.topbar .brand{min-width:0}.lens-app .controls,.lens-app .topbar{padding:16px}.lens-app .topbar h1{font-size:17px}.lens-app .connector-row{font-size:13px}.lens-app .result{padding:16px 20px}.lens-app .result h3{font-size:14px}#issues{margin-left:auto}
+</style></head><body><main class="app lens-app">
+<header class="topbar"><div class="brand"><h1>Pinpointer search</h1></div><div class="tools"><a class="button" href="../sonar.html">Tab Sonar</a><button id="wide">Open wide</button></div></header>
+<section class="controls lens-search"><form id="semantic-form"><label class="sr-only" for="query">Semantic search</label><div class="field semantic-query"><input id="query" type="text" autocomplete="off" spellcheck="false" placeholder="Describe the passage you want to find…"><button class="primary" id="search" type="submit">Search</button><button id="stop" type="button" disabled hidden>Stop</button></div><div class="connector-row" aria-label="Search sources"><label class="connector"><input id="use-tabs" type="checkbox" checked> Open tabs</label><label class="connector"><input id="use-corpus" type="checkbox"> Local A2AJ</label><button id="options-button" type="button" class="quiet">Options</button><button id="files-button" type="button" class="quiet">A2AJ files</button></div></form></section>
+<section class="statusbar"><span id="status" role="status" aria-live="polite"></span></section>
+<section class="workspace"><div class="left"><div class="list-head"><h2>Results</h2><span id="count" class="count"></span><button id="issues" class="quiet" hidden>Details</button></div><div class="scroll" id="results"><div class="empty"><p>Enter a question to find relevant passages.</p></div></div><div class="pager" id="pager" hidden><button id="prev" aria-label="Previous page">←</button><span id="page-info"></span><button id="next" aria-label="Next page">→</button></div></div></section></main>
+<dialog id="options"><button class="close" type="button">Close</button><h2>Search options</h2><label><input id="exact" type="checkbox"> Exact words instead of meaning</label><label>Tabs<select id="scope"><option value="group">Current tab group</option><option value="all">All windows</option><option value="current">Current tab</option></select></label><button id="origin" type="button">Use active tab as origin</button><hr><label>Language<select id="language"><option value="both">English + French</option><option value="en">English</option><option value="fr">French</option></select></label><label>Dataset <input id="dataset" placeholder="All"></label><label>From <input id="from" type="date"></label><label>To <input id="to" type="date"></label></dialog>
+<dialog id="catalog"><button class="close" type="button">Close</button><h2>Local A2AJ</h2><p>Select the folder containing your A2AJ Parquet files. Subfolders are included.</p><div class="tools"><button id="add-folder" class="primary">Choose folder</button><button id="add-parquet">Choose files</button><button id="index-all">Build / resume index</button></div><p id="catalog-status" class="small"></p><div id="file-list"></div></dialog>
+<input id="parquets" type="file" multiple accept=".parquet" hidden><dialog id="issue-dialog"><button class="close">Close</button><h2>Search details</h2><div id="issue-list"></div></dialog><script src="../canlii-courts.js"></script><script src="../core.js"></script><script type="module" src="lens.mjs"></script></body></html>
