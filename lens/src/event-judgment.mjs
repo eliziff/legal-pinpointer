@@ -25,7 +25,9 @@ export async function judgeEvent(row, source, decisions, signal) {
   else if(/\b(?:requested|requesting|asked|asking)\b/iu.test(state)) {status='requested';basis='explicit request';}
   else {
     const probabilities=Object.values(answer.probabilities).sort((a,b)=>b-a);
-    if(probabilities[0]<.5||probabilities[0]-probabilities[1]<.1)status='unclear';
+    // A review threshold, not a calibrated probability guarantee. In particular,
+    // terse PDF fragments can produce closely competing completed/denied logits.
+    if(probabilities[0]<.5||probabilities[0]-probabilities[1]<.2){status='unclear';basis='weak model separation';}
   }
   return {status,basis,modelChoice:answer.choice,probabilities:answer.probabilities,
     targetStart:row.start+begin,targetEnd:row.start+end};
