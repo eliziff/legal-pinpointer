@@ -17,15 +17,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Commit the checked native bridge update
-        if: hashFiles('lens/native.patch') != ''
-        run: |
-          git apply --check lens/native.patch
-          git apply lens/native.patch
-          git rm lens/native.patch
-          git add content.js
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Integrate native Pinpointer range and clipboard bridge'
-          git push origin HEAD:codex/pinpointer-lens-event-strip
       - run: npm test
       - run: npm install
         working-directory: lens
@@ -58,6 +49,7 @@ jobs:
             lens/dist/lens-preview.png
             lens/dist/event-strip-preview.png
             lens/dist/build-info.json
+            lens/dist/test-session.zip
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
