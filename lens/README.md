@@ -1,49 +1,54 @@
 # Pinpointer Lens and Event Strip
 
-Two local tools, one small source-addressed decision layer. This is a preview, not a model-quality certification.
+## Use the packaged applications
 
-## Use the packaged artifacts
+Unpack `legal-pinpointer-lens.zip`, load its root in Chrome's extension manager, open Tab Sonar, and choose **Lens**. The extension package includes Laya, its tokenizer and browser inference runtime. No separate model download, key, server or pre-existing browser cache is required.
 
-- Unpack `legal-pinpointer-lens.zip`, load its root in Chrome's extension manager, open Tab Sonar, and choose **Lens**.
-- Open `event-strip.html` directly from disk. The model, tokenizer, inference engine, document parsers, OCR worker and language data are embedded. No server, key, CDN, model download, or prior browser cache is required at runtime.
-
-The extension build contains the existing Pinpointer functionality unchanged, plus Lens. Build dependencies and model downloads are development-time only. Merely downloading the source repository is not a substitute for the packaged release.
+Open `event-strip.html` directly from disk. Its model, tokenizer, document parsers, OCR worker and language data are embedded. Dependencies are downloaded when building, not when processing your documents.
 
 ## Lens
 
-Search open tabs/current tab group or import PDF, DOCX and EML documents. Use exact words, quoted phrases, prefixes, AND/OR/NOT, then supply a semantic distinction. Results preserve source text; judgments add a score and can sort by fit. Blank Find sweeps all passages. The model never deletes the raw results.
+Enter one research question and choose **Open tabs**, **Local A2AJ**, or both. Options select the current tab, current group or all windows, and corpus language/date/dataset filters. Results contain source text and source addresses. Select a result to open its passage or use native Pinpointer quotation, pinpoint and citation actions where the page has detected structure.
 
-Choose the complete A2AJ directory. Every nested Parquet file is registered. Case-law, legislation and Hansard column layouts are recognized, including English and French text. There is no document-count, file-count, corpus-size or result-count product cap. DuckDB reads selected files in place; an incremental IndexedDB inverted index persists in bounded transactions. Interrupted indexing resumes from completed batches. Searches include unindexed tails, so an incomplete index does not silently narrow scope. The UI pages results; it does not truncate them. File failures and schema mismatches are visible.
+There is no separate semantic distinction, evaluation button or per-result model status. Search starts the packaged model automatically. A failed inference stops the search rather than masquerading as successful keyword retrieval. Stop interrupts work and retains only already-ranked results.
 
-Directory handles are persisted when the browser permits it. Reauthorize/reselect the directory after a restart when requested. Individual-file selections need reselection after restart. Indexes and corpus result excerpts are extension-local data; Clear removes the active search results, while removing a corpus file removes its postings. Existing Tab Sonar's RAM-only query behavior is unchanged.
+**Tabs:** Laya evaluates every detected structural unit against the question; matching query words are not a prerequisite. Ordinary pages fall back to visible text blocks. Long units are evaluated in overlapping token windows without discarding their tails, while display and clipboard retain the original unit. The native Pinpointer bridge preserves paragraph/section targets, formatting settings, rich/plain clipboard and stale-source checks.
 
-Exact browser navigation validates document ID, revision and original text. Local corpus navigation validates file identity, Parquet row, language and exact text offsets. The built-in Chrome PDF viewer cannot be scraped as HTML: import the original PDF for native extraction/OCR instead.
+**Local A2AJ:** choose the complete directory or individual Parquet files. Nested files and English/French case-law, legislation and Hansard layouts are supported. The connector uses broad lexical candidate retrieval followed by Laya ranking; there is not yet a dense vector index. Semantic matches absent from the lexical candidate set can therefore be missed. Tabs do not have that restriction.
+
+DuckDB reads selected files in place; an incremental IndexedDB inverted index persists in bounded transactions. Indexing resumes from completed batches, and unindexed tails remain searchable. There is no file-count, document-count or result-count product cap. UI pagination is not a retrieval cutoff. This is not a full-national-corpus throughput benchmark.
+
+Directory handles persist when the browser permits it. Individual-file selections need reselection after restart. Removing a corpus file removes its postings. Browser navigation validates document identity and expected text; local corpus navigation validates file identity, Parquet row, language and exact offsets. Built-in browser PDF viewers are not scraped as HTML; Event Strip accepts original PDF files for extraction/OCR.
 
 ## Event Strip
 
-Drop `.eml`, `.pdf`, `.docx` or text files. Supported email attachments are recursively imported. Native PDF text is used first; pages without usable text use packaged Tesseract OCR. This build does not claim to contain the separate Legal Browser OCR legal-domain model. Word paragraph/table-cell and note references are preserved; tracked revisions have explicit current/original views.
+Drop EML, PDF, DOCX or text files. Supported email attachments are recursively imported. Native PDF text is preferred; otherwise packaged Tesseract OCR is used. Word paragraph/table-cell and note references are retained, with explicit current/original tracked-revision views.
 
-The chronology retains event-date occurrences, original date wording, communication date, exact sentence, source and assertion status. It does not infer missing years or choose between ambiguous numeric dates. Model choices distinguish completed reports, proposals, requests, denials and conditions. Human corrections are preserved across rebuilding. Source text is not generated or rewritten. Use the unresolved view and source preview before relying on an entry. Save/Open session retains original input files and corrections; CSV and clipboard exports keep source locators.
+Chronology rows retain event-date occurrences, original wording, communication date, exact source sentence and assertion status. Missing years and ambiguous numeric dates are not guessed. Model choices distinguish completed reports, proposals, requests, denials and conditions. Human corrections survive rebuilding. Save/Open session retains original files and corrections; CSV and clipboard exports retain locators.
 
-Encrypted email, unreadable pages, unsupported attachments and model context errors are reported, not silently treated as absent. These adapters do not establish whether a statement is true, calculate legal deadlines, or certify source authenticity.
+Unsupported inputs and processing failures are reported. These operations do not establish whether a statement is true or calculate legal deadlines.
 
 ## Model and runtime
 
-The packaged graph is `soyelmismo/laya-multilingual-onnx`, a selective INT8 export of Apache-2.0 Laya. `build-info.json` records the resolved revision and downloaded SHA-256 values. `LAYA_REVISION` can pin a repeat build. The browser worker implements the published option-marker sequence and temperatures with ONNX Runtime Web. It performs actual model inference; there is no keyword-based stand-in, remote fallback or generated JSON parser. Context overflow remains an explicit unresolved result. The baseline is single-threaded WASM, including direct `file://` use; browser latency is measured by the acceptance runner, not inferred from a native GPU benchmark.
+The packaged model is `soyelmismo/laya-multilingual-onnx`. The release workflow pins revision `0966c4fa58da6878b39e7e14cb5e93313b82d828`; `build-info.json` records the revision and asset hashes. The worker follows Laya's published option-marker sequence and temperature scaling on ONNX Runtime Web WASM.
+
+Initialization performs real two- and four-option inference before reporting success. Each run validates input/output tensor contracts and disposes tensors in a finally block. Search uses a binary relevant/not-relevant judgment for ranking, with no scores exposed in the main UI. Ranking values are not calibrated accuracy estimates. Overlong questions are rejected explicitly; passage ranking covers long text through token windows. Event Strip's typed decisions retain explicit context-budget errors.
 
 ## Build and verify
 
 ```sh
+npm test
 cd lens
 npm install
 npm test
-npm run build
-python -m pip install pyarrow==21.0.0
+LAYA_REVISION=0966c4fa58da6878b39e7e14cb5e93313b82d828 npm run build
+node verify-runtime.mjs
+python -m pip install pyarrow==21.0.0 pillow==11.3.0
 python test/fixtures.py
 npx playwright install --with-deps chromium
 npm run acceptance
 ```
 
-The preview workflow builds both deliverables and publishes them only after its browser acceptance gate passes. `validation.json` lists the checks actually executed. Core tests cover query semantics, exact offsets, date ambiguity and spreadsheet-safe escaping. The browser fixture includes all registered dataset families and a match beyond row 230; it is not a throughput measurement on the full national corpus.
+The workflow publishes downloadable packages only after actual WASM inference and installed-Chromium acceptance pass. `runtime-validation.json` records authored semantic smoke cases, not a comprehensive retrieval benchmark. `validation.json` records actual browser checks: the dataset families, bilingual row 230, semantic tab ordering, native pinpoint actions, stale-source protection, combined connectors, document intake, embedded OCR and Laya inference. External runtime requests and uncaught page errors fail the gate. The source-page fixture is synthetic CanLII-shaped HTML fulfilled locally by Playwright.
 
-Application additions: MIT. Upstream libraries and model assets retain their own licenses; bundled notices are available inside the HTML.
+Application additions: MIT. Upstream libraries and model assets retain their own licenses and bundled notices.
