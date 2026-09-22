@@ -10,7 +10,7 @@
   <main id="workspace">
     <header id="search-header">
       <div class="brand"><span class="sonar-mark" aria-hidden="true">◎</span><h1>Tab Sonar</h1><span id="privacy">ON DEVICE</span></div>
-      <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button></nav>
+      <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button><button id="lens-route" type="button">Lens</button></nav>
       <form id="search-form" role="search">
         <label class="sr-only" for="query">Find terms in open tabs</label>
         <div class="input-row"><input id="query" type="text" placeholder="Find terms together…" autocomplete="off" spellcheck="false" maxlength="1024" aria-describedby="keyboard-help"><button id="mode" type="button" title="Same paragraph; Tab switches proximity">/p</button></div>
@@ -38,5 +38,6 @@
   <script src="find-core.js"></script>
   <script src="sonar-results.js"></script>
   <script src="sonar.js"></script>
+  <script src="lens-launcher.js"></script>
 </body>
 </html>
