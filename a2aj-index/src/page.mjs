@@ -36,12 +36,15 @@ async function openFiles(files) {
 }
 
 async function pickFolder() {
-  if (!window.showDirectoryPicker) return $('dir').click();
-  let dir; try { dir = await showDirectoryPicker({mode: 'read'}); } catch { return; }
-  const files = [];
-  const walk = async (h, depth) => { for await (const e of h.values()) { if (e.kind === 'file') files.push(await e.getFile()); else if (depth < 1) await walk(e, depth + 1); } };
-  await walk(dir, 0);
-  return openFiles(files);
+  if (window.showDirectoryPicker) {
+    try {
+      const dir = await showDirectoryPicker({mode: 'read'}), files = [];
+      const walk = async (h, depth) => { for await (const e of h.values()) { if (e.kind === 'file') files.push(await e.getFile()); else if (depth < 1) await walk(e, depth + 1); } };
+      await walk(dir, 0);
+      return openFiles(files);
+    } catch (e) { if (e.name === 'AbortError') return; } // blocked by policy or unsupported: fall back to the folder input
+  }
+  $('dir').click();
 }
 
 function highlight(text, qterms) {

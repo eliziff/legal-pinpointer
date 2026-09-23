@@ -1,7 +1,7 @@
 // Builds the static A2AJ passage index from the local A2AJ full-text SQLite files (read-only).
 //
 //   node --max-old-space-size=3500 build/build-index.mjs --out <dir> [--config build/datasets.json]
-//        [--sample N] [--eval-docs targets.json --eval-out eval-passages.json] [--fts5 <dir>]
+//        [--sample N] [--eval-docs bench/queries.json --eval-out eval-passages.json] [--fts5 <dir>]
 //
 // Output (every file <= 2,000,000,000 bytes, so each can be a GitHub release asset):
 //   manifest.json  counts, parameters, file list, per-dataset sizes
@@ -33,7 +33,8 @@ const t0 = Date.now(), lap = label => console.log(`[${((Date.now() - t0) / 1000)
 const sources = Object.entries(config.sources).map(([name, file]) => ({name, db: new DatabaseSync(expand(file), {readOnly: true})}));
 const includeRx = new RegExp('^(' + config.include.map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*$/, '.*')).join('|') + ')$');
 const excludes = (config.exclude || []).map(r => ({...r, rx: new RegExp(r.headRegex, 'i'), n: 0}));
-const evalDocs = EVAL_DOCS ? new Set(Object.values(JSON.parse(fs.readFileSync(EVAL_DOCS, 'utf8'))).map(Number)) : new Set();
+// --eval-docs bench/queries.json: every case target ("c:<id>") is kept in samples and gets its passage spans recorded
+const evalDocs = new Set(EVAL_DOCS ? JSON.parse(fs.readFileSync(EVAL_DOCS, 'utf8')).flatMap(q => q.docs || []).filter(k => k.startsWith('c:')).map(k => +k.slice(2)) : []);
 let docs = [];
 for (const [si, s] of sources.entries())
   for (const r of s.db.prepare('SELECT id, dataset, document_date_en AS date FROM document').all())

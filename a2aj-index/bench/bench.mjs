@@ -1,12 +1,20 @@
 // Headless Chromium benchmark of dist/a2aj-search.html opened from file:// with the index folder picked.
-//   node bench/bench.mjs --index <dir> --eval <eval-passages.json> --tag <name> [--passes 2] [--only nl,phrase]
-// Pass 1 is the first run after launch (cold JS, empty caches; OS cache state is whatever it is: run
-// bench/evict-cache.mjs first for a cold-disk number). Pass 2 repeats the queries (warm).
-import {chromium} from 'playwright'; import fs from 'node:fs'; import path from 'node:path'; import {execSync} from 'node:child_process';
+//   node bench/bench.mjs --index <dir> --eval <eval-passages.json> --tag <name> [--passes 2] [--only nl,phrase] [--cold-copy <tmpdir>]
+// Pass 1 is the first run after launch (cold JS, empty caches). With --cold-copy the index is first copied to <tmpdir>
+// with robocopy /J (unbuffered I/O, so none of it is in the OS file cache), benchmarked there, and the copy deleted:
+// pass 1 is then also cold-disk. Pass 2 repeats the queries (warm).
+import {chromium} from 'playwright'; import fs from 'node:fs'; import path from 'node:path'; import {execSync, spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 const argv = process.argv.slice(2), opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const dir = path.resolve(opt('--index')), tag = opt('--tag', path.basename(dir)), passes = +opt('--passes', 2);
+const src = path.resolve(opt('--index')), tag = opt('--tag', path.basename(src)), passes = +opt('--passes', 2), coldCopy = opt('--cold-copy');
+let dir = src;
+if (coldCopy) {
+  dir = path.resolve(coldCopy); fs.rmSync(dir, {recursive: true, force: true});
+  const t = Date.now(), r = spawnSync('robocopy', [src, dir, '/J', '/NFL', '/NDL', '/NJH', '/NJS', '/NP', '/XD', '_tmp']);
+  if (r.status >= 8) throw new Error('robocopy failed ' + r.status + ' ' + r.stdout);
+  console.log(`cold copy (unbuffered) in ${((Date.now() - t) / 1000).toFixed(0)} s`);
+}
 const evalMap = opt('--eval') ? JSON.parse(fs.readFileSync(opt('--eval'), 'utf8')) : {};
 let queries = JSON.parse(fs.readFileSync(path.join(root, 'bench', 'queries.json'), 'utf8'));
 if (opt('--only')) queries = queries.filter(q => opt('--only').split(',').includes(q.type));
@@ -36,9 +44,10 @@ let mem = null;
 try { mem = JSON.parse(execSync(`powershell -NoProfile -Command "Get-Process chrome,chrome-headless-shell -ErrorAction SilentlyContinue | Where-Object {$_.Path -like '*ms-playwright*'} | Select-Object Id,PeakWorkingSet64,WorkingSet64,PrivateMemorySize64 | ConvertTo-Json"`).toString()); } catch {}
 const heap = await page.evaluate(() => performance.memory?.usedJSHeapSize || 0);
 await browser.close();
+if (coldCopy) fs.rmSync(dir, {recursive: true, force: true});
 
 // quality
-const byQ = new Map(queries.map(q => [q.id, q])), summary = {tag, index: dir, openMs: +info.openMs.toFixed(1), openWallMs, docs: info.docs, passages: info.passages};
+const byQ = new Map(queries.map(q => [q.id, q])), summary = {tag, index: src, coldCopy: !!coldCopy, openMs: +info.openMs.toFixed(1), openWallMs, docs: info.docs, passages: info.passages};
 const qual = {};
 for (const r of runs.filter(r => r.pass === passes)) {
   const q = byQ.get(r.id);
