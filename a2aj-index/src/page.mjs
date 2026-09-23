@@ -47,6 +47,9 @@ async function pickFolder() {
   $('dir').click();
 }
 
+// Legislation text is Markdown: drop heading/emphasis markers and blank lines for display.
+const plain = text => text.replace(/^#{1,6}\s+/gm, '').replace(/\*+(?=\S)|(?<=\S)\*+/g, '').replace(/\n{2,}/g, '\n');
+
 function highlight(text, qterms) {
   const frag = document.createDocumentFragment(); let at = 0;
   tokens(text, (tok, s, e) => { if (qterms.has(term(tok))) { frag.append(text.slice(at, s)); const m = document.createElement('mark'); m.textContent = text.slice(s, e); frag.append(m); at = e; } });
@@ -57,18 +60,20 @@ async function search(query, opts = {}) { return call('search', {query, opts}); 
 
 async function run(ev) {
   ev?.preventDefault(); const q = $('q').value.trim(); if (!q || !info) return;
-  const court = $('court').value, opts = {k: 100, show: 20, maxPerDoc: 2, datasets: court ? court.split(',') : [], from: $('from').value, to: $('to').value};
+  const court = $('court').value, opts = {show: 20, maxPerDoc: 2, datasets: court ? court.split(',') : [], from: $('from').value, to: $('to').value};
   $('meta').textContent = 'Searching…';
   try {
     const r = await search(q, opts), qterms = new Set(terms(q.replace(/"/g, ' ')));
-    $('meta').textContent = `${r.results.length ? '' : 'No results. '}${r.searchMs.toFixed(0)} ms` + (r.missing.length ? ` · not in index: ${r.missing.join(', ')}` : '');
+    $('meta').textContent = `${r.results.length ? '' : 'No results. '}${r.totalMs.toFixed(0)} ms` + (r.missing.length ? ` · not in index: ${r.missing.join(', ')}` : '');
     const ol = $('results'); ol.replaceChildren();
     for (const h of r.results) {
-      const li = document.createElement('li'), head = document.createElement('div'), a = document.createElement('a'), p = document.createElement('p');
+      const li = document.createElement('li'), head = document.createElement('div'), a = document.createElement('a');
       head.className = 'head'; a.href = h.meta.url || '#'; a.target = '_blank'; a.rel = 'noopener'; a.textContent = h.meta.citation || h.meta.name;
       const nm = document.createElement('span'); nm.className = 'name'; nm.textContent = h.meta.citation ? h.meta.name : '';
       const sub = document.createElement('span'); sub.className = 'sub'; sub.textContent = [label(h.meta.dataset), h.meta.date].filter(Boolean).join(' · ');
-      head.append(a, nm, sub); p.append(highlight(h.text, qterms)); li.append(head, p); ol.append(li);
+      head.append(a, nm, sub); li.append(head);
+      for (const x of h.passages) { const p = document.createElement('p'); p.append(highlight(plain(x.text), qterms)); li.append(p); }
+      ol.append(li);
     }
   } catch (e) { $('meta').textContent = e.message; }
 }

@@ -27,6 +27,7 @@ li { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
 .head a { color: var(--accent); font-weight: 600; text-decoration: none; } .head a:hover { text-decoration: underline; }
 .name { font-style: italic; } .sub { color: var(--muted); font-size: 13px; }
 li p { margin: 0; white-space: pre-line; font-size: 14px; }
+li p + p { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .hint { color: var(--muted); font-size: 12px; margin: 0; }
 </style>
@@ -48,7 +49,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
     </div>
     <button disabled>Search</button>
   </form>
-  <p class="hint">Words are matched by stem and ranked by BM25 over passages. Put "exact phrases" in quotes. Everything runs on this computer; the files are read in place.</p>
+  <p class="hint">Words are matched by stem; passages are ranked by BM25, documents by their best passage plus matches in the case name or citation. Put "exact phrases" in quotes. Everything runs on this computer; the files are read in place.</p>
   <div id="meta"></div>
   <ol id="results"></ol>
 </main>

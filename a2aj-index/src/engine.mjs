@@ -1,9 +1,11 @@
 // Query engine over the static passage index. Environment-neutral: the caller supplies
 //   io.read(name, offset, length) -> Uint8Array   (synchronous; FileReaderSync in a browser worker)
 //   io.inflate(bytes) -> Promise<Uint8Array>        (raw deflate; DecompressionStream in a browser)
-import {B, decodeBlock, getVarint} from './format.mjs';
+import {B, QMAX, decodeBlock, getVarint} from './format.mjs';
 import {terms, phraseNorm} from './tokenize.mjs';
 
+// Default document ranking (see rankDocs); the page uses it, bench/quality.mjs sweeps it.
+export const RANKING = {title: 1, authority: 0, titleOnly: 20};
 const WHOLE_LIST = 512 * 1024, CHUNK = 256 * 1024, td = new TextDecoder();
 
 export async function openIndex(io) {
@@ -33,7 +35,8 @@ export async function openIndex(io) {
       while (st.pos < buf.length) {
         const p = buf[st.pos++], sl = buf[st.pos++], term = prev.slice(0, p) + td.decode(buf.subarray(st.pos, st.pos + sl)); st.pos += sl;
         const df = getVarint(buf, st), file = buf[st.pos++], off = getVarint(buf, st), len = getVarint(buf, st), maxQ = buf[st.pos++];
-        entries.push({term, df, file, off, len, maxQ}); prev = term;
+        const tdf = getVarint(buf, st), title = tdf ? {tdf, file: buf[st.pos++], off: getVarint(buf, st), len: getVarint(buf, st)} : null;
+        entries.push({term, df, file, off, len, maxQ, tdf, title}); prev = term;
       }
       dictCache.set(lo, entries);
     }
@@ -114,16 +117,53 @@ export async function openIndex(io) {
     score() { return this.idf * this.qs[this.i]; }
   }
 
-  // Top-k over passages. query: free text; "quoted phrases" are required and verified against the text.
-  async function search(query, {k = 100, datasets, from, to, maxVerify = 3000} = {}) {
+  const idf = e => Math.log(1 + (N - e.df + 0.5) / (e.df + 0.5));
+  const docAllowed = (d, rs) => { if (!rs) return true; const p = A.docFirstPid[d]; return rs.some(([a, b]) => p >= a && p < b); };
+  function titleDocs(e) { // documents whose style of cause or citation holds the term
+    const buf = read(postNames[e.title.file], e.title.off, e.title.len), st = {pos: 0}, out = new Uint32Array(e.tdf); let prev = -1;
+    for (let i = 0; i < e.tdf; i++) out[i] = prev += getVarint(buf, st) + 1;
+    return out;
+  }
+  function bestInDocs(list, ents) { // best passage of each listed document for the query terms
+    const out = new Map(), cs = ents.filter(e => e.df).map(e => new Cursor(e, idf(e)));
+    for (const d of [...list].sort((a, b) => a - b)) {
+      const a = A.docFirstPid[d], b = A.docFirstPid[d + 1], acc = new Map();
+      for (const c of cs) { c.seek(a); while (c.cur < b) { acc.set(c.cur, (acc.get(c.cur) || 0) + c.score()); c.next(); } }
+      let best = {pid: a, score: 0}; for (const [pid, score] of acc) if (score > best.score) best = {pid, score};
+      out.set(d, best);
+    }
+    return out;
+  }
+  // Documents from passages: score = best passage + QMAX * (title * sum of title idf over query terms in the style of
+  // cause / citation + authority * log10(1 + number of indexed documents citing it)). Documents whose title matches but
+  // that have no passage in the top k are scored on their own passages (the strongest `titleOnly` of them).
+  function rankDocs(hits, ents, rs, phrase, {title = RANKING.title, authority = RANKING.authority, titleOnly = RANKING.titleOnly} = {}) {
+    const docs = new Map();
+    for (const h of hits) { h.doc = docOf(h.pid); let d = docs.get(h.doc); if (!d) docs.set(h.doc, d = {doc: h.doc, best: h.score, hits: [], title: 0}); d.hits.push(h); }
+    if (title > 0) {
+      const ts = new Map();
+      for (const e of ents) if (e.tdf) { const w = Math.log(1 + (D - e.tdf + 0.5) / (e.tdf + 0.5)); for (const d of titleDocs(e)) ts.set(d, (ts.get(d) || 0) + w); }
+      for (const [d, s] of ts) { const x = docs.get(d); if (x) x.title = s; }
+      if (!phrase && titleOnly) {
+        const extra = [...ts].filter(([d]) => !docs.has(d) && docAllowed(d, rs)).sort((a, b) => b[1] - a[1]).slice(0, titleOnly), best = bestInDocs(extra.map(x => x[0]), ents);
+        for (const [d, s] of extra) { const b = best.get(d); docs.set(d, {doc: d, best: b.score, hits: [b], title: s}); }
+      }
+    }
+    for (const x of docs.values()) x.score = x.best + QMAX * (title * x.title + authority * Math.log10(1 + (A.docCitedBy?.[x.doc] || 0)));
+    return [...docs.values()].sort((a, b) => b.score - a.score);
+  }
+
+  // Top-k over passages, then documents. query: free text; "quoted phrases" are required and verified against the text.
+  async function search(query, opts = {}) {
+    const {k = 100, datasets, from, to, maxVerify = 3000} = opts;
     const t0 = performance.now(), s0 = {...stats};
     const phrases = [...query.matchAll(/"([^"]+)"/g)].map(m => m[1]);
     const free = query.replace(/"[^"]*"/g, ' ');
     const req = new Set(phrases.flatMap(terms)), all = [...new Set([...terms(free), ...req])];
-    const cursors = [], missing = [];
+    const cursors = [], missing = [], ents = [];
     for (const t of all) {
       const e = lookup(t); if (!e) { missing.push(t); continue; }
-      cursors.push(Object.assign(new Cursor(e, Math.log(1 + (N - e.df + 0.5) / (e.df + 0.5))), {req: req.has(t), t}));
+      ents.push(e); if (e.df) cursors.push(Object.assign(new Cursor(e, idf(e)), {req: req.has(t), t}));
     }
     const rs = ranges({datasets, from, to});
     let ri = 0; const allowed = d => { if (!rs) return d; while (ri < rs.length && rs[ri][1] <= d) ri++; return ri < rs.length ? Math.max(d, rs[ri][0]) : Infinity; };
@@ -179,8 +219,8 @@ export async function openIndex(io) {
       hits = heap.sort((a, b) => b[0] - a[0]).map(([score, pid]) => ({pid, score}));
       hits.evaluated = evaluated;
     }
-    for (const h of hits) h.doc = docOf(h.pid);
-    return {hits, terms: cursors.map(c => ({t: c.t, df: c.df})), missing, phrases, candidates: hits.total, checked, verified,
+    const docs = rankDocs(hits, ents, rs, phrases.length > 0, opts);
+    return {hits, docs, terms: cursors.map(c => ({t: c.t, df: c.df})), missing, phrases, candidates: hits.total, checked, verified,
       ms: performance.now() - t0, reads: stats.reads - s0.reads, bytes: stats.bytes - s0.bytes, decoded: (stats.decoded || 0) - (s0.decoded || 0)};
   }
 

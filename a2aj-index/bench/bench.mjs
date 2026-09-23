@@ -4,7 +4,7 @@
 // with robocopy /J (unbuffered I/O, so none of it is in the OS file cache), benchmarked there, and the copy deleted:
 // pass 1 is then also cold-disk. Pass 2 repeats the queries (warm).
 import {chromium} from 'playwright'; import fs from 'node:fs'; import path from 'node:path'; import {execSync, spawnSync} from 'node:child_process';
-import {pathToFileURL} from 'node:url';
+import {pathToFileURL} from 'node:url'; import {quality} from './metrics.mjs';
 const argv = process.argv.slice(2), opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
 const src = path.resolve(opt('--index')), tag = opt('--tag', path.basename(src)), passes = +opt('--passes', 2), coldCopy = opt('--cold-copy');
@@ -15,6 +15,7 @@ if (coldCopy) {
   if (r.status >= 8) throw new Error('robocopy failed ' + r.status + ' ' + r.stdout);
   console.log(`cold copy (unbuffered) in ${((Date.now() - t) / 1000).toFixed(0)} s`);
 }
+const ranking = JSON.parse(opt('--ranking', '{}')); // e.g. '{"title":0}'; default: engine RANKING
 const evalMap = opt('--eval') ? JSON.parse(fs.readFileSync(opt('--eval'), 'utf8')) : {};
 let queries = JSON.parse(fs.readFileSync(path.join(root, 'bench', 'queries.json'), 'utf8'));
 if (opt('--only')) queries = queries.filter(q => opt('--only').split(',').includes(q.type));
@@ -34,9 +35,9 @@ console.log(`opened ${info.docs} docs / ${info.passages} passages: worker ${info
 const runs = [];
 for (let pass = 1; pass <= passes; pass++) {
   for (const q of queries) {
-    const r = await page.evaluate(arg => window.a2aj.raw(arg), {query: q.query, opts: {k: 100, show: 20, maxPerDoc: 2}, withDocIds: true});
+    const r = await page.evaluate(arg => window.a2aj.raw(arg), {query: q.query, opts: {show: 20, maxPerDoc: 2, ...ranking}, withDocIds: true});
     runs.push({pass, id: q.id, type: q.type, set: q.set, searchMs: r.searchMs, totalMs: r.totalMs, reads: r.reads, bytes: r.bytes, decoded: r.decoded,
-      candidates: r.candidates, evaluated: r.evaluated, pids: r.pids, docIds: r.docIds, n: r.pids.length});
+      candidates: r.candidates, evaluated: r.evaluated, pids: r.pids, shownPids: r.shownPids, docIds: r.docIds, n: r.pids.length});
   }
   console.log(`pass ${pass} done`);
 }
@@ -47,24 +48,8 @@ await browser.close();
 if (coldCopy) fs.rmSync(dir, {recursive: true, force: true});
 
 // quality
-const byQ = new Map(queries.map(q => [q.id, q])), summary = {tag, index: src, coldCopy: !!coldCopy, openMs: +info.openMs.toFixed(1), openWallMs, docs: info.docs, passages: info.passages};
-const qual = {};
-for (const r of runs.filter(r => r.pass === passes)) {
-  const q = byQ.get(r.id);
-  if (q.docs) {
-    const inScope = q.docs.some(k => k.startsWith('l:') || evalMap[k.slice(2)] || !Object.keys(evalMap).length);
-    if (!inScope) continue;
-    const g = qual[q.set + ':' + q.type] ||= {n: 0, r20: 0, mrr: 0, pn: 0, r10: 0, distinctDocs: 0};
-    const rank = r.docIds.findIndex(k => q.docs.includes(k));
-    g.n++; g.distinctDocs += r.docIds.length; if (rank >= 0) { g.r20++; g.mrr += 1 / (rank + 1); }
-    r.docRank = rank >= 0 ? rank + 1 : null;
-    if (q.passage && evalMap[q.passage.doc]) {
-      const s = q.passage.start, e = s + q.passage.len, rel = new Set(evalMap[q.passage.doc].filter(([, a, b]) => a < e && b > s).map(x => x[0]));
-      g.pn++; const pr = r.pids.slice(0, 10).findIndex(p => rel.has(p)); if (pr >= 0) g.r10++; r.passageRank = pr >= 0 ? pr + 1 : null;
-    }
-  }
-}
-for (const g of Object.values(qual)) { g['docR@20'] = +(g.r20 / g.n).toFixed(3); g.MRR = +(g.mrr / g.n).toFixed(3); g.distinctDocs = +(g.distinctDocs / g.n).toFixed(1); if (g.pn) g['passageR@10'] = +(g.r10 / g.pn).toFixed(3); delete g.r20; delete g.mrr; delete g.r10; }
+const summary = {tag, index: src, coldCopy: !!coldCopy, ranking, openMs: +info.openMs.toFixed(1), openWallMs, docs: info.docs, passages: info.passages};
+const qual = quality(queries, runs.filter(r => r.pass === passes), evalMap);
 const lat = {};
 for (let pass = 1; pass <= passes; pass++) for (const type of ['phrase', 'keyword', 'nl']) {
   const xs = runs.filter(r => r.pass === pass && r.type === type); if (!xs.length) continue;
