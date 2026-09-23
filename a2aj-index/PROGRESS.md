@@ -38,6 +38,23 @@ Heavy commands go through the shared serial lock (`SP` = the session scratchpad,
 2. Full v2 build; arms {title 0/1} x {authority 0/0.5/1}; pick the default by both query sets; full cold+warm bench.
 3. Work-laptop steps; final report tables (bench/tables.mjs).
 
+## Work-laptop steps (no installs)
+1. Get the files into one folder, e.g. `Documents\A2AJ`: `a2aj-search.html` plus every index file
+   (`manifest.json`, `meta.bin`, `dict.bin`, `docs.bin`, `post-*.bin`, `text-*.bin`), about 2.5 GB. From a GitHub
+   release: download every asset (each is under 2 GB). From a USB drive or OneDrive: copy the folder. Keep the file
+   names exactly as they are (a browser that saves `text-000 (1).bin` breaks the set).
+2. Double-click `a2aj-search.html`. If Windows opens something else: right-click > Open with > Microsoft Edge (or Chrome).
+3. Click **Open index folder…**, choose the folder, and accept the browser's prompt ("View files" / "Upload"): the
+   files are read in place on this computer and nothing is sent anywhere.
+4. The status line shows about 208,000 documents and the open time. Search with plain words, a case name
+   ("Jordan delay ceiling"), a question, or "exact phrases" in quotes; narrow with the court list and the dates.
+   The citation links open the source A2AJ records (the court's own decision page, or the statute's official site) in a new tab.
+5. Each time the page is reopened, pick the folder again (browsers do not keep file access for local pages).
+6. To update, replace the whole folder with a newer build; if a file is missing or truncated the page names it.
+
+Publishing a build (on the build machine): `node build/build-page.mjs`, then attach `dist/a2aj-search.html` and every
+file of the index folder to a release, e.g. `gh release create a2aj-YYYY-MM-DD dist/a2aj-search.html <index>/*`.
+
 ## Commands
 ```
 cd a2aj-index
