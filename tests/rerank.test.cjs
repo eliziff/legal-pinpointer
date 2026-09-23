@@ -51,6 +51,7 @@ test('the broker ranks every tab with corpus-wide BM25 and hands out passage tex
   const broker = createBroker(api), sender = { id: 'extension', tab: tabs[0], frameId: 0, documentId: 'doc1', url: tabs[0].url };
   const reply = await broker.handle({ type: 'SONAR_SEARCH', query: 'waiver privilege', mode: 'p', scope: 'all', sequence: 1 }, sender);
   assert.equal(reply.ranked, true);
+  assert.deepEqual([reply.searched, reply.total], [2, 2], 'ranked tabs count as searched');
   assert.deepEqual(reply.results.map(r => r.preview), ['passage 2.0', 'passage 1.0', 'passage 1.1']);
   assert.equal(reply.results[0].tfs, undefined, 'term statistics stay in the broker');
   const { texts } = await broker.handle({ type: 'SONAR_TEXTS', session: reply.session, ticket: reply.ticket, ids: [2, 0] }, sender);

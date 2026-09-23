@@ -11,7 +11,8 @@
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', wheelAt = 0, scrubbing = false;
   // Ranked mode: BM25 order shows at once; the cross-encoder then reorders the
   // top results, but never while the pointer is on the list or after the user
-  // has moved the selection, so nothing jumps under them.
+  // has moved the selection, so nothing jumps under them. The model loads after
+  // the first ranked results are shown, never in competition with them.
   const RERANK_DEPTH = 30;
   let reranker = null, rerankUnavailable = false, rerankJob = 0, pendingOrder = null, navigated = false, pointerInList = false;
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'), (index, open) => choose(index, open));
@@ -117,8 +118,7 @@
     try {
       if (!origin) await useActive(false);
       if (token !== sequence || route !== 'tabs') return;
-      const ranked = core.ranked(query, mode);
-      if (ranked) warmReranker(); else mode = core.compile(query, mode).mode;
+      if (!core.ranked(query, mode)) mode = core.compile(query, mode).mode;
       labels();
       $('query').removeAttribute('aria-invalid'); flight = token;
       const response = await send('SONAR_SEARCH', { query, mode, scope, sequence: token, originTabId: origin.id, refresh });
