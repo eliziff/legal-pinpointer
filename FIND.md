@@ -85,24 +85,61 @@ shared search has been changed or cleared elsewhere shows a refresh notice.
 
 ## Query language
 
+**Plain words rank by relevance.** In /p, a query of plain words (no quotes,
+parentheses, `*`, `/p`, `/s` or upper-case AND/OR/NOT) finds paragraphs across
+the searched tabs that share its words and lists them best first, not in page
+order: `whether an employer must accommodate to the point of undue hardship`.
+Lower-case and/or/not are ordinary words here. The status line reads
+"N matching paragraphs, best first"; there are no scores or badges.
+
+- First pass, shown at once: Okapi BM25 (k1 1.2, b 0.75) over paragraphs, with
+  unit counts, lengths and document frequencies summed over every searched tab,
+  so a rare word weighs the same whichever tab it is in. Words are folded for
+  scoring only (case, accents, light English/French inflection: `Waivers` ~
+  `waiver`, `accommodating` ~ `accommodate`, `généraux` ~ `general`); offsets,
+  highlights and copies always refer to the original text. Each page proposes
+  its 64 best paragraphs with their term counts; the broker rescores them with
+  the corpus-wide statistics and keeps the best 200.
+- Second pass: the top 30 are rescored on the device by a cross-encoder
+  (ms-marco-MiniLM-L6-v2, int8 ONNX, 23 MB) in a worker of the side panel,
+  reading each whole paragraph up to 512 tokens. The model loads only after the
+  first results are on screen. It is English-only, so French queries keep the
+  first-pass order. If the model is absent or fails, the first-pass order stays.
+- The list never jumps under the user: the reranked order replaces the first
+  one once, when all 30 are scored, and only while the pointer is off the list
+  and the selection has not been moved. Otherwise it waits for the pointer to
+  leave, or is dropped once a result has been chosen. Open, preview and the
+  copy commands use the result's issued handle, so they work from either order.
+
+**Exact search** keeps document order and Boolean matching.
 `privileg* waiv*` requires both prefixes in one unit, in either order.
 `"duty of care" breach` combines a whitespace-normalized phrase and whole word.
 Matching is Unicode-aware and case-insensitive; accents are significant.
+Write AND or `/p` between plain words (`privilege AND waiver`,
+`privilege /p waiver`) to get the exact same-paragraph match instead of
+ranking; /s is always exact.
 
 `privilege /p waiver` and `privilege /s waiver` explicitly set proximity; Tab
-updates those operators but not quoted literals. Spaces and AND combine terms;
-parentheses and OR allow alternatives; NOT excludes a matching unit, not a whole
-document. For example `(privileg* OR confidential*) waiv* NOT implied`.
-Each alternative must require a positive term. Unsupported syntax is rejected.
-This is not a replica of a provider's tokenizer or a legal-relevance classifier.
+updates those operators but not quoted literals. AND and spaces between
+operators combine terms; parentheses and OR allow alternatives; NOT excludes a
+matching unit, not a whole document. For example
+`(privileg* OR confidential*) waiv* NOT implied`. In exact queries and/or/not
+are operators in any case. Each alternative must require a positive term.
+Unsupported syntax is rejected. Exact mode is not a replica of a provider's
+tokenizer.
 
 ## Access, resource budgets and cleanup
 
 The native workspace adds only the **sidePanel** permission. Existing activeTab,
 scripting and HTTP/HTTPS host access support user-invoked cross-tab searches.
 Automatic citation scripts keep their original provider matches. Search code is
-not injected into every website on page load. No runtime dependency, build step,
-backend, telemetry, external assets, polling or worker-keepalive loop is added.
+not injected into every website on page load. No backend, telemetry, polling or
+worker-keepalive loop is added. The one packaged dependency is the reranker in
+`vendor/rerank/` (onnxruntime-web 1.30.0 WASM and the int8 model, 37 MB, not
+committed): `npm run fetch:rerank` downloads it and checks every file against a
+pinned SHA-256; nothing is fetched at run time. The manifest makes extension
+pages cross-origin isolated (COOP/COEP), which lets the panel's reranker use up
+to four WASM threads; its pool threads sleep rather than spin between operators.
 
 The broker stores compact navigation handles in extension-private RAM session
 storage; queries/previews normally remain in the panel instance. For a deliberate
@@ -121,7 +158,9 @@ on every browser-owned close event is made.
 Existing search caps remain: four-tab batches; 200 units per page and 1,000 total
 previews; four million text characters/150,000 traversal steps per page; a
 32-million-character queue-start threshold across pages (last batch may overshoot);
-five-second operation waits within an 18-second deadline. Physical paragraphs over
+five-second operation waits within an 18-second deadline. Ranked mode takes 64
+candidates per page and keeps 200 in total (the 1,000-result stop does not apply),
+and reranks the top 30, each cut to 3,000 characters and 512 tokens. Physical paragraphs over
 65,536 UTF-16 characters and budget-truncated units are skipped whole, not split
 into misleading proximity/NOT matches. Highlight caps are 100 ranges/unit and
 2,000 background ranges; previews contain at most 460 characters. Partial work

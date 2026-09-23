@@ -16,7 +16,10 @@ function load() {
       fetch(`${base}tokenizer.json`).then(response => { if (!response.ok) throw new Error('Reranker is not included in this build.'); return response.json(); }),
       fetch(`${base}model.onnx`).then(response => { if (!response.ok) throw new Error('Reranker is not included in this build.'); return response.arrayBuffer(); })
     ]);
-    const session = await ort.InferenceSession.create(new Uint8Array(model), { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+    // Idle pool threads sleep instead of spinning, so a rerank never busy-waits
+    // on cores that the tabs being searched need.
+    const session = await ort.InferenceSession.create(new Uint8Array(model), { executionProviders: ['wasm'], graphOptimizationLevel: 'all',
+      extra: { session: { intra_op: { allow_spinning: '0' }, inter_op: { allow_spinning: '0' } } } });
     return { tokenizer: globalThis.LegalPinpointerRerankCore.createTokenizer(tokenizer.model.vocab), session };
   })();
   return loading;
