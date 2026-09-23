@@ -9,6 +9,11 @@
   let query = '', canliiQuery = '', result = null, current = -1, sequence = Date.now();
   let desiredPreview = null, previewing = false;
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', wheelAt = 0, scrubbing = false;
+  // Ranked mode: BM25 order shows at once; the cross-encoder then reorders the
+  // top results, but never while the pointer is on the list or after the user
+  // has moved the selection, so nothing jumps under them.
+  const RERANK_DEPTH = 30;
+  let reranker = null, rerankUnavailable = false, rerankJob = 0, pendingOrder = null, navigated = false, pointerInList = false;
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'), (index, open) => choose(index, open));
   function nextSequence() { sequence = Math.max(sequence + 2, Date.now()); return sequence; }
   function tell(text, error = false) { $('notice').textContent = text; $('notice').title = text; $('notice').classList.toggle('error', error); }
@@ -66,7 +71,8 @@
   function resultStatus() {
     if (!result) { status('Ready to search', 'Loaded page text only. Nothing leaves your browser.'); return; }
     const count = result.results.length;
-    status(`${count.toLocaleString()}${result.limited ? '+' : ''} matching ${mode === 'p' ? 'paragraphs' : 'sentences'}`,
+    status(result.ranked ? `${count.toLocaleString()} matching paragraphs, best first`
+      : `${count.toLocaleString()}${result.limited ? '+' : ''} matching ${mode === 'p' ? 'paragraphs' : 'sentences'}`,
       `${result.searched}/${result.total} tabs searched${result.skipped.length ? ` · ${result.skipped.length} skipped` : ''}${result.limited ? ' · Partial' : ''}`);
     if (result.note) tell(result.note);
   }
@@ -82,7 +88,7 @@
       : 'Only the query you submit is sent to CanLII. Open-tab searches and their excerpts stay local.';
     controls();
     if (selected && scope === 'current' && !busy && !result.stale) {
-      desiredPreview = { token: sequence, session: result.session, ticket: result.ticket, id: current };
+      desiredPreview = { token: sequence, session: result.session, ticket: result.ticket, id: selected.id };
       if (!previewing) drainPreview();
     }
   }
@@ -97,6 +103,7 @@
   }
   function cancel() {
     desiredPreview = null; clearTimeout(timer); const seq = nextSequence();
+    pendingOrder = null; navigated = false; if (rerankJob) { rerankJob = 0; reranker?.postMessage({ type: 'cancel' }); }
     if (flight) { flight = 0; send('SONAR_CANCEL', { sequence: seq - 1 }).catch(() => {}); }
     scrubbing = false;
     return seq;
@@ -110,17 +117,22 @@
     try {
       if (!origin) await useActive(false);
       if (token !== sequence || route !== 'tabs') return;
-      const compiled = core.compile(query, mode); mode = compiled.mode; labels();
+      const ranked = core.ranked(query, mode);
+      if (ranked) warmReranker(); else mode = core.compile(query, mode).mode;
+      labels();
       $('query').removeAttribute('aria-invalid'); flight = token;
       const response = await send('SONAR_SEARCH', { query, mode, scope, sequence: token, originTabId: origin.id, refresh });
       if (token !== sequence || route !== 'tabs') return;
       if (response.stale) throw new Error('This workspace was updated in another window. Search again.');
       result = response; busy = false; current = result.results.length ? 0 : -1;
+      result.results.forEach((item, id) => { item.id = id; });
+      document.body.dataset.order = result.ranked ? 'ranked' : 'document';
       list.setResults(result.results, current); $('result-spacer').hidden = false;
       $('empty').hidden = Boolean(result.results.length);
       if (!result.results.length) empty(query.trim() ? 'No matching passages' : 'Find the passage, not just the tab.',
         query.trim() ? 'Try broader terms or a different scope. Skipped pages are listed in Details.' : 'Type words or quoted phrases. Tab switches paragraph and sentence proximity.');
       resultStatus(); details(); preview();
+      if (result.ranked) rerank(token);
     } catch (error) {
       if (token !== sequence || route !== 'tabs') return;
       busy = false; result = null; current = -1; list.setResults([], -1); details(); preview();
@@ -153,9 +165,49 @@
   }
   function choose(index, open = false) {
     if (busy || result?.stale || route !== 'tabs' || !result?.results[index]) return;
-    current = index; list.select(index, !open); preview();
+    navigated = true; current = index; list.select(index, !open); preview();
     if (open) visit(false);
   }
+  function warmReranker() {
+    if (reranker || rerankUnavailable) return;
+    try { reranker = new Worker('rerank-worker.js', { type: 'module' }); }
+    catch (_) { rerankUnavailable = true; return; }
+    reranker.onerror = () => { rerankUnavailable = true; reranker.terminate(); reranker = null; rerankJob = 0; };
+    reranker.postMessage({ type: 'warm' });
+  }
+  async function rerank(token) {
+    const top = result.results.slice(0, RERANK_DEPTH), expected = result;
+    if (rerankUnavailable || top.length < 2 || LegalPinpointerRerankCore.looksFrench(query)) return;
+    warmReranker();
+    let texts;
+    try { ({ texts } = await send('SONAR_TEXTS', { session: result.session, ticket: result.ticket, ids: top.map(item => item.id) })); }
+    catch (_) { return; }
+    if (token !== sequence || result !== expected || !reranker) return;
+    const passages = top.map((item, i) => ({ id: item.id, text: texts[i] })).filter(item => typeof item.text === 'string' && item.text);
+    const job = rerankJob = token, scores = new Map();
+    reranker.onmessage = ({ data }) => {
+      if (data.type === 'unavailable') { rerankUnavailable = true; reranker?.terminate(); reranker = null; rerankJob = 0; return; }
+      if (data.job !== job || rerankJob !== job) return;
+      if (data.type === 'score') scores.set(data.id, data.score);
+      else if (data.type === 'failed') rerankJob = 0;
+      else if (data.type === 'done') {
+        rerankJob = 0;
+        // Scored passages by cross-encoder score; any unscored ones keep BM25 order after them.
+        const scored = top.filter(item => scores.has(item.id)).sort((a, b) => scores.get(b.id) - scores.get(a.id));
+        pendingOrder = [...scored, ...top.filter(item => !scores.has(item.id)), ...result.results.slice(top.length)];
+        applyOrder();
+      }
+    };
+    reranker.postMessage({ type: 'score', job, query, passages, maxLength: 512 });
+  }
+  function applyOrder() {
+    if (!pendingOrder || navigated || pointerInList || busy || !result) return;
+    result.results = pendingOrder; pendingOrder = null; current = 0;
+    list.setResults(result.results, current); preview();
+    document.body.dataset.order = 'reranked';
+  }
+  $('list-viewport').addEventListener('pointerenter', () => { pointerInList = true; });
+  $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; applyOrder(); });
   function move(delta) {
     if (busy || !result?.results.length) return;
     choose((current + delta + result.results.length) % result.results.length);
@@ -175,7 +227,7 @@
       if (destination !== windowId) await chrome.storage.session.set({ [`sonar-launch:${destination}`]: {
         nonce: crypto.randomUUID(), created: Date.now(), route: 'tabs', origin, handoff: snapshot()
       } });
-      await send(back ? 'SONAR_BACK' : 'SONAR_GO', { session: result.session, ticket: result.ticket, id: current });
+      await send(back ? 'SONAR_BACK' : 'SONAR_GO', { session: result.session, ticket: result.ticket, id: result.results[current].id });
       if (token === sequence) tell(back ? 'Returned to the starting tab.' : 'Opened the exact passage. Results stay here.');
     } catch (error) { if (token === sequence) tell(error.message, true); }
     finally { opening = false; }
@@ -184,7 +236,7 @@
   // resolve once the source tab has built them with Pinpointer's formatting.
   async function copyPassage(mode) {
     if (busy || result?.stale || route !== 'tabs' || current < 0 || !result) return;
-    const token = sequence, request = send('SONAR_COPY', { session: result.session, ticket: result.ticket, id: current, mode });
+    const token = sequence, request = send('SONAR_COPY', { session: result.session, ticket: result.ticket, id: result.results[current].id, mode });
     const blob = type => request.then(reply => new Blob([type === 'text/html' ? reply.html : reply.plain], { type }));
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob('text/plain'), 'text/html': blob('text/html') })]);
