@@ -5,7 +5,7 @@ import {B, QMAX, decodeBlock, getVarint} from './format.mjs';
 import {terms, phraseNorm} from './tokenize.mjs';
 
 // Default document ranking (see rankDocs); the page uses it, bench/quality.mjs sweeps it.
-export const RANKING = {title: 1, authority: 0, titleOnly: 20};
+export const RANKING = {title: 0, authority: 1, titleOnly: 20};
 const WHOLE_LIST = 512 * 1024, CHUNK = 256 * 1024, td = new TextDecoder();
 
 export async function openIndex(io) {
