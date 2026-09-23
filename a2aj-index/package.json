@@ -1,0 +1,19 @@
+{
+  "name": "a2aj-index",
+  "private": true,
+  "type": "module",
+  "description": "Static, shardable full-text index of the A2AJ Canadian corpus, searchable from a single offline HTML page.",
+  "scripts": {
+    "build:index": "node --max-old-space-size=3500 build/build-index.mjs",
+    "build:page": "node build/build-page.mjs",
+    "bench": "node bench/bench.mjs"
+  },
+  "dependencies": {
+    "stemmer": "2.0.1"
+  },
+  "devDependencies": {
+    "@sqlite.org/sqlite-wasm": "^3.53.4-build1",
+    "esbuild": "0.28.2",
+    "playwright": "1.61.1"
+  }
+}
