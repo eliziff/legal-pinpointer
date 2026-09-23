@@ -16,6 +16,10 @@ citation-copying shortcuts and output formats are unchanged.
 | Ctrl+Enter or click a result | Open the exact matching passage in its source tab. |
 | Alt+wheel; release Alt | Preview passages, then open the displayed result. |
 | Back to start | Restore the source scroll position and return to the originating tab. |
+| Copy quote / Ctrl+Shift+X | Copy the selected passage as Pinpointer's quotation: the linked paragraph or provision marker and the text. Unnumbered text and other sites copy `[Link]: text` with a link to the passage. |
+| Copy pinpoint / Ctrl+X | Copy the pinpoint (for example `at para 12`) linked to the paragraph, as the in-page shortcut does. Ctrl+X on a selection in the query still cuts. |
+| Copy link | Copy a text-fragment link that opens the page scrolled to and highlighting the passage. |
+| Alt+X | Copy the document's citation. |
 | Use active tab | Explicitly change the origin of Current tab/group search. |
 | Refresh | Re-read tabs/group membership and rebuild the source text index. |
 | Clear | Clear the current route's query; in Open tabs, release its shared search session. |
@@ -61,6 +65,10 @@ animated height transitions. Results have fixed 132-pixel rows and mount only
 the viewport plus three overscan rows on either side. Scroll/resize redraws are
 coalesced through animation frames. Result text is escaped into DOM text/mark
 nodes, never injected as source HTML. Dark and forced-color modes are supported.
+
+Copying runs in the source tab with Pinpointer's own formatting code and the
+pinpoint wording option from the popup. The copied passage is the whole matching
+paragraph (or sentence in /s mode), rechecked against the page before copying.
 
 Every result carries the source's title, observed pinpoint where available,
 excerpt and highlighted matches. A click uses an issued result handle, exact
