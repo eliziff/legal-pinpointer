@@ -2,3 +2,4 @@ node_modules/
 lens-dist/
 lens/dist/
 runtime-validation.json
+vendor/

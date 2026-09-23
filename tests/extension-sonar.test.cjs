@@ -5,6 +5,7 @@
 // simulated. Needs Playwright: npm install --no-save --package-lock=false playwright
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -104,6 +105,24 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
     await panel.click('#scope');
     found = await search('waiv* privilege');
     assert.match(found.detail, /^2\/2 tabs searched/);
+
+    // Plain words rank by relevance across the group; jump and copy use the same handles.
+    assert.equal(await panel.evaluate(() => crossOriginIsolated), true, 'the panel is cross-origin isolated for threaded WASM');
+    found = await search('intention to waive privilege');
+    assert.match(found.summary, /best first$/);
+    assert.match(found.rows[0], /requires an intention to waive/);
+    if (fs.existsSync(path.join(root, 'vendor/rerank/model.onnx'))) {
+      await panel.waitForFunction(() => document.body.dataset.order === 'reranked', null, { timeout: 60_000 });
+      assert.match(await panel.locator('#result-rows > *').first().textContent(), /requires an intention to waive/);
+    }
+    await panel.locator('#result-rows > *').first().click({ position: { x: 4, y: 4 } });
+    await panel.waitForFunction(() => /Opened the exact passage/.test(document.querySelector('#notice').textContent));
+    assert.equal(await tabs[1].evaluate(() => document.visibilityState), 'visible');
+    assert.ok(await tabs[1].evaluate(() => CSS.highlights.has('legal-pinpointer-sonar-active')));
+    await panel.click('#copy-pinpoint'); await panel.waitForFunction(() => /^Copied: at para 1/.test(document.querySelector('#notice').textContent));
+    copied = await clipboard();
+    assert.equal(copied.plain, 'at para 1');
+    assert.match(copied.html, /2024scc2\.html#par1"/);
     assert.deepEqual(errors, []);
   } finally {
     await cdp?.close().catch(() => {});
