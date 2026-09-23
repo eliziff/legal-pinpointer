@@ -2,9 +2,9 @@
 
 (function exposeSonarBroker(global) {
   function createBroker(api) {
-    const prefix = 'pinpointer-sonar:', TTL = 15 * 60_000, MAX_RESULTS = 1000, CONCURRENCY = 4, MAX_INDEX_CHARS = 32_000_000;
+    const prefix = 'pinpointer-sonar:', TTL = 15 * 60_000, MAX_RESULTS = 1000, RANKED_RESULTS = 200, CONCURRENCY = 4, MAX_INDEX_CHARS = 32_000_000;
     const pending = new Map(), running = new Map(), gates = new Map();
-    const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_COPY']);
+    const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_COPY', 'SONAR_TEXTS']);
     const sessionKey = sender => sender.workspace
       ? `${prefix}workspace:${sender.workspace}` : `${prefix}${sender.tab.id}:${sender.documentId}`;
     const panelURL = () => api.runtime.getURL('sonar.html');
@@ -76,10 +76,16 @@
       return true;
     }
     function current(key, sequence) { return pending.get(key)?.sequence === sequence; }
-    function pageResults(value, tab, target) {
+    function pageResults(value, tab, target, terms = 0) {
       if (!value || value.url !== tab.url || !Array.isArray(value.results)) throw new Error('Page changed or returned invalid results.');
+      const count = value => Number.isSafeInteger(value) && value >= 0;
+      if (terms && !(count(value.ranked?.units) && count(value.ranked.length) && Array.isArray(value.ranked.dfs) &&
+          value.ranked.dfs.length === terms && value.ranked.dfs.every(count))) throw new Error('Page returned invalid term statistics.');
       return value.results.slice(0, 200).map(result => {
         if (!Number.isInteger(result.index) || result.index < 0 || result.index >= 200 || typeof result.preview !== 'string') {
+          throw new Error('Page returned an invalid passage.');
+        }
+        if (terms && !(count(result.length) && Array.isArray(result.tfs) && result.tfs.length === terms && result.tfs.every(count))) {
           throw new Error('Page returned an invalid passage.');
         }
         const preview = result.preview.slice(0, 460), marks = [];
@@ -92,15 +98,35 @@
         return { ...target, windowId: tab.windowId, index: result.index, url: value.url, preview, marks,
           title: String(value.title || tab.title || 'Untitled page').slice(0, 300),
           locator: typeof result.locator === 'string' ? result.locator.slice(0, 80) : '',
-          leading: Boolean(result.leading), trailing: Boolean(result.trailing) };
+          leading: Boolean(result.leading), trailing: Boolean(result.trailing), ...(terms ? { tfs: result.tfs, length: result.length } : {}) };
       });
+    }
+    // Corpus-wide BM25: sum every tab's unit counts, lengths and document
+    // frequencies, then rescore each page's local candidates with them.
+    function rankGlobally(pages) {
+      let units = 0, length = 0;
+      const dfs = [];
+      for (const { stats } of pages) {
+        units += stats.units; length += stats.length;
+        stats.dfs.forEach((df, i) => { dfs[i] = (dfs[i] || 0) + df; });
+      }
+      const average = length / Math.max(1, units), core = global.LegalPinpointerFindCore, scored = [];
+      pages.forEach(({ results }, order) => results.forEach(result => {
+        const score = core.bm25(result.tfs, result.length, dfs, units, average);
+        const { tfs, length: _, ...rest } = result;
+        if (score > 0) scored.push({ score, order, result: rest });
+      }));
+      return scored.sort((a, b) => b.score - a.score || a.order - b.order || a.result.index - b.result.index)
+        .slice(0, RANKED_RESULTS).map(entry => entry.result);
     }
     async function search(message, sender) {
       if (typeof message.query !== 'string' || message.query.length > 1024 || !['p', 's'].includes(message.mode) ||
           !['current', 'all', 'group'].includes(message.scope) || (message.refresh !== undefined && typeof message.refresh !== 'boolean')) {
         throw new Error('Invalid search request.');
       }
-      const compiled = global.LegalPinpointerFindCore.compile(message.query, message.mode), key = sessionKey(sender);
+      const core = global.LegalPinpointerFindCore, ranked = core.ranked(message.query, message.mode);
+      const compiled = ranked ? { tree: true, mode: 'p' } : core.compile(message.query, message.mode), key = sessionKey(sender);
+      const terms = ranked ? core.rankTerms(message.query).terms.length : 0, rankedPages = [];
       if (!claim(key, message.sequence)) return { stale: true };
       const run = { cancelled: false, state: null };
       running.set(key, run);
@@ -135,7 +161,7 @@
         // Fixed batches cap running page jobs, intermediate results, and storage
         // writes. Stop launching work once the aggregate result budget is full.
         for (let offset = 0; offset < candidates.length && alive(); offset += CONCURRENCY) {
-          if (results.length >= MAX_RESULTS || characters >= MAX_INDEX_CHARS || Date.now() >= deadline) {
+          if ((!ranked && results.length >= MAX_RESULTS) || characters >= MAX_INDEX_CHARS || Date.now() >= deadline) {
             limited = true;
             for (const tab of candidates.slice(offset)) skip(tab, results.length >= MAX_RESULTS ? 'Result limit; narrow the search' : characters >= MAX_INDEX_CHARS ? 'Text budget; narrow the scope' : 'Search time limit; refresh to retry');
             break;
@@ -165,7 +191,8 @@
               const value = await timeout(invoke(target, 'search', [{ query: message.query, mode: compiled.mode,
                 ticket: state.ticket, deadline: end, refresh: Boolean(message.refresh), notify: Boolean(state.panel) }]), Math.max(1, end - Date.now()));
               if (!alive()) return [];
-              const normalized = pageResults(value, tab, target);
+              const normalized = pageResults(value, tab, target, terms);
+              if (ranked) { rankedPages.push({ tabId: tab.id, stats: value.ranked, results: normalized }); return []; }
               characters += Number.isSafeInteger(value.characters) ? Math.max(0, Math.min(4_000_000, value.characters)) : 0;
               searched++; limited ||= Boolean(value.limited) || value.results.length > 200;
               return normalized;
@@ -182,13 +209,18 @@
           }
         }
         if (!alive()) { await dispose(state, true); return { stale: true }; }
+        if (ranked) {
+          // Equal scores keep tab order, then document order.
+          rankedPages.sort((a, b) => candidates.findIndex(t => t.id === a.tabId) - candidates.findIndex(t => t.id === b.tabId));
+          results.push(...rankGlobally(rankedPages));
+        }
         // Store issued navigation handles, not snippets/marks. Reading one result
         // after a worker restart need not deserialize a megabyte of preview text.
         state.results = results.map(({ tabId, documentId, windowId, index, url }) => ({ tabId, documentId, windowId, index, url }));
         state.updated = Date.now();
         await exclusive(key, async () => { if (alive()) await save(key, state); });
         if (!alive()) return { stale: true };
-        return { session: key, ticket: state.ticket, results, mode: compiled.mode,
+        return { session: key, ticket: state.ticket, results, mode: compiled.mode, ranked,
           searched, total: candidates.length, skipped, limited, origin: state.origin,
           note: message.scope === 'group' && origin.groupId < 0 ? 'This tab is not in a tab group. No other ungrouped tabs were searched.' : '' };
       } finally {
@@ -196,9 +228,13 @@
         if (run.cancelled && state) void dispose(state, true);
       }
     }
-    async function issued(message, sender) {
+    async function issuedState(message, sender) {
       const state = await load(message.session);
       if (!state || (sender.workspace && state.incognito !== sender.incognito) || Date.now() - state.updated > TTL || state.ticket !== message.ticket || message.session !== sessionKey(sender)) throw new Error('Search expired. Refresh the results.');
+      return state;
+    }
+    async function issued(message, sender) {
+      const state = await issuedState(message, sender);
       if (!Number.isInteger(message.id) || message.id < 0) throw new Error('Choose a search result.');
       const result = state.results[message.id];
       if (message.type === 'SONAR_PREVIEW' && (!state.panel || state.scope !== 'current' || result?.tabId !== state.origin.tabId)) throw new Error('Preview is limited to the current source tab.');
@@ -210,6 +246,25 @@
         throw new Error('The tab navigated or left this group. Refresh the search.');
       }
       return { state, result, tab };
+    }
+    // Passage text of issued results, for the panel's on-device reranker.
+    async function passageTexts(message, sender) {
+      if (!Array.isArray(message.ids) || message.ids.length > 64 || !message.ids.every(id => Number.isInteger(id) && id >= 0)) throw new Error('Choose search results.');
+      const state = await issuedState(message, sender), groups = new Map(), texts = message.ids.map(() => null);
+      message.ids.forEach((id, at) => {
+        const result = state.results[id];
+        if (!result) return;
+        const key = `${result.tabId}:${result.documentId}`;
+        if (!groups.has(key)) groups.set(key, { target: result, positions: [], slots: [] });
+        groups.get(key).positions.push(result.index); groups.get(key).slots.push(at);
+      });
+      await Promise.all([...groups.values()].map(async ({ target, positions, slots }) => {
+        try {
+          const values = await timeout(invoke(target, 'texts', [state.ticket, positions]), 3000);
+          slots.forEach((slot, i) => { if (typeof values?.[i] === 'string') texts[slot] = values[i].slice(0, 3000); });
+        } catch (_) { /* A tab that closed or changed keeps its first-pass rank. */ }
+      }));
+      return { texts };
     }
     // Copy uses Pinpointer's own quote/pinpoint/link builders where the page has
     // them (content.js on supported legal sites), else a text-fragment link.
@@ -308,6 +363,7 @@
       }
       if (message.type === 'SONAR_GO' || message.type === 'SONAR_PREVIEW') return go(message, sender);
       if (message.type === 'SONAR_COPY') return copyResult(message, sender);
+      if (message.type === 'SONAR_TEXTS') return passageTexts(message, sender);
       return returnToSearch(message, sender);
     }
     async function open(tab) {

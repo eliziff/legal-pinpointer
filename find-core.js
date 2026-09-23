@@ -2,7 +2,8 @@
 
 (function exposeFindCore(global) {
   if (global.LegalPinpointerFindCore && typeof module === 'undefined') return;
-  // No stemming or remote search: offsets always refer to the original page text.
+  // Exact mode never stems; ranked mode folds words for scoring only. Offsets
+  // always refer to the original page text. Nothing is searched remotely.
   const segmenters = new Map();
   const WORD = '[\\p{L}\\p{N}\\p{M}_]';
   const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -175,7 +176,55 @@
 
   function sentences(text, locale = 'en') { return [...sentenceUnits(text, locale)]; }
 
-  const api = { compile, matches, sentences, sentenceUnits, switchScope };
+  // Ranked mode: plain words (no quotes, parentheses, *, /p, /s or upper-case
+  // AND/OR/NOT) in paragraph mode are ranked by BM25 instead of matched exactly.
+  const RANK_WORD = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu;
+  // Words not worth highlighting. They still count in BM25, where IDF weighs them.
+  const QUIET = new Set(('a an and are as at be but by for from has have he her his i in is it its of on or she that the their them they this to was were ' +
+    'which who will with not no what why how when where whether does do did can le la les un une des du de et ou en au aux ce ces cette est sont pas ' +
+    'par pour sur dans que qui ne se sa son ses il elle ils elles l d s qu').split(' '));
+  function ranked(query, mode = 'p') {
+    return mode === 'p' && !/["“”()*]/.test(query) && /[\p{L}\p{N}]/u.test(query) &&
+      !String(query).split(/\s+/).some(word => /^(?:AND|OR|NOT)$/.test(word) || /^\//.test(word));
+  }
+  // Lower case, no accents, light English/French inflection folding (measured:
+  // pool A R@30 0.735 -> 0.867 over plain lower case; see FIND.md).
+  function fold(word) {
+    let w = word.toLowerCase();
+    if (/[^\x00-\x7f]/.test(w)) w = w.normalize('NFD').replace(/\p{M}/gu, '');
+    if (w.length > 4 && /ies$/.test(w) && !/[ae]ies$/.test(w)) w = `${w.slice(0, -3)}y`;
+    else if (w.length > 4 && /aux$/.test(w)) w = `${w.slice(0, -3)}al`;
+    else if (w.length > 3 && /(?:eau|eu|au)x$/.test(w)) w = w.slice(0, -1);
+    else if (w.length > 3 && /es$/.test(w) && !/[aeo]es$/.test(w)) w = w.slice(0, -1);
+    else if (w.length > 3 && /s$/.test(w) && !/(?:us|ss|is)$/.test(w)) w = w.slice(0, -1);
+    if (w.length > 5 && /ing$/.test(w)) w = w.slice(0, -3);
+    else if (w.length > 4 && /ed$/.test(w) && !/eed$/.test(w)) w = w.slice(0, -2);
+    if (w.length > 4 && /e$/.test(w)) w = w.slice(0, -1);
+    return w;
+  }
+  function eachWord(text, visit) {
+    const pattern = new RegExp(RANK_WORD.source, 'gu');
+    for (let hit; (hit = pattern.exec(text));) visit(hit[0], hit.index);
+  }
+  // Unique folded query terms; `marked` are the ones worth highlighting.
+  function rankTerms(query) {
+    const terms = [], seen = new Set();
+    eachWord(String(query), word => { const term = fold(word); if (!seen.has(term)) { seen.add(term); terms.push(term); } });
+    const quiet = terms.filter(term => QUIET.has(term));
+    return { terms: terms.slice(0, 64), marked: new Set(quiet.length === terms.length ? terms : terms.filter(term => !QUIET.has(term))) };
+  }
+  // Okapi BM25 (k1 1.2, b 0.75) of one unit from corpus-wide statistics.
+  function bm25(tfs, length, dfs, units, averageLength) {
+    let score = 0;
+    const norm = 1.2 * (0.25 + 0.75 * length / (averageLength || 1));
+    for (let i = 0; i < tfs.length; i++) {
+      if (!tfs[i] || !dfs[i]) continue;
+      score += Math.log(1 + (units - dfs[i] + 0.5) / (dfs[i] + 0.5)) * tfs[i] * 2.2 / (tfs[i] + norm);
+    }
+    return score;
+  }
+
+  const api = { compile, matches, sentences, sentenceUnits, switchScope, ranked, fold, eachWord, rankTerms, bm25 };
   global.LegalPinpointerFindCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

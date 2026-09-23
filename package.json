@@ -4,7 +4,7 @@
   "private": true,
   "description": "Dependency-free source and tests for the Legal Pinpointer browser extension.",
   "scripts": {
-    "test": "node --test tests/core.test.cjs tests/engine.test.cjs tests/legislation.test.cjs tests/security.test.cjs tests/text-fragments.test.cjs tests/find.test.cjs tests/sonar.test.cjs tests/performance-citations.test.cjs tests/text-hotpaths.test.cjs tests/workspace.test.cjs",
+    "test": "node --test tests/core.test.cjs tests/engine.test.cjs tests/legislation.test.cjs tests/security.test.cjs tests/text-fragments.test.cjs tests/find.test.cjs tests/sonar.test.cjs tests/rerank.test.cjs tests/performance-citations.test.cjs tests/text-hotpaths.test.cjs tests/workspace.test.cjs",
     "test:browser": "node --test tests/browser-clipboard.test.cjs",
     "audit:legislation": "node tools/audit-canlii-legislation-index.cjs",
     "check": "npm test && npm run test:browser && npm run audit:legislation",
@@ -15,6 +15,7 @@
     "benchmark:pinpointer": "node tools/benchmark-pinpointer.cjs",
     "benchmark:text": "node tools/benchmark-text-hotpaths.cjs",
     "test:workspace": "node --test tests/workspace.test.cjs tests/workspace-browser.test.cjs",
-    "test:extension": "node --test tests/extension-sonar.test.cjs"
+    "test:extension": "node --test tests/extension-sonar.test.cjs",
+    "fetch:rerank": "node tools/fetch-rerank-model.cjs"
   }
 }
