@@ -111,6 +111,23 @@ Lower-case and/or/not are ordinary words here. The status line reads
   leave, or is dropped once a result has been chosen. Open, preview and the
   copy commands use the result's issued handle, so they work from either order.
 
+Measured in the installed extension (headless Chromium, 30 tabs holding the 30
+longest A2AJ judgments, 20.4M characters, cross-origin isolated so the model
+uses 4 threads; 2026-09-23 on a loaded laptop at 75% CPU from other work). The
+run's memory guard stopped it after 38 of the 51 queries, so the quality rows
+cover those 38 and the 60-tab run was not reached.
+
+| Mode | Target in top 10 | MRR | First results p50 / p95 | Reranked p50 / p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Ranked, first pass (BM25) | 0.698 | 0.503 | 0.35 / 0.79 s | - |
+| Ranked + on-device rerank | 0.836 | 0.709 | 0.30 / 0.41 s | 1.83 / 2.57 s |
+
+The first search after opening (every page indexed, term statistics built,
+model loaded) returned first results in 3.1-4.8 s and the reranked order in
+5.8-6.8 s. The rerank itself takes 1.2-2.7 s for 30 paragraphs. Memory was
+100 MB for the panel with its model worker and 108 MB of heap across the 30 tab
+pages.
+
 **Exact search** keeps document order and Boolean matching.
 `privileg* waiv*` requires both prefixes in one unit, in either order.
 `"duty of care" breach` combines a whitespace-normalized phrase and whole word.
