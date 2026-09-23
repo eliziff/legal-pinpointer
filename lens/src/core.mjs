@@ -98,7 +98,7 @@ export function dateCandidates(text, anchor=null) {
     if(choices.length>1&&day!==undefined)choices=choices.filter(c=>new Date(c+'T12:00:00Z').getUTCDay()===day);
     add(m,choices.length===1?choices[0]:null,choices.length>1?'Ambiguous day/month order':choices.length?'':'Invalid calendar date',choices);
   }
-  const patterns=[new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th|er)?\\s+(${monthRE})\\.?\\s*,?\\s*((?:19|20)\\d{2})?`,'giu'),new RegExp(`\\b(${monthRE})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*((?:19|20)\\d{2}))?`,'giu')];
+  const patterns=[new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th|er)?\\s+(?:day\\s+of\\s+)?(${monthRE})\\.?\\s*,?\\s*((?:19|20)\\d{2})?`,'giu'),new RegExp(`\\b(${monthRE})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*((?:19|20)\\d{2}))?`,'giu')];
   patterns.forEach((re,rev)=>{for(const m of text.matchAll(re)) {const d=+(rev?m[2]:m[1]),mon=months.get(norm(rev?m[1]:m[2])); add(m,m[3]?iso(+m[3],mon,d):null,m[3]?'':'Year not stated');}});
   for(const m of text.matchAll(/\b(today|yesterday|tomorrow|aujourd'hui|hier|demain)\b/giu)) {
     const offset={today:0,yesterday:-1,tomorrow:1,"aujourd'hui":0,hier:-1,demain:1}[norm(m[0])];
