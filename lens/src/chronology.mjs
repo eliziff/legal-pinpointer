@@ -109,8 +109,31 @@ export function screen(text){
 }
 export function createCatalogue(){return {engine:ENGINE_VERSION,mentions:[],omitted:[],scanned:[],pairs:{},events:[],separations:[]};}
 function evidence(source,block,event){return {id:idFor(source,block,event.start,event.end),sourceId:source.id,blockId:block.id,start:event.start,end:event.end,quote:block.text.slice(event.start,event.end),communicated:source.communicated||'',quoted:Boolean(block.quoted),ocr:Boolean(block.ocr),locator:block.locator};}
-export async function discoverEvents(sources,catalogue,decisions,{signal,onProgress=()=>{}}={}){
-  const completed=new Set(catalogue.scanned),known=new Set(catalogue.mentions.map(m=>m.id));
+// A document is itself an event: its own date (a header Date/Sent line, "the
+// 5th day of June, 2024", else the first full date of its opening) and title.
+// Correspondence already has a header entry; image-only files have no text.
+const HEADER_DATE=/^[ \t]*(?:sent|date|envoy[ée])[ \t]*:?[ \t]+(.+)$/imu,SUBJECT=/^[ \t]*(?:subject|objet|re)[ \t]*:[ \t]*(.+)$/imu;
+export function documentEntry(source){
+  if(source.blocks.some(b=>b.correspondence?.length))return null;
+  const block=source.blocks.find(b=>!b.quoted&&b.text.trim());if(!block)return null;
+  const head=block.text.slice(0,1500),line=HEADER_DATE.exec(head);
+  let date=line?dateCandidates(line[1]).find(d=>d.date):null;
+  if(date){const at=line.index+line[0].indexOf(line[1]);date={...date,start:at+date.start,end:at+date.end};}
+  else date=dateCandidates(head).find(d=>d.date);
+  if(!date)return null;
+  const subject=SUBJECT.exec(head)?.[1]?.trim();
+  const title=subject||head.split(/\n/u).map(l=>l.trim()).find(l=>l.length>=12&&l.length<=120&&(l.match(/\p{L}/gu)||[]).length>.6*l.length&&!/court file|page \d|^\d/iu.test(l))||source.name;
+  return {block,start:date.start,end:date.end,date:date.date,dateText:date.raw,text:clean(title).slice(0,160)};
+}
+const ACTION=/\b\p{L}{3,}ed\b|\b(?:sent|met|paid|signed|made|gave|took|told|wrote|spoke|went|came|began|issued|filed|served|held|sold|bought|won|lost|left|found|said|brought|became)\b/iu;
+export async function discoverEvents(sources,catalogue,decisions,{signal,onProgress=()=>{},deep=false}={}){
+  // Fast and model-reading passes are cached separately; neither blocks the other.
+  const done=deep?(catalogue.scanned):(catalogue.fastScanned||=[]);
+  const completed=new Set(done),known=new Set(catalogue.mentions.map(m=>m.id));
+  for(const source of sources){const d=documentEntry(source);if(!d)continue;
+    const ev=evidence(source,d.block,d);if(known.has(ev.id))continue;known.add(ev.id);
+    catalogue.mentions.push({...ev,text:d.text,date:d.date,dateEnd:'',dateText:d.dateText,dateReason:'',dateOptions:[],dateBasis:'document date',
+      dateEvidence:{sourceId:source.id,blockId:d.block.id,start:d.start,end:d.end},uncertain:false,document:'document'});}
   // Each dated email or letter is itself an event: sending it. Its header is
   // exact source text, so no model judgment is needed or spent on it.
   for(const source of sources)for(const block of source.blocks)for(const c of block.correspondence||[]){
@@ -120,9 +143,19 @@ export async function discoverEvents(sources,catalogue,decisions,{signal,onProgr
   }
   for(const source of sources)for(const block of source.blocks)for(const unit of sentenceUnits(block.text,source.language)){
     cancelled(signal);const unitId=idFor(source,block,unit.start,unit.end);if(completed.has(unitId))continue;
-    if((block.correspondence||[]).some(c=>unit.start>=c.start&&unit.end<=c.end)){catalogue.scanned.push(unitId);completed.add(unitId);continue;}
+    if((block.correspondence||[]).some(c=>unit.start>=c.start&&unit.end<=c.end)){done.push(unitId);completed.add(unitId);continue;}
     const screened=screen(unit.text);
-    if(screened){catalogue.omitted.push({...evidence(source,block,unit),probability:0,basis:screened});catalogue.scanned.push(unitId);completed.add(unitId);continue;}
+    if(screened){if(deep)catalogue.omitted.push({...evidence(source,block,unit),probability:0,basis:screened});done.push(unitId);completed.add(unitId);continue;}
+    if(!deep){
+      // Without the model: a sentence that states a full date and reads as a
+      // happening (an action verb) is an entry dated by that date.
+      const d=ACTION.test(unit.text)&&dateCandidates(unit.text,block.quoted?null:source.communicated).find(x=>x.date);
+      if(d){const ev=evidence(source,block,unit);
+        if(!known.has(ev.id)){known.add(ev.id);catalogue.mentions.push({...ev,...resolvedDate(source,{...d,start:unit.start+d.start,end:unit.start+d.end,blockId:block.id},'stated date'),text:clean(unit.text),uncertain:false});}}
+      done.push(unitId);completed.add(unitId);
+      if(done.length%200===0){onProgress({phase:'discover',source:source.name,events:catalogue.mentions.length});await pause();}
+      continue;
+    }
     const finding=await isEvent(unit.text,decisions,signal,source.language),added=[],omitted=[];
     if(finding.include){
       const parts=await eventSpans(unit,decisions,signal);
@@ -154,9 +187,10 @@ function compatible(a,b){
   // account, participant or amount numbers. Missing detail alone is not conflict.
   return !x||!y||x===y;
 }
-export async function sameEvent(a,b,decisions,signal){
+export async function sameEvent(a,b,decisions,signal,deep=true){
   if(!compatible(a,b))return false;
   if(normalized(a.text)===normalized(b.text))return true;
+  if(!deep){if(!a.date||a.date!==b.date)return false;const x=terms(a.text),y=terms(b.text);let n=0;for(const t of x)n+=y.has(t);return n/Math.max(1,Math.min(x.size,y.size))>=.6;}
   const q={type:'noul',instructions:'Do both passages describe the SAME specific event, with the same participants and outcome, rather than different or conflicting events?',criteria:{true:'Same specific happening',false:'Different, conflicting or uncertain'}};
   for(const [x,y]of [[a,b],[b,a]]){
     const r=await decisions.decide(`A: ${x.text}\nEvent date: ${x.date||'not stated'}\nB: ${y.text}\nEvent date: ${y.date||'not stated'}`,q,signal);
@@ -164,7 +198,7 @@ export async function sameEvent(a,b,decisions,signal){
   }
   return true;
 }
-export async function collateEvents(catalogue,decisions,{signal,onProgress=()=>{}}={}){
+export async function collateEvents(catalogue,decisions,{signal,onProgress=()=>{},deep=false}={}){
   const groups=[],postings=new Map(),dates=new Map(),exact=new Map(),separate=new Set(catalogue.separations||[]);
   const previous=new Map(catalogue.events.filter(e=>!e.manual).map(e=>[e.mentionIds[0],e]));
   const pairKey=(a,b)=>[a,b].sort().join('\0');
@@ -179,7 +213,7 @@ export async function collateEvents(catalogue,decisions,{signal,onProgress=()=>{
       if(group.members.some(other=>!compatible(other,m)||separate.has(pairKey(other.id,m.id))))continue;
       // Separately edited entries stay separate; do not discard either edit.
       if(previous.get(m.id)?.edited||group.members.some(x=>previous.get(x.id)?.excluded))continue;
-      if(!(p in catalogue.pairs))catalogue.pairs[p]=await sameEvent(group.members[0],m,decisions,signal);
+      if(!(p in catalogue.pairs))catalogue.pairs[p]=await sameEvent(group.members[0],m,decisions,signal,deep);
       if(catalogue.pairs[p]){selected=group;break;}
     }
     if(selected)selected.members.push(m);else{selected={index:groups.length,members:[m]};groups.push(selected);}
@@ -199,7 +233,9 @@ export async function collateEvents(catalogue,decisions,{signal,onProgress=()=>{
   catalogue.events=events;return events;
 }
 export async function makeChronology(sources,catalogue,decisions,options={}){
-  await decisions.start();cancelled(options.signal);await discoverEvents(sources,catalogue,decisions,options);return collateEvents(catalogue,decisions,options);
+  // Default is fast: documents and dated sentences, no model load. {deep:true}
+  // also asks the model about every sentence (much slower).
+  if(options.deep)await decisions.start();cancelled(options.signal);await discoverEvents(sources,catalogue,decisions,options);return collateEvents(catalogue,decisions,options);
 }
 export function ungroup(catalogue,event){for(let i=0;i<event.mentionIds.length;i++)for(let j=i+1;j<event.mentionIds.length;j++)catalogue.separations.push([event.mentionIds[i],event.mentionIds[j]].sort().join('\0'));}
 export function eventOrder(a,b){return (a.date||'9999').localeCompare(b.date||'9999')||a.text.localeCompare(b.text)||a.id.localeCompare(b.id);}
