@@ -80,6 +80,7 @@ export function* paragraphSpans(text) {
 }
 
 const monthNames=[['january','jan','janvier','janv'],['february','feb','février','fevrier','févr','fevr'],['march','mar','mars'],['april','apr','avril','avr'],['may','mai'],['june','jun','juin'],['july','jul','juillet','juil'],['august','aug','août','aout'],['september','sep','sept','septembre'],['october','oct','octobre'],['november','nov','novembre'],['december','dec','décembre','decembre','déc']];
+const weekdays=new Map([['sunday','sun','dimanche','dim'],['monday','mon','lundi','lun'],['tuesday','tue','tues','mardi','mar'],['wednesday','wed','mercredi','mer'],['thursday','thu','thur','thurs','jeudi','jeu'],['friday','fri','vendredi','ven'],['saturday','sat','samedi','sam']].flatMap((list,i)=>list.map(n=>[n,i])));
 const months=new Map(monthNames.flatMap((list,i)=>list.map(s=>[s,i+1])));
 const monthRE=Array.from(months.keys()).sort((a,b)=>b.length-a.length).join('|');
 const iso=(y,m,d)=> { const date=new Date(Date.UTC(y,m-1,d)); return date.getUTCFullYear()===y && date.getUTCMonth()===m-1 && date.getUTCDate()===d ? `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}` : null; };
@@ -91,7 +92,10 @@ export function dateCandidates(text, anchor=null) {
   };
   for(const m of text.matchAll(/\b((?:19|20)\d{2})-(\d{2})-(\d{2})\b/g)) add(m,iso(+m[1],+m[2],+m[3]),'');
   for(const m of text.matchAll(/\b(\d{1,2})[\/-](\d{1,2})[\/-]((?:19|20)\d{2})\b/g)) {
-    const a=iso(+m[3],+m[2],+m[1]), b=iso(+m[3],+m[1],+m[2]), choices=[...new Set([a,b].filter(Boolean))];
+    const a=iso(+m[3],+m[2],+m[1]), b=iso(+m[3],+m[1],+m[2]);let choices=[...new Set([a,b].filter(Boolean))];
+    // A stated weekday ("Fri 3/10/2023", as mail clients print) settles the order.
+    const day=weekdays.get(norm(/([\p{L}]+)\.?,?\s*$/u.exec(text.slice(Math.max(0,m.index-12),m.index))?.[1]||''));
+    if(choices.length>1&&day!==undefined)choices=choices.filter(c=>new Date(c+'T12:00:00Z').getUTCDay()===day);
     add(m,choices.length===1?choices[0]:null,choices.length>1?'Ambiguous day/month order':choices.length?'':'Invalid calendar date',choices);
   }
   const patterns=[new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th|er)?\\s+(${monthRE})\\.?\\s*,?\\s*((?:19|20)\\d{2})?`,'giu'),new RegExp(`\\b(${monthRE})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*((?:19|20)\\d{2}))?`,'giu')];
