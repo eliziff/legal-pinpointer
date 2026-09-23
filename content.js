@@ -577,27 +577,34 @@
     }, 2800);
   }
 
-  async function copy(mode, showFeedback = true) {
+  // A passage (Tab Sonar result) replaces the selection/hover/clipboard source
+  // and returns the payload for the caller to write instead of writing it here.
+  async function copy(mode, showFeedback = true, passage = null) {
     const model = await inspectPage(mode === 'citation');
     let payload;
     let message;
     let fragmentSource = null;
 
-    if (mode === 'citation') {
+    if (passage && mode === 'link') {
+      const target = fragments.urlForRange(passage, model.root, model.cleanUrl);
+      payload = { plain: target, html: anchorHtml(target, target) };
+      message = 'Copied passage link';
+    } else if (mode === 'citation') {
       const target = model.canliiUrl || model.cleanUrl;
       payload = core.outputCitationLink(model.citation, target);
       message = `Copied citation: ${model.citation.plain}`;
     } else if (!model.structure || !model.structure.nodes.length) {
       // No structure is not a reason to discard the user's selected quotation.
       // Retain clipboard text-fragment precedence when it resolves on this page.
-      const fragment = await clipboardFragment(model);
+      const fragment = passage ? null : await clipboardFragment(model);
       assertCurrentModel(model);
-      const selected = fragment?.range || liveSelectionRange();
+      const selected = passage || fragment?.range || liveSelectionRange();
       if (selected && !selected.collapsed && !ownOverlay(selected.startContainer)
           && !ownOverlay(selected.endContainer)) {
         const text = renderSelectionFragment(selected.cloneContents());
         if (!text.plain) throw new Error('The selected range contains no copyable text.');
-        const target = fragment?.url || model.cleanUrl;
+        let target = fragment?.url || model.cleanUrl;
+        if (passage) try { target = fragments.urlForRange(passage, model.root, model.cleanUrl); } catch (_) { /* page link */ }
         payload = { plain: `[Link]: ${text.plain}`, html: `${anchorHtml('[Link]', target)}: ${text.html}` };
         message = 'Copied selected text with source link';
         fragmentSource = fragment;
@@ -607,7 +614,7 @@
         message = `Copied page: ${model.citation.plain}`;
       }
     } else {
-      const sourceInfo = await copySource(model, mode);
+      const sourceInfo = passage ? { kind: 'selection', range: passage, url: '' } : await copySource(model, mode);
       assertCurrentModel(model);
       if (sourceInfo.kind === 'text-fragment') fragmentSource = sourceInfo;
       const nodes = sourceInfo.range ? nodesForRange(model, sourceInfo.range, mode === 'quote') : [sourceInfo.node];
@@ -634,6 +641,7 @@
     }
 
     assertCurrentModel(model);
+    if (passage) return { ok: true, message, payload };
     await clipboardWrite(payload);
     rememberedFragment = fragmentSource
       ? { url: fragmentSource.url, outputPlain: payload.plain }
@@ -728,23 +736,7 @@
   }
 
   function lensFragment(range, model) {
-    const wanted=range.toString().replace(/\s+/g,' ').trim();
-    if (!wanted) throw new Error('No text was selected.');
-    const index=fragments.buildTextIndex(model.root,true),text=index.text,lower=text.toLocaleLowerCase(),needle=wanted.toLocaleLowerCase();
-    let at=-1,chosen=-1;
-    while ((at=lower.indexOf(needle,at+1))>=0) {
-      const p=fragments.boundaryPoint(index,at);
-      if(p&&range.comparePoint(p.node,p.offset)===0){chosen=at;break;}
-    }
-    if(chosen<0)throw new Error('A precise passage link cannot be made for this selection.');
-    const escape=s=>encodeURIComponent(s).replace(/-/g,'%2D');
-    const prefix=text.slice(Math.max(0,chosen-160),chosen).trim().split(/\s+/).slice(-8).join(' ');
-    const suffix=text.slice(chosen+wanted.length,chosen+wanted.length+160).trim().split(/\s+/).slice(0,8).join(' ');
-    const value=(prefix?escape(prefix)+'-,':'')+escape(wanted)+(suffix?',-'+escape(suffix):'');
-    const target=core.withFragment(model.cleanUrl,'#:~:text='+value);
-    const resolved=fragments.resolveUrl(target,model.root);
-    if(!resolved||normalizeQuoteText(resolved.range.toString())!==normalizeQuoteText(range.toString()))throw new Error('The passage link is ambiguous. Use its native pinpoint.');
-    return target;
+    return fragments.urlForRange(range, model.root, model.cleanUrl);
   }
 
   async function lensResolve(handle,index,expected,options={}) {
@@ -786,6 +778,8 @@
     window.scrollBy({top:range.getBoundingClientRect().top-window.innerHeight*.3,behavior:'instant'});
     return {ok:true,target:targetForNode(model,{kind:'lens'},node)};
   }
+
+  globalThis.LegalPinpointerSonarCopy = (range, mode) => copy(mode, false, range);
 
   globalThis.LegalPinpointerLensBridge={collect:lensCollect,prepare:lensPrepare,open:lensOpen,
     formatRange(range,mode,options={}){

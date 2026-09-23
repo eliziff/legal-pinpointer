@@ -62,7 +62,7 @@ test('persistent workspace navigates real ranges across documents with stable la
       const p=await browser.newPage({viewport:{width:400,height:900}});p.on('pageerror',e=>errors.push(e.message));
       await p.setContent(fs.readFileSync(path.join(root,'sonar.html'),'utf8').replace(/<script[\s\S]*?<\/script>/g,'').replace(/<link[^>]+>/g,''));
       await p.addStyleTag({content:fs.readFileSync(path.join(root,'sonar.css'),'utf8')});
-      await p.exposeFunction('__send',m=>dispatch(m,{id:'extension',url:api.runtime.getURL('sonar.html'),documentId:`panel${windowId}`}));
+      await p.exposeFunction('__send',m=>dispatch(m,{id:'extension',url:api.runtime.getURL('sonar.html')}));
       await p.exposeFunction('__get',k=>api.storage.session.get(k));await p.exposeFunction('__set',v=>api.storage.session.set(v));await p.exposeFunction('__remove',k=>api.storage.session.remove(k));
       await p.exposeFunction('__tabs',q=>api.tabs.query(q));await p.exposeFunction('__open',v=>api.sidePanel.open(v));
       await p.evaluate(windowId=>{

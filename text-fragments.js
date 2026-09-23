@@ -459,7 +459,37 @@
     return { range, matches, url: String(value).trim(), text: range.toString() };
   }
 
+  // Build the shortest text-fragment URL (start/end words plus context) that
+  // resolves back to exactly this range; throws when no unambiguous link exists.
+  function urlForRange(range, root, cleanUrl) {
+    const squash = (value) => value.replace(/\s+/g, ' ').trim();
+    const wanted = squash(range.toString());
+    if (!wanted) throw new Error('No text was selected.');
+    const index = buildTextIndex(root, true), text = index.text, lower = text.toLocaleLowerCase();
+    let at = -1, chosen = -1;
+    while ((at = lower.indexOf(wanted.toLocaleLowerCase(), at + 1)) >= 0) {
+      const point = boundaryPoint(index, at);
+      if (point && range.comparePoint(point.node, point.offset) === 0) { chosen = at; break; }
+    }
+    if (chosen < 0) throw new Error('A precise passage link cannot be made for this passage.');
+    const escape = (value) => encodeURIComponent(value).replace(/-/g, '%2D');
+    const words = wanted.split(' ');
+    const before = text.slice(Math.max(0, chosen - 160), chosen).trim().split(/\s+/).slice(-8).join(' ');
+    const after = text.slice(chosen + wanted.length, chosen + wanted.length + 160).trim().split(/\s+/).slice(0, 8).join(' ');
+    const context = (body) => (before ? `${escape(before)}-,` : '') + body + (after ? `,-${escape(after)}` : '');
+    const candidates = [4, 8, 16].filter((n) => words.length > n * 2)
+      .map((n) => context(`${escape(words.slice(0, n).join(' '))},${escape(words.slice(-n).join(' '))}`));
+    candidates.push(context(escape(wanted)));
+    for (const body of candidates) {
+      const url = core.withFragment(cleanUrl, `#:~:text=${body}`);
+      const resolved = resolveUrl(url, root);
+      if (resolved && squash(resolved.range.toString()) === wanted) return url;
+    }
+    throw new Error('The passage link would be ambiguous on this page.');
+  }
+
   const api = {
+    urlForRange,
     boundaryPoint,
     buildStructureIndex,
     buildTextIndex,

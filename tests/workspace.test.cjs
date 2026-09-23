@@ -27,7 +27,7 @@ function fixture() {
       if(o.files || !o.args || typeof o.args[0] === 'boolean')return [{documentId:`doc${id}`,result:true}];
       return [{documentId:`doc${id}`,result:{ok:true,value:o.args[0]==='search'?{url:tabs.find(t=>t.id===id).url,title:`Title ${id}`,characters:100,limited:false,results:[{index:0,preview:'Privilege and waiver.',marks:[{start:0,end:9}]}]}:true}}];}}
   };
-  return {api,tabs,store,calls,broker:createBroker(api),panel:{id:'extension',url:api.runtime.getURL('sonar.html'),documentId:'panelA'}};
+  return {api,tabs,store,calls,broker:createBroker(api),panel:{id:'extension',url:api.runtime.getURL('sonar.html'),origin:'chrome-extension://extension'}};
 }
 const request = (scope='all',sequence=1) => ({type:'SONAR_SEARCH',query:'privileg* waiv*',mode:'p',scope,sequence,originTabId:1,workspace:UUID,incognito:false});
 
@@ -63,7 +63,7 @@ test('panel workspace searches exact scopes and does not retarget when a result 
 
 test('only the packaged panel can share workspaces; page senders cannot forge one',async()=>{
   const f=fixture();
-  const bad=[{...f.panel,url:'https://evil.test'},{...f.panel,id:'other'},{...f.panel,tab:f.tabs[0],frameId:0}, {...f.panel,documentId:null}];
+  const bad=[{...f.panel,url:'https://evil.test'},{...f.panel,id:'other'},{...f.panel,tab:f.tabs[0],frameId:0}];
   for(const sender of bad)await assert.rejects(f.broker.handle(request(),sender),/sender/);
   await assert.rejects(f.broker.handle({...request(),workspace:'bad'},f.panel),/workspace/);
   await assert.rejects(f.broker.handle({...request(),incognito:true},f.panel),/private/);
@@ -72,7 +72,7 @@ test('only the packaged panel can share workspaces; page senders cannot forge on
 test('exact navigation survives worker restart and panel handoff, but rejects stale URLs, groups and document IDs',async()=>{
   const f=fixture(),r=await f.broker.handle(request(),f.panel),restarted=createBroker(f.api);
   const go={...request(),type:'SONAR_GO',session:r.session,ticket:r.ticket,id:2};
-  await restarted.handle(go,{...f.panel,documentId:'panelB'});
+  await restarted.handle(go,f.panel);
   assert.ok(f.calls.some(([type,id])=>type==='activate'&&id===3));
   f.tabs[2].windowId=14; await assert.rejects(restarted.handle(go,f.panel),/navigated/);f.tabs[2].windowId=11;
   f.tabs[2].url+='/changed'; await assert.rejects(restarted.handle(go,f.panel),/navigated/);f.tabs[2].url=r.results[2].url;
