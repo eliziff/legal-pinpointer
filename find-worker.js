@@ -192,9 +192,9 @@
                 ticket: state.ticket, deadline: end, refresh: Boolean(message.refresh), notify: Boolean(state.panel) }]), Math.max(1, end - Date.now()));
               if (!alive()) return [];
               const normalized = pageResults(value, tab, target, terms);
-              if (ranked) { rankedPages.push({ tabId: tab.id, stats: value.ranked, results: normalized }); return []; }
               characters += Number.isSafeInteger(value.characters) ? Math.max(0, Math.min(4_000_000, value.characters)) : 0;
               searched++; limited ||= Boolean(value.limited) || value.results.length > 200;
+              if (ranked) { rankedPages.push({ tabId: tab.id, stats: value.ranked, results: normalized }); return []; }
               return normalized;
             } catch (error) {
               // Promise.race alone does not cancel an executeScript job.
