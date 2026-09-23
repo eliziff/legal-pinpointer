@@ -1,0 +1,16 @@
+{
+  "comment": "Which A2AJ datasets go into the package. 'include' entries may end in * (prefix match). 'exclude' drops individual documents whose first 5000 characters match headRegex (case-insensitive). English text only.",
+  "sources": {
+    "cases": "%LOCALAPPDATA%/OpenLegalProducts/LegalData/providers/a2aj/a2aj-cases-fulltext.sqlite",
+    "laws": "%LOCALAPPDATA%/OpenLegalProducts/LegalData/providers/a2aj/a2aj-laws-fulltext.sqlite"
+  },
+  "include": [
+    "SCC", "FCA", "FC", "CMAC", "CHRT", "CT", "SCT", "RAD", "RPD", "RLLR",
+    "ONCA", "BCCA", "BCSC", "NSCA", "NSSC", "NSPC", "NSFC", "NSSM", "YKCA",
+    "LEGISLATION-*", "REGULATIONS-*"
+  ],
+  "notIncluded": "TCC (tax), SST, FPSLREB, CITT, CIRB, OHSTC, TATC, CART, OIC, PSDPT",
+  "exclude": [
+    {"datasets": ["FCA", "SCC"], "headRegex": "tax court of canada", "why": "appeals from the Tax Court of Canada (tax matters)"}
+  ]
+}
