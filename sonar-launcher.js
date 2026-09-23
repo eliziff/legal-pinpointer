@@ -50,7 +50,7 @@
           await api.tabs.create({ windowId: window.id, url, active: true });
           return { opened: true };
         });
-      } else if (['SONAR_SEARCH', 'SONAR_GO', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL'].includes(message?.type)) {
+      } else if (['SONAR_SEARCH', 'SONAR_GO', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_COPY'].includes(message?.type)) {
         task = broker.handle(message, sender);
       } else return false;
       task.then(value => respond({ ok: true, ...value })).catch(error => respond({ ok: false, message: error.message }));
