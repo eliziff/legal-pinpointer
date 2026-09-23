@@ -123,6 +123,20 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
     copied = await clipboard();
     assert.equal(copied.plain, 'at para 1');
     assert.match(copied.html, /2024scc2\.html#par1"/);
+    // Every row of the ranked (possibly reordered) list opens and copies its own passage.
+    const ranked = await panel.evaluate(() => [...document.querySelectorAll('#result-rows [data-result]')].map(row => ({
+      at: row.dataset.result, title: row.querySelector('.result-title').textContent, text: row.querySelector('.result-text').textContent.replace(/^…|…$/g, '') })));
+    assert.ok(ranked.length >= 3);
+    for (const row of ranked) {
+      await panel.evaluate(() => { document.querySelector('#notice').textContent = ''; });
+      await panel.locator(`#result-rows [data-result="${row.at}"]`).click({ position: { x: 4, y: 4 } });
+      await panel.waitForFunction(() => /Opened the exact passage/.test(document.querySelector('#notice').textContent));
+      await panel.evaluate(() => { document.querySelector('#notice').textContent = ''; });
+      await panel.click('#copy-quote'); await panel.waitForFunction(() => /^Copied/.test(document.querySelector('#notice').textContent));
+      copied = await clipboard();
+      assert.ok(copied.plain.includes(row.text), `row ${row.at} copies its own passage: ${copied.plain}`);
+      assert.match(copied.html, row.title.startsWith('Alpha') ? /2024scc1\.html/ : /2024scc2\.html/, `row ${row.at} links its own judgment`);
+    }
     assert.deepEqual(errors, []);
   } finally {
     await cdp?.close().catch(() => {});
