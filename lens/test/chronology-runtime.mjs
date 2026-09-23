@@ -11,7 +11,7 @@ const call=(type,args)=>new Promise((resolve,reject)=>{const n=++id;calls++;pend
 const initialized=call('init',{assets});
 const decisions={start:()=>initialized,decide:(state,question)=>call('decide',{state,question}),rank:(text,query)=>call('rank',{text,query,context:''})};
 const corpus=JSON.parse(await readFile(new URL('chronology-fixtures.json',import.meta.url),'utf8'));
-const cat=createCatalogue();const start=performance.now();await makeChronology(corpus.sources,cat,decisions);
+const cat=createCatalogue();const start=performance.now();await makeChronology(corpus.sources,cat,decisions,{deep:true});
 const checks=[];const check=(name,fn)=>{try{fn();checks.push({name,passed:true});}catch(e){checks.push({name,passed:false,error:e.message});}};
 console.log('ACTUAL EVENTS',JSON.stringify(cat.events,null,2));console.log('MENTIONS',JSON.stringify(cat.mentions,null,2));console.log('OMITTED',JSON.stringify(cat.omitted,null,2));
 check('Different construction milestones in a single sentence become distinct events',()=>{const rows=cat.mentions.filter(m=>m.sourceId==='project');assert.equal(rows.length,2);assert.deepEqual(rows.map(m=>m.date),['2026-05-03','2026-09-18']);});
@@ -25,6 +25,6 @@ check('Ambiguous numeric dates and missing years stay unresolved',()=>{assert.eq
 check('Original spans validate against their sources',()=>validateCatalogue(cat,corpus.sources));
 const pairResults=[];for(const pair of corpus.pairs){const result=await sameEvent(pair.a,pair.b,decisions);pairResults.push({...pair,result});check('Event matching: '+pair.a.text+' / '+pair.b.text,()=>assert.equal(result,pair.same));}
 check('Same construction start collects multiple sources',()=>assert.ok(cat.events.some(e=>e.mentionIds.some(id=>id.startsWith('project:'))&&e.mentionIds.some(id=>id.startsWith('progress:')))));
-const before=calls;await makeChronology(corpus.sources,cat,decisions);check('Rebuilding unchanged documents reuses discovery and matching',()=>assert.equal(calls,before));
+const before=calls;await makeChronology(corpus.sources,cat,decisions,{deep:true});check('Rebuilding unchanged documents reuses discovery and matching',()=>assert.equal(calls,before));
 const evidence={passed:checks.every(c=>c.passed),runtime:'Actual packaged Laya ONNX with ONNX Runtime Web WASM; no mocked judgments',ms:performance.now()-start,calls,checks,pairResults,catalogue:cat};
 await mkdir(new URL('../dist/',import.meta.url),{recursive:true});await writeFile(new URL('../dist/chronology-validation.json',import.meta.url),JSON.stringify(evidence,null,2));console.log(JSON.stringify({passed:evidence.passed,checks,pairResults},null,2));assert.ok(evidence.passed,'Chronology acceptance failed; inspect saved actual outputs.');

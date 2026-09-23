@@ -45,7 +45,7 @@ async function applyFocus(signal){const focus=$('focus').value.trim();if(!focus)
   for(const e of catalogue.events){cancelled(signal);const key=focus+'\0'+e.text;let score=focusCache.get(key);if(score==null){score=(await decisions.rank(e.text,focus,'',signal)).noul;focusCache.set(key,score);}e.relevance=score;}$('filter').value='focus';
 }
 async function build(){if(!sources.length){status('Add documents first.');return;}closeInspector();await operation(async signal=>{
-  try{status('Finding events…');await makeChronology(sources,catalogue,decisions,{signal,onProgress:p=>{partialEvents();if(performance.now()-renderAt>400){renderAt=performance.now();render();}status(p.phase==='discover'?'Finding events…':'Collecting repeated mentions…');}});await applyFocus(signal);page=0;status('');}
+  try{status('Finding events…');await makeChronology(sources,catalogue,decisions,{signal,deep:$('thorough').checked,onProgress:p=>{partialEvents();if(performance.now()-renderAt>400){renderAt=performance.now();render();}status(p.phase==='discover'?'Finding events…':'Collecting repeated mentions…');}});await applyFocus(signal);page=0;status('');}
   finally{partialEvents();}
 });}
 function rowsForExport(){return visible().map(e=>[e.date+(e.dateEnd?' – '+e.dateEnd:''),e.text,mentions(e).map(sourceLabel).join('\n'),e.note||'']);}
