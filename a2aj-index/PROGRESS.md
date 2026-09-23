@@ -19,11 +19,24 @@ Heavy commands go through the shared serial lock (`SP` = the session scratchpad,
 - Fixes: eval targets now come from `bench/queries.json` (all case targets, not only P); folder picker falls back to
   the folder input when `showDirectoryPicker` is blocked.
 
+- s50 browser bench + UI check pass (file:// page, folder input, court/date filters, 390 px layout).
+- Extra baselines on the 49 legal queries (bench/baselines.json): FTS5 12.5 GB keyword R@20 0.308, NL 0.655;
+  A2AJ API keyword 0.462, NL 0.655.
+- Tax head rule audited (`$SP/a2aj-index/tax-audit.mjs`): drops FCA 1478 + SCC 42; a 25-doc sample of the 252 without a
+  tax word in the head are all appeals from the Tax Court (costs, EI insurability, procedure).
+- v1 full build (format /1): 14.3 min, peak RSS 1.4 GB, 2.44 GB in 6 files (text-000 1.75 GB), 208,235 docs,
+  9.57 M passages. Bench (bench/results/full.json): open 197 ms; cold p50/p95 phrase 113/1157, keyword 82/378,
+  NL 145/503 ms; warm NL 116/354; peak 253 MB. Quality: bench:nl R@20 0.697 / MRR 0.467 (FTS5 0.727 / 0.583),
+  legal keyword 0.231 / 0.019, legal NL 0.655 / 0.333. Diagnosis (scratch/diag.mjs): lower-court passages restating a
+  doctrine outrank the leading case; keyword queries name the case ("Jordan", "Oakes", "Ward").
+- v2 (format /2): title field (style of cause + citations -> doc postings) and cited-by counts (citations in the text
+  mapped through A2AJ citation_lookup keys) at build; engine ranks documents = best passage + QMAX * (title * sum title
+  idf + authority * log10(1 + cited-by)); page shows one card per document with up to 2 passages.
+
 ## Next
-1. s50 sample rebuild + headless bench (validates the browser path end to end).
-2. Full build into `$SP/a2aj-index/full` (expect ~2.5-3 GB, 1-2 h at idle priority).
-3. Full bench: cold (`--cold-copy`) + warm; quality vs baselines; memory.
-4. Page check in headless Chromium (screenshot); work-laptop steps; final report tables.
+1. s50 v2 (8 MB shards to exercise multi-file reads): arms via bench/quality.mjs, bench, UI check.
+2. Full v2 build; arms {title 0/1} x {authority 0/0.5/1}; pick the default by both query sets; full cold+warm bench.
+3. Work-laptop steps; final report tables (bench/tables.mjs).
 
 ## Commands
 ```

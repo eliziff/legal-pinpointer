@@ -1,19 +1,21 @@
 // Builds the static A2AJ passage index from the local A2AJ full-text SQLite files (read-only).
 //
 //   node --max-old-space-size=3500 build/build-index.mjs --out <dir> [--config build/datasets.json]
-//        [--sample N] [--eval-docs bench/queries.json --eval-out eval-passages.json] [--fts5 <dir>]
+//        [--sample N] [--eval-docs bench/queries.json --eval-out eval-passages.json] [--fts5 <dir>] [--shard-limit bytes (test)]
 //
 // Output (every file <= 2,000,000,000 bytes, so each can be a GitHub release asset):
 //   manifest.json  counts, parameters, file list, per-dataset sizes
-//   meta.bin       deflate-raw: arrays loaded when the folder is opened (doc->passage ranges, dates, courts,
-//                  text/docs block offsets, first term of every dictionary block)
-//   dict.bin       sorted term dictionary in blocks of 64 front-coded entries (df, postings location, max impact)
-//   post-NNN.bin   postings (block-packed passage ids + 4-bit BM25 impacts, skip table per term)
+//   meta.bin       deflate-raw: arrays loaded when the folder is opened (doc->passage ranges, dates, courts, cited-by
+//                  counts, text/docs block offsets, first term of every dictionary block)
+//   dict.bin       sorted term dictionary in blocks of 64 front-coded entries (df, postings location, max impact,
+//                  title df and title postings location)
+//   post-NNN.bin   passage postings (block-packed passage ids + 4-bit BM25 impacts, skip table per term), then
+//                  title postings (varint gaps of the documents whose style of cause or citation holds the term)
 //   text-NNN.bin   passage text, ~64 KB blocks, deflate-raw (DecompressionStream in the browser)
 //   docs.bin       per-document metadata (citation, style of cause, date, URL), 64 docs per deflate-raw block
 import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'; import zlib from 'node:zlib';
 import {DatabaseSync} from 'node:sqlite';
-import {tokens, term} from '../src/tokenize.mjs';
+import {tokens, term, terms} from '../src/tokenize.mjs';
 import {B, K1, BM25_B, quantize, encodeBlock, putVarint} from '../src/format.mjs';
 
 try { os.setPriority(os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {}
@@ -22,7 +24,7 @@ const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z
 const OUT = opt('--out'); if (!OUT) throw new Error('--out <dir> required');
 const config = JSON.parse(fs.readFileSync(opt('--config', path.join(HERE, 'datasets.json')), 'utf8'));
 const SAMPLE = +opt('--sample', 1), FTS5 = opt('--fts5'), EVAL_DOCS = opt('--eval-docs'), EVAL_OUT = opt('--eval-out');
-const LIMIT = 2_000_000_000, TEXT_BLOCK = 64 * 1024, DOCS_BLOCK = 64, DICT_BLOCK = 64, SEG = 1 << 24;
+const LIMIT = Math.min(2_000_000_000, +opt('--shard-limit', 2e9)), TEXT_BLOCK = 64 * 1024, DOCS_BLOCK = 64, DICT_BLOCK = 64, SEG = 1 << 24;
 const MINW = 60, MAXW = 260, CHUNKW = 180; // passage size in words
 const expand = p => p.replace(/%([^%]+)%/g, (_, v) => process.env[v] || '');
 fs.mkdirSync(OUT, {recursive: true});
@@ -44,6 +46,18 @@ const dsIndex = new Map(dsOrder.map((d, i) => [d, i]));
 docs.sort((a, b) => dsIndex.get(a.ds) - dsIndex.get(b.ds) || a.date.localeCompare(b.date) || a.si - b.si || a.id - b.id);
 if (SAMPLE > 1) docs = docs.filter((d, i) => i % SAMPLE === 0 || (d.si === 0 && evalDocs.has(d.id)));
 lap(`${docs.length} candidate documents in ${dsOrder.length} datasets`);
+
+// Citation graph for the authority prior: A2AJ's citation_lookup keys are the citation's lowercase letters and digits
+// ("2016scc27", "19911scr742", "rsc1985cc46"), so a citation found in the text maps to its document by the same
+// normalization. Patterns follow core.js (neutralCitations, reporterCandidates) plus statute chapters.
+const citeKey = new Map(); // key -> source * 1e8 + id; -1 when the key names more than one document
+for (const [si, s] of sources.entries())
+  for (const r of s.db.prepare('SELECT citation_key k, document_id d FROM citation_lookup').all()) {
+    const v = si * 1e8 + r.d, old = citeKey.get(r.k); citeKey.set(r.k, old === undefined || old === v ? v : -1);
+  }
+const CITE = /\b(?:18|19|20)\d{2}\s+[A-Z][A-Z0-9-]{1,15}\s+\d+\b|\[(?:18|19|20)\d{2}\]\s+\d+\s+(?:S\.?\s?C\.?\s?R|R\.?\s?C\.?\s?S)\.?\s+\d+|\b(?:R\.?\s?)?S\.?\s?(?:[A-Z]\.?\s?){1,3}\s*(?:18|19|20)\d{2},?\s+c\.?\s*[A-Z]{0,2}-?\d+(?:\.\d+)?/g;
+const citedBy = new Map(); // source * 1e8 + id -> number of indexed documents citing it
+lap(`${citeKey.size} citation keys`);
 
 // ---------- writers ----------
 class Out { // sequential writer with a big buffer
@@ -71,6 +85,7 @@ let segT = new Uint32Array(SEG), segP = new Uint32Array(SEG), segF = new Uint8Ar
 const text = new Sharded('text'), tb = {firstPid: [], file: [], off: [], len: []};
 let tbParts = [], tbBytes = 0, tbFirst = 0, tbDs = new Map();
 const docsOut = new Out(path.join(OUT, 'docs.bin')), docBlockOff = [0]; let docRows = [];
+let titleT = new Uint32Array(1 << 20), titleD = new Uint32Array(1 << 20), nTitle = 0; const docKey = [];
 const docFirstPid = [], docDate = [], docDs = [], dsStats = dsOrder.map(code => ({code, docs: 0, passages: 0, chars: 0, textBytes: 0, postings: 0, postBytes: 0, firstPid: 0, endPid: 0, firstDoc: 0, endDoc: 0}));
 const evalMap = {}; let fts;
 if (FTS5) {
@@ -162,6 +177,17 @@ for (const [k, d] of docs.entries()) {
   docFirstPid.push(P); docDate.push(+(r.d || '0').slice(0, 10).replace(/-/g, '') || 0); docDs.push(ds);
   docRows.push([sources[d.si].name[0], d.id, d.ds, (r.d || '').slice(0, 10), r.c || '', r.c2 || '', r.n || '', r.u || '']);
   if (docRows.length === DOCS_BLOCK) flushDocs();
+  // title field (style of cause + citations): one posting per distinct term
+  for (const t of new Set(terms(`${r.n || ''} ${r.c || ''} ${r.c2 || ''}`))) {
+    let id = vocab.get(t); if (id === undefined) { id = V++; vocab.set(t, id); termList.push(t); if (V > df.length) { df = grow(df, V); cnt = grow(cnt, V); } }
+    if (nTitle === titleT.length) { titleT = grow(titleT, nTitle + 1); titleD = grow(titleD, nTitle + 1); }
+    titleT[nTitle] = id; titleD[nTitle++] = D;
+  }
+  // documents this one cites (each counted once, never itself)
+  const self = d.si * 1e8 + d.id, cites = new Set();
+  for (const m of body.matchAll(CITE)) { const v = citeKey.get(m[0].toLowerCase().replace(/[^a-z0-9]/g, '')); if (v > 0 && v !== self) cites.add(v); }
+  for (const v of cites) citedBy.set(v, (citedBy.get(v) || 0) + 1);
+  docKey.push(self);
   st.docs++; D++;
   const spans = segment(body);
   if (d.si === 0 && evalDocs.has(d.id)) evalMap[d.id] = spans.map(([a, b], i) => [P + i, a, b]);
@@ -246,6 +272,23 @@ for (;;) {
   const [file, off] = post.write(enc.subarray(0, pos));
   tFile[t] = file; tOff[t] = off; tLen[t] = pos; tMaxQ[t] = maxQ; totalPostings += n;
 }
+// title postings: per term, the documents whose style of cause / citations contain it (varint gaps of document numbers)
+const tdf = new Uint32Array(V), ttFile = new Uint8Array(V), ttOff = new Uint32Array(V), ttLen = new Uint32Array(V);
+{
+  const count = new Uint32Array(V + 1); for (let i = 0; i < nTitle; i++) count[titleT[i] + 1]++;
+  for (let t = 0; t < V; t++) count[t + 1] += count[t];
+  const docsOf = new Uint32Array(nTitle), at = count.slice(0, V);
+  for (let i = 0; i < nTitle; i++) docsOf[at[titleT[i]]++] = titleD[i]; // stable: document numbers stay increasing
+  let buf = new Uint8Array(1 << 16), titleBytes = 0;
+  for (let t = 0; t < V; t++) {
+    const s = count[t], e = count[t + 1]; if (s === e) continue;
+    if ((e - s) * 5 > buf.length) buf = new Uint8Array((e - s) * 5);
+    let pos = 0, prev = -1; for (let j = s; j < e; j++) { pos = putVarint(buf, pos, docsOf[j] - prev - 1); prev = docsOf[j]; }
+    const [file, off] = post.write(buf.subarray(0, pos)); tdf[t] = e - s; ttFile[t] = file; ttOff[t] = off; ttLen[t] = pos; titleBytes += pos;
+  }
+  lap(`title postings: ${nTitle} postings, ${titleBytes} bytes; cited documents: ${citedBy.size}`);
+}
+titleT = titleD = null;
 const postFiles = post.finish();
 fs.rmSync(TMP, {recursive: true, force: true});
 dsStats.forEach((s, i) => { s.postBytes = dsPost[i]; });
@@ -262,6 +305,7 @@ for (let s = 0; s < V; s += DICT_BLOCK) {
     let p = 0; while (p < prev.length && p < t.length && p < 255 && prev[p] === t[p]) p++;
     const suf = te.encode(t.slice(p)); enc2[pos++] = p; enc2[pos++] = suf.length; enc2.set(suf, pos); pos += suf.length;
     pos = putVarint(enc2, pos, df[id]); enc2[pos++] = tFile[id]; pos = putVarint(enc2, pos, tOff[id]); pos = putVarint(enc2, pos, tLen[id]); enc2[pos++] = tMaxQ[id];
+    pos = putVarint(enc2, pos, tdf[id]); if (tdf[id]) { enc2[pos++] = ttFile[id]; pos = putVarint(enc2, pos, ttOff[id]); pos = putVarint(enc2, pos, ttLen[id]); }
     prev = t;
   }
   dictFirst.push(termsArr[order[s]]); dictOut.write(enc2.subarray(0, pos)); dictOff.push(dictOut.size);
@@ -272,7 +316,7 @@ lap(`dictionary: ${V} terms, ${dictOut.size} bytes`);
 // ---------- 4. meta.bin + manifest ----------
 const arrays = {
   docFirstPid: Uint32Array.from(docFirstPid), docDate: Uint32Array.from(docDate), docDs: Uint8Array.from(docDs),
-  docBlockOff: Uint32Array.from(docBlockOff),
+  docBlockOff: Uint32Array.from(docBlockOff), docCitedBy: Uint32Array.from(docKey, k => citedBy.get(k) || 0),
   tbFirstPid: Uint32Array.from([...tb.firstPid, P]), tbOff: Uint32Array.from(tb.off), tbLen: Uint32Array.from(tb.len), tbFile: Uint8Array.from(tb.file),
   dictOff: Uint32Array.from(dictOff), dictFirst: te.encode(dictFirst.join('\n')),
 };
@@ -285,7 +329,7 @@ const docBytes = docsOut.size / D;
 const datasets = dsStats.filter(s => s.docs).map(s => ({code: s.code, docs: s.docs, passages: s.passages, firstPid: s.firstPid, endPid: s.endPid, firstDoc: s.firstDoc, endDoc: s.endDoc,
   textMB: +(s.chars / 1e6).toFixed(1), packageMB: +((s.textBytes + s.postBytes + s.docs * docBytes) / 1e6).toFixed(1),
   textStoreMB: +(s.textBytes / 1e6).toFixed(1), postingsMB: +(s.postBytes / 1e6).toFixed(1), postings: s.postings}));
-const manifest = {format: 'a2aj-passage-index/1', created: new Date().toISOString(), language: 'en', sample: SAMPLE,
+const manifest = {format: 'a2aj-passage-index/2', created: new Date().toISOString(), language: 'en', sample: SAMPLE,
   params: {B, K1, b: BM25_B, qmax: 15, minWords: MINW, maxWords: MAXW, chunkWords: CHUNKW, textBlock: TEXT_BLOCK, docsBlock: DOCS_BLOCK, dictBlock: DICT_BLOCK, textCodec: 'deflate-raw'},
   passages: P, docs: D, terms: V, postings: totalPostings, avgdl, layout, datasets,
   excluded: excludes.map(x => ({datasets: x.datasets, why: x.why, docs: x.n})),
