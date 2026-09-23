@@ -66,3 +66,73 @@ python $SP/heavy.py "a2aj full build" -- node --max-old-space-size=3500 build/bu
 python $SP/heavy.py "a2aj full bench" -- node bench/bench.mjs --index $SP/a2aj-index/full --eval $SP/a2aj-index/full-eval.json --tag full --cold-copy $SP/a2aj-index/full-cold
 node build/build-page.mjs   # rebuilds dist/a2aj-search.html
 ```
+
+## Final v2 (2026-09-23): ranking default {title: 0, authority: 1}
+
+Grid (12 arms, full index): any title weight hurt both query sets; cited-by authority helped both. Chosen: title 0, authority 1 (best bench:nl R@20 and best legal:nl R@20/MRR). Grid output: `$SP/a2aj-index/grid.json`.
+
+## Package: 2.44 GB in 5 files (largest 1.75 GB), 208,235 documents, 9,567,821 passages, 779,229 terms; build 15 min
+
+| file | bytes |
+| --- | ---: |
+| meta.bin | 1,722,470 |
+| dict.bin | 12,266,995 |
+| docs.bin | 5,757,176 |
+| text-000.bin | 1,750,629,688 |
+| post-000.bin | 673,571,805 |
+
+### Per dataset (text store + postings attributed by passage, docs metadata by document)
+
+| dataset | docs | passages | raw text MB | package MB |
+| --- | ---: | ---: | ---: | ---: |
+| BCCA | 14,638 | 605,373 | 373 | 165 |
+| BCSC | 52,085 | 3,092,363 | 1806 | 824 |
+| CHRT | 1,164 | 72,316 | 45 | 19 |
+| CMAC | 154 | 7,511 | 4 | 2 |
+| CT | 629 | 19,926 | 12 | 5 |
+| FC | 35,426 | 1,350,325 | 819 | 364 |
+| FCA | 6,272 | 195,323 | 117 | 52 |
+| NSCA | 4,739 | 205,621 | 122 | 55 |
+| NSFC | 323 | 20,642 | 12 | 5 |
+| NSPC | 1,610 | 95,467 | 58 | 27 |
+| NSSC | 9,219 | 539,224 | 315 | 145 |
+| NSSM | 1,658 | 45,368 | 26 | 12 |
+| ONCA | 23,883 | 592,269 | 364 | 161 |
+| RAD | 14,156 | 519,526 | 313 | 127 |
+| RLLR | 927 | 19,095 | 12 | 5 |
+| RPD | 6,729 | 223,544 | 141 | 61 |
+| SCC | 10,785 | 622,243 | 426 | 188 |
+| SCT | 44 | 11,144 | 7 | 3 |
+| YKCA | 271 | 13,329 | 8 | 4 |
+| LEGISLATION (all jurisdictions) | 6,163 | 672,327 | 304 | 105 |
+| REGULATIONS (all jurisdictions) | 17,360 | 644,885 | 281 | 98 |
+| **total** | 208,235 | 9,567,821 | 5566 | 2444 |
+
+Excluded by rule: appeals from the Tax Court of Canada (tax matters): 1520 documents
+
+## Latency (headless Chromium, file:// page, ms per query incl. passage text + metadata for 20 results)
+
+Folder open: 175 ms wall (file list + manifest + meta), worker open 73.4 ms. Pass 1 = cold disk (unbuffered copy) + fresh browser; pass 2 = warm.
+
+| type | n | cold p50 | cold p95 | warm p50 | warm p95 | MB read p50 / p95 (cold) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| phrase | 17 | 138 | 1102 | 240 | 1488 | 1.3 / 7.9 |
+| keyword | 15 | 162 | 472 | 155 | 1242 | 1.2 / 7.0 |
+| nl | 68 | 272 | 1199 | 317 | 1346 | 3.5 / 7.3 |
+
+Memory: peak working set 249 MB largest Chromium process, 391 MB all Chromium processes.
+
+## Quality vs baselines
+
+| query set | n | this: doc R@20 | MRR | passage R@10 | FTS5 12.5 GB: R@20 / MRR | FTS5 p50 ms | A2AJ API: R@20 / MRR | API p50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| bench:nl | 33 | 0.788 | 0.454 | 0.303 | 0.727 / 0.583 | 2275 | 0.606 / 0.338 | 1892 |
+| legal:keyword | 13 | 0.538 | 0.338 | - | 0.308 / 0.076 | 389 | 0.462 / 0.133 | 3242 |
+| legal:nl | 29 | 0.828 | 0.613 | - | 0.655 / 0.335 | 986 | 0.655 / 0.384 | 2172 |
+| legal:phrase | 2 | 1.000 | 0.625 | - | 1.000 / 0.538 | 1575 | 1.000 / 1.000 | 3115 |
+
+- bench:nl = the 39 paraphrase queries of search-bench minus 6 whose target is in an excluded dataset (OHSTC x3, TCC x2, SST); on all 39 the FTS5 baseline is R@20 0.641 / MRR 0.519 and the API 0.538 / 0.312 (search-bench/report.md). FTS5 and API rank whole documents over the full 225k-case corpus.
+- search-bench K-queries (12 exact phrases): FTS5 phrase p50 179 ms / p95 240 ms (cases DB).
+- legal:* = 49 legal-research queries (L01-L49 in bench/queries.json); targets are the leading case or statute. FTS5 and API rows: search-bench/src/ftslegal.mjs and api-legal.py (run 2026-09-23; FTS5 keyword/nl as OR of terms, phrases quoted; statute targets scored against the laws DB / doc_type=laws).
+
+UI check on the full index passed (file:// page, court/date filters, no errors); screenshots in `$SP/a2aj-index/shots-v2`.
