@@ -39,6 +39,10 @@ async function eventSpans(unit,decisions,signal){
   for(const match of boundaries){
     cancelled(signal);const left=unit.text.slice(last,match.index),right=unit.text.slice(match.index+match[0].length);
     if(left.trim().split(/\s+/).length<2||right.trim().split(/\s+/).length<3)continue;
+    // Distinct milestones in one sentence carry their own dates ("commenced on
+    // 3 May and was complete by 18 September"). Undated conjunctions join noun
+    // phrases far more often than events, so they are not offered for a split.
+    if(!dateCandidates(left).length||!dateCandidates(right).length)continue;
     const answer=await decisions.decide(`Before: ${left}\nAfter: ${right}`,{type:'noul',instructions:'Do these phrases describe two distinct events or milestones rather than parts or details of one event?',criteria:{true:'Separate happenings',false:'One happening, a name or a list'}},signal);
     if(yes(answer)<.7)continue;
     parts.push(span(unit.text,last,match.index));last=match.index+match[0].length;
@@ -86,12 +90,39 @@ export async function associateDate(source,block,event,decisions,signal){
 function resolvedDate(source,d,basis){
   return {date:d.date||'',dateEnd:d.dateEnd||'',dateText:d.raw,dateReason:d.reason||(!d.date?'Invalid or incomplete date.':''),dateOptions:[d],dateBasis:basis,dateEvidence:{sourceId:source.id,blockId:d.blockId,start:d.start,end:d.end}};
 }
+// What cannot narrate an event, screened before any model call: the model
+// rates headings, backsheets and email disclaimers as events with high
+// confidence, and each call costs real time. Screened text stays reviewable
+// under omitted passages.
+const DISCLAIMER=/intended recipient|received this (?:message|e-?mail|communication) in error|confidentiality notice|privileged (?:and|&) confidential|may contain (?:confidential|privileged)|destinataire vis[ée]|re[çc]u ce (?:message|courriel) par erreur/iu;
+const CONTACT=/\S+@\S+\.\w+|\+?\d[\d .()-]{7,}\d|\bLSO\b|\b[A-Z]\d[A-Z] ?\d[A-Z]\d\b/u;
+export function screen(text){
+  const letters=text.match(/\p{L}{2,}/gu)||[],words=text.trim().split(/\s+/u).length;
+  if(letters.length<2)return 'fragment';
+  const undated=dateCandidates(text).reduceRight((t,d)=>t.slice(0,d.start)+t.slice(d.end),text);
+  if(letters.join('').length<.7*undated.replace(/\s/gu,'').length)return 'fragment';
+  if(words<8&&!/[.!?…]["'’”)]*$/u.test(text.trim()))return 'heading or label';
+  const upper=letters.join('').replace(/\P{Lu}/gu,'').length;if(upper>.7*letters.join('').length)return 'heading or label';
+  if(DISCLAIMER.test(text))return 'disclaimer';
+  if(words<30&&CONTACT.test(text)&&!/\b(?:on|sent|wrote|called|met|received|delivered|signed)\b/iu.test(text))return 'contact details';
+  return '';
+}
 export function createCatalogue(){return {engine:ENGINE_VERSION,mentions:[],omitted:[],scanned:[],pairs:{},events:[],separations:[]};}
 function evidence(source,block,event){return {id:idFor(source,block,event.start,event.end),sourceId:source.id,blockId:block.id,start:event.start,end:event.end,quote:block.text.slice(event.start,event.end),communicated:source.communicated||'',quoted:Boolean(block.quoted),ocr:Boolean(block.ocr),locator:block.locator};}
 export async function discoverEvents(sources,catalogue,decisions,{signal,onProgress=()=>{}}={}){
   const completed=new Set(catalogue.scanned),known=new Set(catalogue.mentions.map(m=>m.id));
+  // Each dated email or letter is itself an event: sending it. Its header is
+  // exact source text, so no model judgment is needed or spent on it.
+  for(const source of sources)for(const block of source.blocks)for(const c of block.correspondence||[]){
+    const ev=evidence(source,block,c);if(known.has(ev.id))continue;known.add(ev.id);
+    catalogue.mentions.push({...ev,text:c.text,date:c.date,dateEnd:'',dateText:c.dateText,dateReason:'',dateOptions:[],dateBasis:`${c.kind} header`,
+      dateEvidence:{sourceId:source.id,blockId:block.id,start:c.start,end:c.end},uncertain:false,document:c.kind});
+  }
   for(const source of sources)for(const block of source.blocks)for(const unit of sentenceUnits(block.text,source.language)){
     cancelled(signal);const unitId=idFor(source,block,unit.start,unit.end);if(completed.has(unitId))continue;
+    if((block.correspondence||[]).some(c=>unit.start>=c.start&&unit.end<=c.end)){catalogue.scanned.push(unitId);completed.add(unitId);continue;}
+    const screened=screen(unit.text);
+    if(screened){catalogue.omitted.push({...evidence(source,block,unit),probability:0,basis:screened});catalogue.scanned.push(unitId);completed.add(unitId);continue;}
     const finding=await isEvent(unit.text,decisions,signal,source.language),added=[],omitted=[];
     if(finding.include){
       const parts=await eventSpans(unit,decisions,signal);
