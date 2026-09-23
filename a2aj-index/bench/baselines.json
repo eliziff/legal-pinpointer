@@ -1,0 +1,14 @@
+{
+ "columns": ["FTS5 12.5 GB: R@20 / MRR", "FTS5 p50 ms", "A2AJ API: R@20 / MRR", "API p50 ms"],
+ "rows": {
+  "bench:nl": {"FTS5 12.5 GB: R@20 / MRR": "0.727 / 0.583", "FTS5 p50 ms": "2275", "A2AJ API: R@20 / MRR": "0.606 / 0.338", "API p50 ms": "1892"},
+  "legal:keyword": {"FTS5 12.5 GB: R@20 / MRR": "0.308 / 0.076", "FTS5 p50 ms": "389", "A2AJ API: R@20 / MRR": "0.462 / 0.133", "API p50 ms": "3242"},
+  "legal:nl": {"FTS5 12.5 GB: R@20 / MRR": "0.655 / 0.335", "FTS5 p50 ms": "986", "A2AJ API: R@20 / MRR": "0.655 / 0.384", "API p50 ms": "2172"},
+  "legal:phrase": {"FTS5 12.5 GB: R@20 / MRR": "1.000 / 0.538", "FTS5 p50 ms": "1575", "A2AJ API: R@20 / MRR": "1.000 / 1.000", "API p50 ms": "3115"}
+ },
+ "notes": [
+  "bench:nl = the 39 paraphrase queries of search-bench minus 6 whose target is in an excluded dataset (OHSTC x3, TCC x2, SST); on all 39 the FTS5 baseline is R@20 0.641 / MRR 0.519 and the API 0.538 / 0.312 (search-bench/report.md). FTS5 and API rank whole documents over the full 225k-case corpus.",
+  "search-bench K-queries (12 exact phrases): FTS5 phrase p50 179 ms / p95 240 ms (cases DB).",
+  "legal:* = 49 legal-research queries (L01-L49 in bench/queries.json); targets are the leading case or statute. FTS5 and API rows: search-bench/src/ftslegal.mjs and api-legal.py (run 2026-09-23; FTS5 keyword/nl as OR of terms, phrases quoted; statute targets scored against the laws DB / doc_type=laws)."
+ ]
+}
