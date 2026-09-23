@@ -4,7 +4,7 @@
   function createBroker(api) {
     const prefix = 'pinpointer-sonar:', TTL = 15 * 60_000, MAX_RESULTS = 1000, CONCURRENCY = 4, MAX_INDEX_CHARS = 32_000_000;
     const pending = new Map(), running = new Map(), gates = new Map();
-    const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW']);
+    const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_COPY']);
     const sessionKey = sender => sender.workspace
       ? `${prefix}workspace:${sender.workspace}` : `${prefix}${sender.tab.id}:${sender.documentId}`;
     const panelURL = () => api.runtime.getURL('sonar.html');
@@ -196,7 +196,7 @@
         if (run.cancelled && state) void dispose(state, true);
       }
     }
-    async function go(message, sender) {
+    async function issued(message, sender) {
       const state = await load(message.session);
       if (!state || (sender.workspace && state.incognito !== sender.incognito) || Date.now() - state.updated > TTL || state.ticket !== message.ticket || message.session !== sessionKey(sender)) throw new Error('Search expired. Refresh the results.');
       if (!Number.isInteger(message.id) || message.id < 0) throw new Error('Choose a search result.');
@@ -209,6 +209,34 @@
           (state.scope === 'group' && (tab.groupId !== state.groupId || tab.windowId !== state.windowId))) {
         throw new Error('The tab navigated or left this group. Refresh the search.');
       }
+      return { state, result, tab };
+    }
+    // Copy uses Pinpointer's own quote/pinpoint/link builders where the page has
+    // them (content.js on supported legal sites), else a text-fragment link.
+    async function copyResult(message, sender) {
+      if (!['quote', 'pinpoint', 'link', 'citation'].includes(message.mode)) throw new Error('Invalid copy action.');
+      const { state, result } = await issued(message, sender);
+      const [probe] = await api.scripting.executeScript({ target: keyFor(result),
+        func: () => Boolean(globalThis.LegalPinpointerSonarCopy || globalThis.LegalPinpointerTextFragments) });
+      if (!probe?.result) await api.scripting.executeScript({ target: keyFor(result), files: ['canlii-courts.js', 'core.js', 'text-fragments.js'] });
+      const [entry] = await api.scripting.executeScript({ target: keyFor(result), args: [state.ticket, result.index, message.mode],
+        func: async (ticket, index, mode) => {
+          try {
+            const page = globalThis.LegalPinpointerSearchPage, range = page.passage(ticket, index);
+            if (globalThis.LegalPinpointerSonarCopy) {
+              try { return { ok: true, value: (await globalThis.LegalPinpointerSonarCopy(range, mode)).payload }; }
+              catch (error) { if (!/supported legal document|No page, paragraph, or provision/.test(error.message)) throw error; }
+            }
+            return { ok: true, value: page.plainCopy(range, mode) };
+          } catch (error) { return { ok: false, message: String(error.message || error).slice(0, 240) }; }
+        } });
+      if (!entry?.result?.ok) throw new Error(entry?.result?.message || 'The document is no longer available.');
+      const { plain, html } = entry.result.value || {};
+      if (typeof plain !== 'string' || typeof html !== 'string') throw new Error('The page returned nothing to copy.');
+      return { plain: plain.slice(0, 200_000), html: html.slice(0, 400_000) };
+    }
+    async function go(message, sender) {
+      const { state, result, tab } = await issued(message, sender);
       if (state.panel || result.tabId === state.origin.tabId) await invoke(result, 'preview', [state.ticket, result.index, true]);
       else await invoke(result, 'reveal', [state.ticket, result.index, message.session]);
       if (message.type === 'SONAR_PREVIEW') return { previewed: true };
@@ -228,14 +256,15 @@
     }
     async function handle(message, sender) {
       if (!messageTypes.has(message?.type)) return null;
-      if (sender?.id !== api.runtime.id || typeof sender.documentId !== 'string') throw new Error('Invalid search sender.');
+      if (sender?.id !== api.runtime.id) throw new Error('Invalid search sender.');
+      // Chrome gives the side panel no tab, frame or documentId; page senders always have them.
       if (!sender.tab && sender.url === panelURL()) {
         if (!/^[a-f0-9-]{36}$/.test(message.workspace || '') || typeof message.incognito !== 'boolean') throw new Error('Invalid workspace.');
         if (message.type === 'SONAR_SEARCH' && !Number.isInteger(message.originTabId)) throw new Error('Choose an origin tab.');
         // Only the packaged, non-web-accessible extension page may share a workspace
         // across windows. Page senders are never allowed to supply this identity.
         sender = { ...sender, workspace: message.workspace, incognito: message.incognito };
-      } else if (message.workspace !== undefined || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 ||
+      } else if (message.workspace !== undefined || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 || typeof sender.documentId !== 'string' ||
           !/^(https?|file):/.test(sender.url || '')) throw new Error('Invalid search sender.');
       if (message.type === 'SONAR_SEARCH') return search(message, sender);
       if (message.type === 'SONAR_CLOSE' || message.type === 'SONAR_CANCEL') {
@@ -278,6 +307,7 @@
         return { returned: true };
       }
       if (message.type === 'SONAR_GO' || message.type === 'SONAR_PREVIEW') return go(message, sender);
+      if (message.type === 'SONAR_COPY') return copyResult(message, sender);
       return returnToSearch(message, sender);
     }
     async function open(tab) {

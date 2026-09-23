@@ -14,6 +14,7 @@
     "test:pinpointer:browser": "node --test tests/pinpointer-browser.test.cjs tests/text-hotpaths-browser.test.cjs",
     "benchmark:pinpointer": "node tools/benchmark-pinpointer.cjs",
     "benchmark:text": "node tools/benchmark-text-hotpaths.cjs",
-    "test:workspace": "node --test tests/workspace.test.cjs tests/workspace-browser.test.cjs"
+    "test:workspace": "node --test tests/workspace.test.cjs tests/workspace-browser.test.cjs",
+    "test:extension": "node --test tests/extension-sonar.test.cjs"
   }
 }

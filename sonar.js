@@ -23,7 +23,7 @@
   }
   function controls() {
     const ready = route === 'tabs' && !busy && !result?.stale && current >= 0 && Boolean(result?.results[current]);
-    for (const id of ['previous', 'next', 'open', 'back']) $(id).disabled = !ready;
+    for (const id of ['previous', 'next', 'open', 'back', 'copy-quote', 'copy-pinpoint', 'copy-link']) $(id).disabled = !ready;
     $('list-viewport').setAttribute('aria-busy', busy); $('list-viewport').inert = busy || Boolean(result?.stale);
   }
   function labels() {
@@ -180,6 +180,21 @@
     } catch (error) { if (token === sequence) tell(error.message, true); }
     finally { opening = false; }
   }
+  // The clipboard write starts inside the click/key gesture; its contents
+  // resolve once the source tab has built them with Pinpointer's formatting.
+  async function copyPassage(mode) {
+    if (busy || result?.stale || route !== 'tabs' || current < 0 || !result) return;
+    const token = sequence, request = send('SONAR_COPY', { session: result.session, ticket: result.ticket, id: current, mode });
+    const blob = type => request.then(reply => new Blob([type === 'text/html' ? reply.html : reply.plain], { type }));
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob('text/plain'), 'text/html': blob('text/html') })]);
+      const { plain } = await request;
+      if (token === sequence) tell(`Copied: ${plain.length > 90 ? `${plain.slice(0, 90)}…` : plain}`);
+    } catch (error) {
+      const reason = await request.then(() => error, failure => failure);
+      if (token === sequence) tell(reason.message || 'Could not copy.', true);
+    }
+  }
   async function externalSearch(event) {
     event?.preventDefault(); if (opening) return;
     canliiQuery = $('query').value;
@@ -234,6 +249,8 @@
   $('use-active').onclick = () => useActive().catch(error => tell(error.message, true));
   $('refresh').onclick = () => schedule(0, true);
   $('previous').onclick = () => move(-1); $('next').onclick = () => move(1);
+  $('copy-quote').onclick = () => copyPassage('quote'); $('copy-pinpoint').onclick = () => copyPassage('pinpoint');
+  $('copy-link').onclick = () => copyPassage('link');
   $('open').onclick = () => visit(false); $('back').onclick = () => visit(true); $('clear').onclick = clear;
   $('issues').onclick = () => $('issue-popover').showPopover();
   document.addEventListener('keydown', event => {
@@ -245,6 +262,12 @@
       event.preventDefault(); event.shiftKey ? scopeCycle() : modeCycle();
     } else if (event.key === 'Enter' && event.target === $('query')) {
       event.preventDefault(); if (route === 'canlii') externalSearch(); else if (event.ctrlKey) visit(false); else move(event.shiftKey ? -1 : 1);
+    } else if (route === 'tabs' && event.code === 'KeyX' && !event.metaKey && (event.ctrlKey !== event.altKey)) {
+      // Pinpointer's shortcuts: Ctrl+X pinpoint, Ctrl+Shift+X quote, Alt+X citation.
+      // A text selection in the query keeps its native cut.
+      const input = $('query');
+      if (event.ctrlKey && !event.shiftKey && document.activeElement === input && input.selectionStart !== input.selectionEnd) return;
+      event.preventDefault(); copyPassage(event.altKey ? 'citation' : event.shiftKey ? 'quote' : 'pinpoint');
     } else if (event.key === 'F6') {
       event.preventDefault(); const elements = Array.from(document.querySelectorAll('input,button,[tabindex="0"]')).filter(el => !el.disabled && !el.hidden && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
       const at = elements.indexOf(document.activeElement); elements[(at + (event.shiftKey ? -1 : 1) + elements.length) % elements.length]?.focus();

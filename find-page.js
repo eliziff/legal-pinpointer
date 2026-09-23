@@ -208,7 +208,7 @@
           const container = first.startContainer.parentElement?.closest('p, li, [role="paragraph"]');
           const marker = container?.querySelector('a[name^="par"], a[id^="par"], [id^="PARA_"]');
           const number = /^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '');
-          found.push({ paragraph, hits: hits.map(h => ({ start: unit.start + h.start, end: unit.start + h.end })),
+          found.push({ paragraph, unit, hits: hits.map(h => ({ start: unit.start + h.start, end: unit.start + h.end })),
             preview: paragraph.text.slice(start, end), leading: start > unit.start, trailing: end < unit.end,
             locator: number ? `para ${number[1]}` : '',
             marks: hits.map(h => ({ start: unit.start + h.start - start, end: Math.min(end, unit.start + h.end) - start }))
@@ -276,6 +276,29 @@
     }
     return true;
   }
+  // The whole matching paragraph/sentence, trimmed, for copying and linking.
+  function passage(ticket, position) {
+    const { result } = selected(ticket, position), text = result.paragraph.text;
+    let start = result.unit.start, end = result.unit.end;
+    while (start < end && /\s/.test(text[start])) start++;
+    while (end > start && /\s/.test(text[end - 1])) end--;
+    const range = rangeFor(result.paragraph, start, end);
+    if (!range) throw new Error('This passage changed or expired. Refresh the search before copying it.');
+    return range;
+  }
+  // Pages without Pinpointer's legal structure: the passage with a text-fragment link.
+  function plainCopy(range, mode) {
+    const escape = value => value.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const page = location.href.replace(/#.*$/, '');
+    let url = page;
+    try { url = global.LegalPinpointerTextFragments.urlForRange(range, document.body, page); } catch (_) { if (mode === 'link') throw _; }
+    const anchor = label => `<a href="${escape(url)}">${escape(label)}</a>`;
+    const text = range.toString().replace(/\s+/g, ' ').trim();
+    if (mode === 'link') return { plain: url, html: anchor(url) };
+    if (mode === 'citation') return { plain: document.title, html: `<a href="${escape(page)}">${escape(document.title)}</a>` };
+    if (mode === 'pinpoint') return { plain: '[Link]', html: anchor('[Link]') };
+    return { plain: `[Link]: ${text}`, html: `${anchor('[Link]')}: ${escape(text)}` };
+  }
   function restore() {
     for (const { node, x, y } of savedScroll || []) node.scrollTo({ left: x, top: y, behavior: 'instant' });
     savedScroll = null; returnHost?.remove(); returnHost = null; clearPaint();
@@ -310,5 +333,5 @@
     observers.splice(0).forEach(o => o.disconnect()); clearPaint(); returnHost?.remove(); returnHost = null;
   }
   window.addEventListener('pagehide', releaseAll);
-  global.LegalPinpointerSearchPage = { search, preview, reveal, restore, release, releaseAll, clearPaint, setOnChange(fn) { onChange = fn; } };
+  global.LegalPinpointerSearchPage = { search, preview, reveal, passage, plainCopy, restore, release, releaseAll, clearPaint, setOnChange(fn) { onChange = fn; } };
 })(globalThis);

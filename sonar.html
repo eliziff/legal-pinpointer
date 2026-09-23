@@ -10,7 +10,7 @@
   <main id="workspace">
     <header id="search-header">
       <div class="brand"><span class="sonar-mark" aria-hidden="true">◎</span><h1>Tab Sonar</h1><span id="privacy">ON DEVICE</span></div>
-      <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button><button id="lens-route" type="button">Lens</button></nav>
+      <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button></nav>
       <form id="search-form" role="search">
         <label class="sr-only" for="query">Find terms in open tabs</label>
         <div class="input-row"><input id="query" type="text" placeholder="Find terms together…" autocomplete="off" spellcheck="false" maxlength="1024" aria-describedby="keyboard-help"><button id="mode" type="button" title="Same paragraph; Tab switches proximity">/p</button></div>
@@ -31,6 +31,7 @@
       <div class="preview-head"><h2>PASSAGE PREVIEW</h2><span id="counter">—</span></div>
       <p id="preview-source"></p><blockquote id="preview-text">Select a match to inspect the excerpt. Your search and results stay here when you open its source.</blockquote>
       <div class="preview-actions"><button id="previous" aria-label="Previous passage" disabled>↑</button><button id="next" aria-label="Next passage" disabled>↓</button><button id="back" class="quiet" disabled>Back to start</button><button id="open" class="primary" disabled>Open passage ↗</button></div>
+      <div class="copy-actions" aria-label="Copy the selected passage"><button id="copy-quote" disabled title="Quotation with its pinpoint link (Ctrl+Shift+X)">Copy quote</button><button id="copy-pinpoint" disabled title="Pinpoint linked to the passage (Ctrl+X)">Copy pinpoint</button><button id="copy-link" disabled title="Link that opens the page at this passage">Copy link</button></div>
     </section>
     <footer id="keyboard-help"><span>Tab: proximity · Shift+Tab: scope</span><span>Enter: next · Ctrl+Enter: open · F6: controls</span><button id="clear" class="quiet" title="Clear query and release this search">Clear</button></footer>
   </main>
@@ -38,6 +39,5 @@
   <script src="find-core.js"></script>
   <script src="sonar-results.js"></script>
   <script src="sonar.js"></script>
-  <script src="lens-launcher.js"></script>
 </body>
 </html>
