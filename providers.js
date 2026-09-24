@@ -54,7 +54,6 @@
       locator: core.normalizeSpace(locator),
       element,
       anchor: options && options.anchor ? options.anchor : '',
-      fragment: options && options.fragment ? options.fragment : '',
       markerText: options && options.markerText ? options.markerText : '',
       source: options && options.source ? options.source : 'provider-native'
     };
@@ -117,7 +116,6 @@
       const kind = match[1] === '¶' ? 'pilcrow' : 'silcrow';
       groups[kind].push(markerNode(kind, match[2], element, {
         anchor: providerAnchorId(element),
-        fragment: core.makeTextFragment(`${match[1]} ${match[2]}`),
         markerText: `${match[1]} ${match[2]}`,
         source: 'symbol-marker'
       }));
@@ -132,13 +130,34 @@
     return 'section';
   }
 
-  function caseMetadata(document, title, headerText, fallbackCitation) {
+  function caseMetadata(document, title, headerText, fallbackCitation, provider) {
     const heading = core.splitCaseHeading(title);
-    const citation = core.chooseCaseCitation([headerText, title], document.documentElement.lang || 'en', fallbackCitation || heading.citation);
+    const citation = core.chooseCaseCitation([title, headerText], document.documentElement.lang || 'en', fallbackCitation || heading.citation, provider);
     return core.makeCitation('case', heading.name, citation);
   }
 
-  function directCanliiLink(container, beforeElement, baseUrl) {
+  function legislationMetadata(document, title, explicitCitation) {
+    const initial = core.makeCitation('legislation', title, explicitCitation);
+    if (initial.citation) return initial;
+    // Only document metadata may supply the citation; body cross-references are unrelated laws.
+    const candidates = [document.title, meta(document, 'lbh-citation'),
+      ...Array.from(document.querySelectorAll('h1, #citeInfo, .co_cites, .SS_DocumentInfo, .documentMeta, .crsw_shortTitle')).map(textOf)];
+    for (const value of candidates.flatMap((candidate) => String(candidate || '').split('|').map(core.normalizeSpace))) {
+      // Schedules to imperial statutes (McGill 2.1.4): "Constitution Act, 1982, being Schedule B to ...".
+      if (/^Schedule [A-Z0-9]+ to the /i.test(value)) {
+        return core.makeCitation('legislation', initial.title.replace(/^The\s+/, ''), `being ${value}`);
+      }
+      const parsed = core.makeCitation('legislation', value, '');
+      if (parsed.citation && core.normalizeSpace(parsed.title).toLowerCase() === initial.title.toLowerCase()) {
+        return core.makeCitation('legislation', initial.title, parsed.citation);
+      }
+      const standalone = core.makeCitation('legislation', `${initial.title}, ${value}`, '');
+      if (standalone.citation && standalone.title === initial.title) return standalone;
+    }
+    return initial;
+  }
+
+  function directCanliiLink(container, beforeElement, baseUrl, citation) {
     if (!container) return '';
     for (const anchor of container.querySelectorAll('a[href]')) {
       if (beforeElement && !(anchor.compareDocumentPosition(beforeElement) & 4)) continue;
@@ -146,6 +165,10 @@
         const url = new URL(anchor.getAttribute('href'), baseUrl);
         const host = url.hostname.toLowerCase();
         if (url.protocol !== 'https:' || !['canlii.org', 'www.canlii.org', 'canlii.ca', 'www.canlii.ca'].includes(host)) continue;
+        const label = core.normalizeCitation(textOf(anchor));
+        if (label !== citation.citation && core.normalizeCitation(core.splitCaseHeading(label).citation) !== citation.citation) continue;
+        if (['canlii.org', 'www.canlii.org'].includes(host) && !/\/doc\/\d{4}\/[^/]+\/[^/]+\.html$/.test(url.pathname)) continue;
+        if (['canlii.ca', 'www.canlii.ca'].includes(host) && !/^\/[a-z0-9]+$/i.test(url.pathname)) continue;
         url.search = '';
         url.hash = '';
         return url.toString();
@@ -156,12 +179,15 @@
     return '';
   }
 
-  function detectedCanliiUrl(document, container, beforeElement, citation, headerText, baseUrl) {
-    const direct = directCanliiLink(container, beforeElement, baseUrl);
-    if (direct) return direct;
+  function detectedCanliiUrl(document, container, beforeElement, citation, baseUrl, headerText) {
     const language = document.documentElement.lang || 'en';
-    return core.canliiUrlForCitation(citation, language)
-      || core.canliiUrlForCitation(String(headerText || '').slice(0, 5000), language)
+    // A parallel neutral or CanLII citation in the document's own metadata identifies the CanLII copy
+    // even when McGill selects a printed reporter for display.
+    const parallel = [...core.neutralCitations(headerText || ''), ...core.canliiCitations(headerText || '')]
+      .map((cite) => core.canliiUrlForCitation(cite, language)).find(Boolean);
+    return core.canliiUrlForCitation(citation.citation, language)
+      || parallel
+      || directCanliiLink(container, beforeElement, baseUrl, citation)
       || '';
   }
 
@@ -206,6 +232,13 @@
       if (!locator || hidden(element)) continue;
       output.push(markerNode(provisionKind(token, title), locator, element, { anchor: token }));
     }
+    // Quebec statutes on CanLII carry LégisQuébec ids: "se:18_1" is section 18.1.
+    for (const element of document.querySelectorAll('[id^="se:"]')) {
+      const match = element.id.match(/^se:(\d+(?:_\d+)*)$/);
+      if (match && !hidden(element)) {
+        output.push(markerNode(provisionKind('', title), match[1].replace(/_/g, '.'), element, { anchor: element.id }));
+      }
+    }
     return uniqueNodes(output);
   }
 
@@ -214,8 +247,21 @@
     const title = meta(document, 'lbh-title') || semanticTitle(document, ['h1.main-title', 'h1']);
     const headerText = [meta(document, 'lbh-citation'), textOf(first(document, ['h1.main-title', '.documentMeta']))].filter(Boolean).join(' | ');
     const citation = documentType === 'case'
-      ? caseMetadata(document, title, headerText, meta(document, 'lbh-citation'))
-      : core.makeCitation(documentType, title, meta(document, 'lbh-citation'));
+      ? caseMetadata(document, title, headerText, meta(document, 'lbh-citation'), 'canlii')
+      : documentType === 'legislation'
+        ? legislationMetadata(document, title, meta(document, 'lbh-citation'))
+        : meta(document, 'citation_title')
+          ? core.articleCitation({
+            authors: Array.from(document.querySelectorAll('meta[name="citation_author"]'), (element) => element.getAttribute('content')),
+            title: meta(document, 'citation_title'),
+            year: meta(document, 'citation_date') || meta(document, 'DC.issued'),
+            volume: meta(document, 'citation_volume') || meta(document, 'DC.citation.volume'),
+            issue: meta(document, 'citation_issue') || meta(document, 'DC.citation.issue'),
+            journal: meta(document, 'citation_journal_title'),
+            firstPage: meta(document, 'citation_firstpage'),
+            docCitation: (meta(document, 'description').match(/\b(?:19|20)\d{2}\s+CanLIIDocs\s+\d+/) || [''])[0]
+          })
+          : core.makeCitation(documentType, title, meta(document, 'lbh-citation'));
     const root = first(document, ['#originalDocument', '#documentContent', '#docCont', 'main']) || document.body;
     const nativeNodes = documentType === 'case'
       ? canliiParagraphNodes(document)
@@ -235,6 +281,12 @@
       documentPath = new URL(location.href).searchParams.get('pddocfullpath') || '';
     } catch (_) {
       // Saved/provider-mutated pages are classified from the DOM below.
+    }
+    // Search-box hits render the document under /search/; the page's own state names its content type.
+    if (!documentPath) {
+      const state = Array.from(document.querySelectorAll('script:not([src])'), (script) => script.textContent)
+        .find((text) => text.includes('"docfullpath"')) || '';
+      documentPath = (state.match(/"docfullpath":"([^"]+)"/) || [])[1] || '';
     }
     const path = `${documentPath} ${location.search || ''} ${location.href || ''}`;
     if (/\/cases-ca\//i.test(path)) return 'case';
@@ -293,11 +345,15 @@
   function lexisAliasText(root) {
     if (!root) return '';
     const boundary = root.querySelector('.SS_Heading, [id^="PARA_"]');
+    if (!boundary) {
+      root = root.querySelector('.SS_DocumentHeader');
+      if (!root) return '';
+    }
     const aliases = [];
     for (const block of root.querySelectorAll('.SS_LeftAlign > div')) {
       if (boundary && !(block.compareDocumentPosition(boundary) & 4)) continue;
       const separated = Array.from(block.childNodes).map((node) => core.normalizeSpace(node.textContent)).filter(Boolean).join(' | ');
-      if (core.neutralCitations(separated).length || core.reporterCandidates(separated).length) {
+      if (core.neutralCitations(separated).length || core.canliiCitations(separated).length || core.inHouseCitations(separated).length || core.reporterCandidates(separated).length) {
         aliases.push(separated);
         break;
       }
@@ -343,14 +399,14 @@
     const documentType = lexisDocumentType(location, document);
     const title = semanticTitle(document, ['#SS_DocumentTitle', '[data-testid="document-title"]', 'h1']);
     const root = first(document, ['#document', '.document-text', '.SS_contentdocument', 'main']) || document.body;
-    const firstParagraph = document.querySelector('[id^="PARA_"]');
-    const headerText = [lexisAliasText(root), boundedTextBefore(root, firstParagraph, 14000)].filter(Boolean).join(' | ');
+    const firstParagraph = root.querySelector('.SS_Heading, [id^="PARA_"]');
+    const headerText = [lexisAliasText(root), firstParagraph ? boundedTextBefore(root, firstParagraph, 14000) : textOf(root.querySelector('.SS_DocumentHeader'))].filter(Boolean).join(' | ');
     const heading = core.splitCaseHeading(title);
     const citation = documentType === 'case'
-      ? caseMetadata(document, heading.name, headerText, heading.citation)
+      ? caseMetadata(document, title, headerText, heading.citation, 'lexis')
       : documentType === 'secondary'
         ? lexisSecondaryCitation(document, title)
-        : core.makeCitation(documentType, title, '');
+        : legislationMetadata(document, title, '');
     const nativeNodes = documentType === 'legislation'
       ? lexisProvisionNodes(document, citation.title)
       : documentType === 'secondary'
@@ -358,10 +414,10 @@
         : lexisParagraphNodes(document);
     const cleanUrl = core.cleanProviderUrl('lexis', location.href);
     return {
-      provider: 'lexis', documentType, citation,
+      provider: 'lexis', documentType, citation, headerText,
       sectionMap: documentType === 'legislation' ? lexisSectionMap(document, root) : [],
       canliiUrl: documentType === 'case'
-        ? detectedCanliiUrl(document, root, firstParagraph, citation.citation, headerText, location.href)
+        ? detectedCanliiUrl(document, root, firstParagraph, citation, location.href, lexisAliasText(root))
         : '',
       cleanUrl, documentUrls: acceptedDocumentUrls(document, location, cleanUrl), root, nativeNodes
     };
@@ -389,10 +445,7 @@
       const attribute = ['data-section-number', 'data-rule-number', 'data-article-number'].find((name) => element.hasAttribute(name));
       const locator = element.getAttribute(attribute);
       const anchor = element.id || '';
-      output.push(markerNode(provisionKind(attribute, title), locator, element, {
-        anchor,
-        fragment: anchor ? '' : core.makeTextFragment(locator)
-      }));
+      output.push(markerNode(provisionKind(attribute, title), locator, element, { anchor }));
     }
     return uniqueNodes(output);
   }
@@ -406,16 +459,19 @@
     const toolbarCitation = textOf(first(document, ['#citeInfo', '.co_cites']));
     const headerText = `${prelim} | ${toolbarCitation}`;
     const citation = documentType === 'case'
-      ? caseMetadata(document, title, headerText, toolbarCitation)
-      : core.makeCitation(documentType, title, toolbarCitation);
+      ? caseMetadata(document, title, headerText, toolbarCitation, 'westlaw')
+      : documentType === 'legislation'
+        ? legislationMetadata(document, title, toolbarCitation)
+        : core.makeCitation(documentType, title, toolbarCitation);
     const nativeNodes = documentType === 'legislation'
       ? westlawProvisionNodes(document, citation.title)
       : westlawParagraphNodes(document);
     const cleanUrl = core.cleanProviderUrl('westlaw', location.href);
     return {
-      provider: 'westlaw', documentType, citation,
+      provider: 'westlaw', documentType, citation, headerText,
       canliiUrl: documentType === 'case'
-        ? detectedCanliiUrl(document, prelimElement || root, null, citation.citation, headerText, location.href)
+        ? detectedCanliiUrl(document, prelimElement || root, null, citation, location.href,
+          `${textOf(first(document, ['.co_parallelCites'])) || prelim} | ${toolbarCitation}`)
         : '',
       cleanUrl, documentUrls: acceptedDocumentUrls(document, location, cleanUrl), root, nativeNodes
     };
@@ -452,6 +508,39 @@
       }, (response) => {
         if (chrome.runtime.lastError || !response || response.ok !== true) resolve('');
         else resolve(response.url || '');
+      });
+    });
+  }
+
+  // Pre-neutral and reporter-only cases resolve through the packaged A2AJ alias x CanLII index.
+  function caseAliasKeys(base) {
+    const header = base.headerText || '';
+    return Array.from(new Set([base.citation.citation, ...core.reporterCandidates(header), ...core.canliiCitations(header)]
+      .map(core.citationKey).filter(Boolean))).slice(0, 50);
+  }
+
+  // Alias evidence can attach a same-named case from another court or year, so a target must share
+  // a year with the document's own citations, and an SCC target needs the document to be an SCC decision.
+  function plausibleCaseTarget(base, target) {
+    const header = `${base.citation.citation} | ${base.headerText || ''}`;
+    const years = new Set(Array.from(header.matchAll(/\[((?:18|19|20)\d{2})\]|\b((?:18|19|20)\d{2})\s+(?:Carswell[A-Za-z]+|CanLII|[A-Z]{2,}[A-Z]*)\s+\d/g),
+      (match) => match[1] || match[2]));
+    const year = (String(target).match(/^(?:[a-z]{2}\/[a-z0-9-]+\/)?((?:18|19|20)\d{2})/) || [])[1];
+    // Report volumes can be dated the year after the decision.
+    if (!year || ![0, 1, -1].some((delta) => years.has(String(Number(year) + delta)))) return false;
+    const supreme = /^ca\/(?:scc|csc)\/|^\d{4}\s+(?:SCC|CSC)\s/i.test(target);
+    return !supreme || /Supreme Court of Canada|Cour supr[eê]me du Canada|\b(?:S\.?C\.?R|R\.?C\.?S|SCC|CSC)\b/.test(header);
+  }
+
+  function pickCaseTarget(base, targets) {
+    return (targets || []).find((target) => plausibleCaseTarget(base, target)) || '';
+  }
+
+  function requestCaseUrl(base, language) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_RESOLVE_CASE', input: { keys: caseAliasKeys(base) } }, (response) => {
+        const target = !chrome.runtime.lastError && response && response.ok === true ? pickCaseTarget(base, response.targets) : '';
+        resolve(target ? core.canliiUrlForAliasTarget(target, language) : '');
       });
     });
   }
@@ -518,7 +607,7 @@
     return {
       kind: structureKind, locator, element, startPoint, endPoint, contentStartPoint,
       anchor: engineAnchorId(element, provider),
-      fragment: core.makeTextFragment(text), markerText: text,
+      markerText: text,
       source: 'legal-structure', engineId: node.id, parentId: node.parent_id || ''
     };
   }
@@ -531,14 +620,18 @@
     });
     const seen = new Set(merged.map((node) => node.locator));
     merged.push(...nativeNodes.filter((node) => !seen.has(node.locator)));
+    // Document order by each unit's own start (several units can share one element, e.g. a <pre>);
+    // a parent and its first child starting together keep parent-first order.
+    const startOf = (node) => {
+      const range = node.element.ownerDocument.createRange();
+      if (node.startPoint && node.startPoint.node) range.setStart(node.startPoint.node, node.startPoint.offset);
+      else range.setStartBefore(node.element);
+      return range;
+    };
     return uniqueNodes(merged.sort((left, right) => {
-      if (!left.element || !right.element || left.element === right.element) {
-        return core.provisionDepth(left.locator) - core.provisionDepth(right.locator);
-      }
-      const position = left.element.compareDocumentPosition(right.element);
-      if (position & 4) return -1;
-      if (position & 2) return 1;
-      return 0;
+      if (!left.element || !right.element) return core.provisionDepth(left.locator) - core.provisionDepth(right.locator);
+      const order = startOf(left).compareBoundaryPoints(Range.START_TO_START, startOf(right));
+      return order || core.provisionDepth(left.locator) - core.provisionDepth(right.locator);
     }));
   }
 
@@ -573,7 +666,7 @@
       if (!startPoint || !endPoint || !element) continue;
       nodes.push({
         kind: 'page', locator, element, startPoint, endPoint,
-        fragment: core.makeTextFragment(marker.text), markerText: marker.text,
+        markerText: marker.text,
         source: 'legal-structure', engineId: node.id, parentId: '', endOffset: end
       });
     }
@@ -591,7 +684,7 @@
         if (startPoint && endPoint && element) {
           nodes.push({
             kind: 'page', locator: expected, element, startPoint, endPoint,
-            fragment: core.makeTextFragment(`[page ${expected}]`), markerText: `[page ${expected}]`,
+            markerText: `[page ${expected}]`,
             source: 'legal-structure', engineId: `${last.engineId}:trailing`, parentId: ''
           });
         }
@@ -602,6 +695,39 @@
       index === 0 || Number(node.locator) === Number(nodes[index - 1].locator) + 1
     ));
     return consecutive ? nodes.map(({ endOffset, ...node }) => node) : [];
+  }
+
+  // Last resort for cases with neither provider anchors nor derived paragraphs: printed "[n]" or
+  // "n." markers at line starts, accepted only as the longest ascending run of at least three.
+  function visibleMarkerNodes(plane) {
+    let best = [];
+    for (const pattern of [/^\[(\d{1,4})\][ \t]/, /^(\d{1,4})\.[ \t]/]) {
+      const candidates = [];
+      for (let start = 0; start < plane.text.length; start = plane.text.indexOf('\n', start) + 1 || plane.text.length) {
+        const match = plane.text.slice(start, start + 12).match(pattern);
+        if (match) candidates.push({ number: Number(match[1]), start, contentStart: start + match[0].length, marker: match[0].trim() });
+      }
+      for (let first = 0; first < candidates.length; first += 1) {
+        if (candidates[first].number > 3) continue;
+        const run = [candidates[first]];
+        for (const candidate of candidates.slice(first + 1)) {
+          const last = run[run.length - 1].number;
+          if (candidate.number > last && candidate.number <= last + 2) run.push(candidate);
+        }
+        if (run.length > best.length) best = run;
+      }
+    }
+    if (best.length < 3) return [];
+    return best.map((marker, index) => {
+      const end = index + 1 < best.length ? best[index + 1].start : plane.text.length;
+      const startPoint = fragments.boundaryPoint(plane, marker.start);
+      return {
+        kind: 'paragraph', locator: String(marker.number), element: pointPassage(startPoint, plane.root),
+        startPoint, endPoint: fragments.boundaryPoint(plane, end),
+        contentStartPoint: fragments.boundaryPoint(plane, marker.contentStart),
+        anchor: '', markerText: marker.marker, source: 'visible-marker'
+      };
+    }).filter((node) => node.startPoint && node.element);
   }
 
   function engineStructure(base, plane, engine) {
@@ -626,6 +752,10 @@
     const merged = base.documentType === 'legislation'
       ? mergeProvisionNodes(nodes, base.nativeNodes)
       : uniqueNodes(nodes);
+    if (!merged.length && base.documentType === 'case') {
+      const visible = visibleMarkerNodes(plane);
+      if (visible.length) return { kind: 'paragraph', nodes: visible, source: 'visible-marker' };
+    }
     return {
       kind: merged.length ? (merged[0].kind || structureKind) : structureKind,
       nodes: merged,
@@ -639,6 +769,9 @@
 
     if (base.documentType === 'legislation' && base.provider !== 'canlii') {
       base.canliiUrl = await requestLegislationUrl(base.citation, document.documentElement.lang || 'en');
+    }
+    if (base.documentType === 'case' && base.provider !== 'canlii' && !base.canliiUrl) {
+      base.canliiUrl = await requestCaseUrl(base, document.documentElement.lang || 'en');
     }
 
     if (base.documentType === 'secondary') {
@@ -661,6 +794,8 @@
 
   const api = {
     adapterFor,
+    caseAliasKeys,
+    pickCaseTarget,
     engineInput,
     engineStructure,
     inspect,

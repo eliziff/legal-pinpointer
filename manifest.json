@@ -23,6 +23,7 @@
         "https://canlii.org/*/doc/*",
         "https://canlii.org/*/laws/*",
         "https://advance.lexis.com/document/*",
+        "https://advance.lexis.com/search/*",
         "https://nextcanada.westlaw.com/Document/*",
         "https://www.nextcanada.westlaw.com/Document/*"
       ],
