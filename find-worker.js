@@ -236,9 +236,9 @@
           if (value.same) return { ...page, same: true };
           let count = 0;
           if (typeof value.text === 'string' && value.text.length <= 4_200_000) for (let at = -1; count <= 200_000 && (count++, at = value.text.indexOf('\n', at + 1)) >= 0;);
-          if (!count || !value.text || !Array.isArray(value.locators) || value.locators.length !== count) throw new Error('Page returned invalid text.');
+          if (!count || !value.text || !Array.isArray(value.paras) || value.paras.length !== count) throw new Error('Page returned invalid text.');
           return { ...page, text: value.text, limited: Boolean(value.limited),
-            locators: value.locators.map(locator => typeof locator === 'string' ? locator.slice(0, 80) : '') };
+            paras: value.paras.map(number => Number.isSafeInteger(number) && number > 0 ? number : 0) };
         } catch (error) { return { tabId, title, skipped: `Unavailable: ${String(error.message || error).slice(0, 180)}` }; }
       }));
       const key = unitsKey(sender.workspace);

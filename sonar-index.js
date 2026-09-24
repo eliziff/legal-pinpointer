@@ -10,7 +10,7 @@
   function createIndex(core) {
     const terms = new Map(), names = [], folds = new Map(), tabs = new Map();
     const encoder = new TextEncoder(), decoder = new TextDecoder();
-    let counts = new Int32Array(4096), scores = new Float64Array(0), tally = new Int32Array(4096);
+    let counts = new Int32Array(4096), scores = new Float64Array(0), tally = new Int32Array(4096), last = null, searches = 0;
     // Word forms by their two 32-bit hashes (open addressing), so a known form
     // costs no string and no Map lookup while a tab is indexed.
     let size = 1 << 16, hashA = new Int32Array(size), hashB = new Int32Array(size), formIds = new Int32Array(size).fill(-1), filled = 0;
@@ -82,11 +82,11 @@
       const bytes = encoder.encode(text), byteStarts = new Uint32Array(count + 1);
       for (let at = 0, u = 1; at < bytes.length && u < count; at++) if (bytes[at] === 10) byteStarts[u++] = at + 1;
       byteStarts[count] = bytes.length + 1;
-      const locators = new Map();
-      (page.locators || []).forEach((locator, u) => { if (locator) locators.set(u, locator); });
+      // Observed paragraph numbers (0: none), for the `para N` locator.
+      const paras = Uint32Array.from(page.paras || [], number => Math.min(number, 4294967295));
       if (scores.length < count) scores = new Float64Array(count);
       tabs.set(page.tabId, { tabId: page.tabId, documentId: page.documentId, windowId: page.windowId, url: page.url, title: page.title,
-        revision: page.revision, limited: Boolean(page.limited), count, total, lengths, ids, offsets, units, tfs, bytes, byteStarts, locators });
+        revision: page.revision, limited: Boolean(page.limited), count, total, lengths, ids, offsets, units, tfs, bytes, byteStarts, paras });
     }
     function drop(tabId) { tabs.delete(tabId); }
     // An unchanged tab keeps its text; its address or window may have changed.
@@ -105,7 +105,7 @@
     // summed over those tabs; equal scores keep tab order, then document order.
     // The first `depth` results also carry a window of `window` characters
     // around their densest query words, for the reranker.
-    function search({ query, tabIds, depth = 0, window = 0 }) {
+    function search({ query, tabIds, depth = 0, window = 0, eager = RESULTS }) {
       const scope = tabIds.map(id => tabs.get(id)).filter(Boolean), { terms: words, marked } = core.rankTerms(query);
       const ids = words.map(word => terms.get(word)), dfs = new Float64Array(words.length);
       let N = 0, L = 0;
@@ -134,13 +134,15 @@
         }
       }
       scope.forEach((tab, order) => {
-        const touched = [];
+        const { offsets, units, tfs, lengths } = tab, touched = [], scale = 0.9 / average;
         where[order].forEach((k, i) => {
           if (k < 0) return;
-          for (let at = tab.offsets[k]; at < tab.offsets[k + 1]; at++) {
-            const u = tab.units[at], tf = tab.tfs[at];
+          // Okapi BM25, k1 1.2, b 0.75: tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * length / average)).
+          const weight = idf[i] * 2.2;
+          for (let at = offsets[k], end = offsets[k + 1]; at < end; at++) {
+            const u = units[at], tf = tfs[at];
             if (!scores[u]) touched.push(u);
-            scores[u] += idf[i] * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * tab.lengths[u] / average));
+            scores[u] += weight * tf / (tf + 0.3 + scale * lengths[u]);
           }
         });
         for (const u of touched) {
@@ -150,32 +152,45 @@
       });
       const best = heap.sort((a, b) => b[0] - a[0] || a[1] - b[1] || a[2] - b[2]), wanted = new Set(words);
       const results = [], passages = [];
+      last = { tag: ++searches, wanted, marked, later: [] };
       for (const [, order, u] of best) {
-        const tab = scope[order], text = unitText(tab, u), hits = core.rankHits(text, wanted, marked, 100, folded);
-        if (!hits.length) continue;
-        const excerpt = core.excerpt(text, hits, core.densest(text, hits)), hash = core.hash(text);
-        if (results.length < depth) {
+        const tab = scope[order], text = unitText(tab, u), hash = core.hash(text), position = results.length;
+        const result = { tabId: tab.tabId, documentId: tab.documentId, windowId: tab.windowId, url: tab.url, title: tab.title,
+          unit: u, hash, locator: tab.paras[u] ? `para ${tab.paras[u]}` : '' };
+        results.push(result);
+        // Excerpts for the first rows now; the rest follow in `excerpts`.
+        if (position >= Math.max(eager, depth)) { Object.assign(result, { preview: '', marks: [] }); last.later.push([position, tab, u]); continue; }
+        const hits = core.rankHits(text, wanted, marked, 100, folded);
+        Object.assign(result, core.excerpt(text, hits, hits.length ? core.densest(text, hits) : 0));
+        if (position < depth) {
           // The reranker reads a window around the densest query words, a third of it before them.
           let passage = text;
-          if (window && text.length > window) {
+          if (window && text.length > window && hits.length) {
             const lead = Math.round(window / 3);
             let start = Math.max(0, Math.min(core.densest(text, hits, lead, window) - lead, text.length - window));
             while (start > 0 && /\S/.test(text[start - 1])) start--;
             passage = text.slice(start, start + window);
           }
-          passages.push({ id: results.length, key: hash, text: passage.replace(/\s+/g, ' ').trim() });
+          passages.push({ id: position, key: hash, text: passage.slice(0, window || 3000).replace(/\s+/g, ' ').trim() });
         }
-        results.push({ tabId: tab.tabId, documentId: tab.documentId, windowId: tab.windowId, url: tab.url, title: tab.title,
-          unit: u, hash, locator: tab.locators.get(u) || '', ...excerpt });
       }
-      return { results, passages, searched: scope.length, limited: scope.some(tab => tab.limited) };
+      return { results, passages, tag: last.tag, searched: scope.length, limited: scope.some(tab => tab.limited) };
+    }
+    // Excerpts of the latest search's remaining results, by position.
+    function excerpts({ tag }) {
+      if (last?.tag !== tag) return { excerpts: [] };
+      const { wanted, marked, later } = last;
+      return { excerpts: later.map(([position, tab, u]) => {
+        const text = unitText(tab, u), hits = core.rankHits(text, wanted, marked, 100, folded);
+        return { position, ...core.excerpt(text, hits, hits.length ? core.densest(text, hits) : 0) };
+      }) };
     }
     function stats() {
       let bytes = 0, postings = 0, units = 0;
       for (const tab of tabs.values()) { bytes += tab.bytes.length; postings += tab.units.length; units += tab.count; }
       return { tabs: tabs.size, units, bytes, postings, terms: names.length, forms: filled };
     }
-    return { put, drop, meta, search, stats };
+    return { put, drop, meta, search, excerpts, stats };
   }
   if (typeof module !== 'undefined' && module.exports) { module.exports = { createIndex }; return; }
   // Dedicated worker: messages from sonar.js, answered in order.
@@ -192,7 +207,7 @@
       queue = queue.then(() => data.type === 'put' ? index.put(data.page, pause) : index.meta(data.meta) || Promise.reject(new Error('Not indexed.')))
         .then(() => global.postMessage({ type: data.type, id: data.id }), error => global.postMessage({ type: data.type, id: data.id, error: String(error.message || error) }));
     } else if (data?.type === 'drop') { index.drop(data.tabId); queue = queue.then(() => index.drop(data.tabId)); }
-    else if (data?.type === 'stats') global.postMessage({ type: 'stats', id: data.id, ...index.stats() });
+    else if (data?.type === "excerpts" || data?.type === "stats") global.postMessage({ type: data.type, id: data.id, ...index[data.type](data) });
   };
   global.postMessage({ type: 'ready' });
 })(globalThis);
