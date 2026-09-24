@@ -82,11 +82,13 @@
       const bytes = encoder.encode(text), byteStarts = new Uint32Array(count + 1);
       for (let at = 0, u = 1; at < bytes.length && u < count; at++) if (bytes[at] === 10) byteStarts[u++] = at + 1;
       byteStarts[count] = bytes.length + 1;
-      // Observed paragraph numbers (0: none), for the `para N` locator.
+      // Observed paragraph numbers (0: none), for the `para N` locator, and each
+      // unit's text hash, which names it in result handles.
       const paras = Uint32Array.from(page.paras || [], number => Math.min(number, 4294967295));
+      const hashes = Float64Array.from(starts, (start, u) => core.hash(text.slice(start, u + 1 < count ? starts[u + 1] - 1 : text.length)));
       if (scores.length < count) scores = new Float64Array(count);
       tabs.set(page.tabId, { tabId: page.tabId, documentId: page.documentId, windowId: page.windowId, url: page.url, title: page.title,
-        revision: page.revision, limited: Boolean(page.limited), count, total, lengths, ids, offsets, units, tfs, bytes, byteStarts, paras });
+        revision: page.revision, limited: Boolean(page.limited), count, total, lengths, ids, offsets, units, tfs, bytes, byteStarts, paras, hashes });
     }
     function drop(tabId) { tabs.delete(tabId); }
     // An unchanged tab keeps its text; its address or window may have changed.
@@ -154,13 +156,13 @@
       const results = [], passages = [];
       last = { tag: ++searches, wanted, marked, later: [] };
       for (const [, order, u] of best) {
-        const tab = scope[order], text = unitText(tab, u), hash = core.hash(text), position = results.length;
+        const tab = scope[order], hash = tab.hashes[u], position = results.length;
         const result = { tabId: tab.tabId, documentId: tab.documentId, windowId: tab.windowId, url: tab.url, title: tab.title,
           unit: u, hash, locator: tab.paras[u] ? `para ${tab.paras[u]}` : '' };
         results.push(result);
         // Excerpts for the first rows now; the rest follow in `excerpts`.
         if (position >= Math.max(eager, depth)) { Object.assign(result, { preview: '', marks: [] }); last.later.push([position, tab, u]); continue; }
-        const hits = core.rankHits(text, wanted, marked, 100, folded);
+        const text = unitText(tab, u), hits = core.rankHits(text, wanted, marked, 100, folded);
         Object.assign(result, core.excerpt(text, hits, hits.length ? core.densest(text, hits) : 0));
         if (position < depth) {
           // The reranker reads a window around the densest query words, a third of it before them.

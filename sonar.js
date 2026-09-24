@@ -158,11 +158,12 @@
     } finally { if (flight === token) flight = 0; }
   }
   // Tabs a search covers, in the broker's order: origin, then window and position.
+  // One tabs query answers every scope (each browser round trip delays results).
   async function scopeTabs() {
-    const start = await chrome.tabs.get(origin.id);
+    const all = await chrome.tabs.query({}), start = all.find(tab => tab.id === origin.id);
+    if (!start) throw new Error(`No tab with id: ${origin.id}.`);
     if (Boolean(start.incognito) !== incognito) throw new Error('Cannot mix private and normal windows.');
-    const tabs = scope === 'current' ? [start] : scope === 'group' ? (start.groupId < 0 ? [] : await chrome.tabs.query({ groupId: start.groupId, windowId: start.windowId }))
-      : await chrome.tabs.query({});
+    const tabs = scope === 'current' ? [start] : scope === 'group' ? all.filter(tab => start.groupId >= 0 && tab.groupId === start.groupId && tab.windowId === start.windowId) : all;
     return { start, tabs: tabs.filter(tab => Boolean(tab.incognito) === incognito).sort((a, b) => (b.id === start.id) - (a.id === start.id) || a.windowId - b.windowId || a.index - b.index) };
   }
   async function rankSearch(token, refresh) {

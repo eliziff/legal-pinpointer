@@ -44,33 +44,40 @@ workers, tab pages) and reported everywhere.
   +402/+257/+606 MB -> jspi. WASM int8 4 threads: tiny plain 101/457 ms, tiny jspi 92/241 ms
   (+171/+182/+296 MB); L2 542/1599; L6 (what shipped) 1477/4062 ms, +237/+445/+742 MB.
   Progressive 8-then-22 costs more in total than one pass -> dropped.
-- DECISION (implemented, uncommitted): runtime = ORT 1.30 JSPI build only (WebGPU + WASM EPs;
-  needs Chrome 137+, else no rerank = BM25 order); GPU with shader-f16 -> MiniLM-L4 fp16
-  (model-gpu.onnx), else TinyBERT-L2 int8 on WASM (model-cpu.onnx); K=30, 620 chars, 192 tok,
-  one reorder. Files: rerank-worker.js, sonar.js (RERANK_DEPTH 30, no RERANK_FIRST/partial),
-  tools/fetch-rerank-model.cjs (new pins, deletes stale vendor files; vendor refetched),
-  extension test checks model-cpu.onnx. npm test + test:extension pass (21:01).
-- eval-fast.cjs: waits for the throttler (.started), logs device, reports GPU process and
-  peak memory per process group. Running 30 tabs 1x (fast-30-x1.json, eval-30-x1.log).
-
+- COMMITTED 1a309cb (pushed, PR branch fast-forwarded): runtime = ORT 1.30 JSPI build only
+  (WebGPU + WASM EPs; needs Chrome 137+, else no rerank = BM25 order; manifest still says 116);
+  GPU with shader-f16 -> MiniLM-L4 fp16 (model-gpu.onnx), else TinyBERT-L2 int8 on WASM
+  (model-cpu.onnx); K=30, 620 chars, 192 tok, 3 length-sorted batches, one reorder; GPU shader
+  warm-up at load; 1 WASM thread on the GPU path. Tokenizer words() via regex passes (3x).
+  FIND.md table = worker-level numbers (below); THIRD_PARTY_NOTICES.md updated.
 - worker-eval.cjs: the shipped rerank-worker.js + vendor in headless Chromium, 38 queries,
   product top 30. WebGPU L4: R@10 .809 MRR .711; 1x p50 361 / p95 493 ms, 4x p50 406 /
-  p95 477 ms; first query 468 ms (shader warm-up at load, added); renderer +316 MB loaded,
-  +241-257 after; GPU process +148 loaded, +176 after. WASM tiny: R@10 .737 MRR .585; 1x p50
-  103 / p95 125, 4x p50 440 / p95 755 ms; renderer +195 loaded, +147-161 after. Worker now
-  uses 1 WASM thread on the GPU path (saves ~30 MB).
+  p95 477 ms; first query 468 ms; renderer +316 MB loaded, +241-257 after (over an idle
+  renderer); GPU process +148 loaded, +176 after. WASM tiny: R@10 .737 MRR .585; 1x p50 103 /
+  p95 125, 4x p50 440 / p95 755 ms; renderer +195 loaded, +147-161 after.
+- COMMITTED (see git log): find-core densest() sliding window (74k-case equivalence,
+  densest-check.cjs); sonar-index.js per-unit hashes computed in put (search no longer decodes
+  and hashes all 200 results; identical search signature, search-prof.cjs); sonar.js
+  scopeTabs() = one chrome.tabs.query for every scope (one browser round trip, not two).
+  61/61 unit tests pass.
 - eval-fast.cjs fixes: panel found on a fresh CDP connection (the old lookup never saw it),
-  --tabs < 30 honored, async memory sampler (samples.max), --abort-mb, --processes.
-  12-tab 1x run: cold first results 59 ms; after read extension 302 MB (rerank worker 148,
-  index 13 MB heap), peak 640; then aborted (machine < 600 MB free: another agent's paint gate
-  holds 2.3 GB). index-bench (node, 30 tabs, depth 30): search p50 5.7 / p95 11.9 ms.
-- FIND.md mechanism text, vendor and caps paragraphs rewritten; measurement table pending.
-  THIRD_PARTY_NOTICES.md updated. All of this is staged, not committed.
+  --tabs < 30 honored, async memory sampler (samples.max), --abort-mb, --processes (ignored
+  by Chromium), --per-site (--process-per-site: all tabs share one renderer; never run yet),
+  --wave N (open tabs N at a time after the panel, discard after read). Wave mode is UNPROVEN:
+  one run lost the panel at the discard step, the next aborted on memory; only count wave
+  numbers if every warm query says 30/30 tabs searched. 12-tab 1x run: cold first results
+  59 ms; after read extension 302 MB (rerank worker 148, index 13 MB heap), peak 640.
+- index (node, 30 tabs, depth 30): search p50 3.9-5.7 / p95 5-12 ms at 1x (machine noisy).
+- Machine: other agents' headless Chrome jobs hold 1.3-2.3 GB; free memory swings 0.4-3 GB.
 
 ## Next
-- eval-fast 30 tabs at 1x and 4x once > 3.3 GB free; fill the FIND.md table (replace the
-  L6 table and its paragraph), fold these notes in, delete this file; npm test +
-  test:extension; commit; push; ff codex/pinpointer-lens-event-strip.
+- Real-extension run at 30 tabs, 1x and 4x: try --per-site first (check
+  memory.before.tabRenderersMB); wait for free memory outside heavy.py. Else 12 tabs at 1x/4x,
+  reported as 12 tabs next to the node 30-tab index timing. Warm first results < 50 ms at 4x is
+  still unmeasured.
+- Then fold into FIND.md (memory "over an idle renderer"), delete this file, commit, push, ff.
+- Final report caveats: CPU path misses R@10 (.737) and 4x p95 (755 ms); both new paths rank
+  below old L6 (.836; .809 is ~1 query); Chrome 116-136 lose rerank; 4x throttles CPU only.
 
 ## Commands (scratch = $TEMP/claude/.../scratchpad)
 - heavy: python scratch/heavy.py "<label>" -- <cmd>
