@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A2AJ Offline Search</title>
+<style>
+:root { --bg: #fbfbfa; --fg: #1d1d1f; --muted: #6b6b70; --line: #e3e3e0; --accent: #1f5fa8; --mark: #fff0a8; --card: #fff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #161618; --fg: #e8e8ea; --muted: #a0a0a8; --line: #2e2e33; --accent: #7fb0ff; --mark: #5a4b00; --card: #1d1d20; } }
+:root[data-theme="dark"] { --bg: #161618; --fg: #e8e8ea; --muted: #a0a0a8; --line: #2e2e33; --accent: #7fb0ff; --mark: #5a4b00; --card: #1d1d20; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 900px; margin: 0 auto; padding: 20px 16px 60px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 14px; }
+h1 { font-size: 20px; margin: 0; }
+#status, #meta { color: var(--muted); font-size: 13px; }
+button, input, select { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+button { cursor: pointer; } button:disabled, input:disabled, select:disabled { opacity: .5; }
+#f { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
+#q { grid-column: 1 / -1; width: 100%; font-size: 16px; padding: 10px 12px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.filters select { max-width: 100%; }
+.filters label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+ol { list-style: none; padding: 0; margin: 12px 0 0; }
+li { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; overflow-wrap: anywhere; }
+.head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin-bottom: 6px; }
+.head a { color: var(--accent); font-weight: 600; text-decoration: none; } .head a:hover { text-decoration: underline; }
+.name { font-style: italic; } .sub { color: var(--muted); font-size: 13px; }
+li p { margin: 0; white-space: pre-line; font-size: 14px; }
+li p + p { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+mark { background: var(--mark); color: inherit; border-radius: 2px; }
+.hint { color: var(--muted); font-size: 12px; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>A2AJ offline search</h1>
+    <button id="pick" type="button">Open index folder…</button>
+    <input type="file" id="dir" webkitdirectory multiple hidden>
+    <span id="status">Choose the folder that holds the downloaded index files.</span>
+  </header>
+  <form id="f">
+    <input id="q" type="search" placeholder="Search case law and legislation" autocomplete="off" disabled>
+    <div class="filters">
+      <select id="court" disabled><option value="">All courts and legislation</option></select>
+      <label>From <input id="from" type="date" disabled></label>
+      <label>To <input id="to" type="date" disabled></label>
+    </div>
+    <button disabled>Search</button>
+  </form>
+  <p class="hint">Words are matched by stem; passages are ranked by BM25, documents by their best passage plus matches in the case name or citation. Put "exact phrases" in quotes. Everything runs on this computer; the files are read in place.</p>
+  <div id="meta"></div>
+  <ol id="results"></ol>
+</main>
+<script type="text/js-worker" id="worker-src">/*WORKER*/</script>
+<script>/*PAGE*/</script>
+</body>
+</html>
