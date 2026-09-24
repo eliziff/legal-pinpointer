@@ -23,7 +23,7 @@ test('historic CanLII-only citations, prefixed titles and legislation titles are
   assert.equal(core.chooseCaseCitation(['MacMillan v. Brownlee', '1934 CanLII 376 (AB QB)'], 'en', ''), '1934 CanLII 376 (AB QB)');
   assert.equal(core.makeCitation('case', '1934 CanLII 376 (AB QB) | MacMillan v. Brownlee', '1934 CanLII 376 (AB QB)').plain,
     'MacMillan v Brownlee, 1934 CanLII 376 (AB QB)');
-  assert.equal(core.makeCitation('case', 'Acme, Inc. v. Beta, 2024 SCC 1', '2024 SCC 1').plain, 'Acme, Inc. v Beta, 2024 SCC 1');
+  assert.equal(core.makeCitation('case', 'Acme, Inc. v. Beta, 2024 SCC 1', '2024 SCC 1').plain, 'Acme, Inc v Beta, 2024 SCC 1');
   assert.equal(core.makeCitation('legislation', 'Criminal Code, RSC 1985, c C-46', 'RSC 1985, c C-46').plain, 'Criminal Code, RSC 1985, c C-46');
   assert.equal(core.makeCitation('case', 'Acme, 2024 Holdings Ltd v. Beta | 2024 SCC 1', '2024 SCC 1').plain, 'Acme, 2024 Holdings Ltd v Beta, 2024 SCC 1');
   assert.equal(core.makeCitation('case', '1934 CanLII 376', '1934 CanLII 376').plain, '1934 CanLII 376');

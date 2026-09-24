@@ -8,6 +8,7 @@ const copyCitation = document.getElementById('copy-citation');
 const openCanlii = document.getElementById('open-canlii');
 const styleInputs = Array.from(document.querySelectorAll('input[name="pinpoint-style"]'));
 const linkFullTextFragmentPinpoint = document.getElementById('link-full-text-fragment-pinpoint');
+const buildTextFragmentWithoutStructure = document.getElementById('build-text-fragment-without-structure');
 let canliiAvailable = false, supported = false, inspectionVersion = 0, busy = false;
 
 function activeTab() {
@@ -89,10 +90,11 @@ async function navigateToCanlii() {
   }
 }
 
-chrome.storage.local.get({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false }, (settings) => {
+chrome.storage.local.get({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false }, (settings) => {
   const selected = styleInputs.find((input) => input.value === settings.pinpointStyle) || styleInputs[0];
   selected.checked = true;
   linkFullTextFragmentPinpoint.checked = Boolean(settings.linkFullTextFragmentPinpoint);
+  buildTextFragmentWithoutStructure.checked = Boolean(settings.buildTextFragmentWithoutStructure);
 });
 
 for (const input of styleInputs) {
@@ -111,6 +113,15 @@ linkFullTextFragmentPinpoint.addEventListener('change', () => {
       : 'Only text-fragment pinpoint locators will be linked.';
   });
 });
+
+buildTextFragmentWithoutStructure.addEventListener('change', () => {
+  chrome.storage.local.set({ buildTextFragmentWithoutStructure: buildTextFragmentWithoutStructure.checked }, () => {
+    status.textContent = buildTextFragmentWithoutStructure.checked
+      ? 'Passages on pages without structure will get text-fragment links.'
+      : 'Pages without structure will link to the whole document.';
+  });
+});
+
 copyPinpoint.addEventListener('click', () => copy('pinpoint'));
 copyQuote.addEventListener('click', () => copy('quote'));
 copyCitation.addEventListener('click', () => copy('citation'));
