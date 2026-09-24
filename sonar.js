@@ -10,10 +10,10 @@
   let desiredPreview = null, previewing = false;
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', wheelAt = 0, scrubbing = false;
   // Ranked mode: BM25 order from the panel's own index shows at once; the
-  // cross-encoder then reorders the top results (the first few, then the rest),
-  // but never while the pointer is on the list or after the user has moved the
-  // selection, so nothing jumps under them.
-  const RERANK_DEPTH = 20, RERANK_FIRST = 8, RERANK_TOKENS = 192, RERANK_WINDOW = 620, RERANK_IDLE = 3 * 60_000;
+  // cross-encoder then reorders the top results once, but never while the
+  // pointer is on the list or after the user has moved the selection, so
+  // nothing jumps under them.
+  const RERANK_DEPTH = 30, RERANK_TOKENS = 192, RERANK_WINDOW = 620, RERANK_IDLE = 3 * 60_000;
   let reranker = null, rerankUnavailable = false, rerankJob = 0, rerankIdle = 0, pendingOrder = null, navigated = false, pointerInList = false;
   // The ranked index (sonar-index.js): every eligible tab's paragraphs, read in
   // idle time after the panel opens and again only when that tab changes. Jump,
@@ -350,28 +350,26 @@
     warmReranker();
     if (!reranker) return;
     idleRelease();
-    const base = result.results.slice(), job = rerankJob = token, scores = new Map();
+    const base = result.results.slice(), job = rerankJob = token;
     reranker.onmessage = ({ data }) => {
       if (data.type === 'unavailable') { rerankUnavailable = true; reranker?.terminate(); reranker = null; rerankJob = 0; return; }
       if (data.job !== job || rerankJob !== job || result !== expected) return;
       if (data.type === 'failed') { rerankJob = 0; return; }
       if (data.type !== 'scores') return;
-      for (const [id, score] of data.scores) scores.set(id, score);
-      if (data.done) rerankJob = 0;
+      rerankJob = 0;
       // Scored passages by cross-encoder score; the rest keep BM25 order after them.
-      const scored = base.filter(item => scores.has(item.id)).sort((a, b) => scores.get(b.id) - scores.get(a.id));
+      const scores = new Map(data.scores), scored = base.filter(item => scores.has(item.id)).sort((a, b) => scores.get(b.id) - scores.get(a.id));
       pendingOrder = [...scored, ...base.filter(item => !scores.has(item.id))];
-      pendingOrder.final = data.done;
       applyOrder();
     };
-    reranker.postMessage({ type: 'score', job, query, passages, first: RERANK_FIRST, maxLength: RERANK_TOKENS });
+    reranker.postMessage({ type: 'score', job, query, passages, maxLength: RERANK_TOKENS });
   }
   function applyOrder() {
     if (!pendingOrder || navigated || pointerInList || busy || !result) return;
     const order = pendingOrder;
     result.results = order; pendingOrder = null; current = 0;
     list.setResults(result.results, current); preview();
-    document.body.dataset.order = order.final ? 'reranked' : 'reranking';
+    document.body.dataset.order = 'reranked';
   }
   $('list-viewport').addEventListener('pointerenter', () => { pointerInList = true; });
   $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; applyOrder(); });

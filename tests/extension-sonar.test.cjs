@@ -111,7 +111,7 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
     found = await search('intention to waive privilege');
     assert.match(found.summary, /best first$/);
     assert.match(found.rows[0], /requires an intention to waive/);
-    if (fs.existsSync(path.join(root, 'vendor/rerank/model.onnx'))) {
+    if (fs.existsSync(path.join(root, 'vendor/rerank/model-cpu.onnx'))) {
       await panel.waitForFunction(() => document.body.dataset.order === 'reranked', null, { timeout: 60_000 });
       assert.match(await panel.locator('#result-rows > *').first().textContent(), /requires an intention to waive/);
     }
