@@ -4,9 +4,11 @@
   function createBroker(api) {
     const prefix = 'pinpointer-sonar:', TTL = 15 * 60_000, MAX_RESULTS = 1000, RANKED_RESULTS = 200, CONCURRENCY = 4, MAX_INDEX_CHARS = 32_000_000;
     const pending = new Map(), running = new Map(), gates = new Map();
-    const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_COPY', 'SONAR_TEXTS']);
+    const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_COPY', 'SONAR_UNITS', 'SONAR_ISSUE']);
     const sessionKey = sender => sender.workspace
       ? `${prefix}workspace:${sender.workspace}` : `${prefix}${sender.tab.id}:${sender.documentId}`;
+    // The documents whose text a side panel has read into its own ranked index.
+    const unitsKey = workspace => `${prefix}units:${workspace}`;
     const panelURL = () => api.runtime.getURL('sonar.html');
     const supported = tab => /^(https?|file):/.test(tab.url || '');
     const keyFor = target => ({ tabId: target.tabId, documentIds: [target.documentId] });
@@ -31,10 +33,7 @@
         func: async (name, values) => {
           try {
             const page = globalThis.LegalPinpointerSearchPage;
-            if (name === 'search' && values[0].notify) {
-              const ticket = values[0].ticket;
-              page.setOnChange(() => { void chrome.runtime.sendMessage({ type: 'SONAR_INVALIDATED', ticket }).catch(() => {}); });
-            }
+            if (name === 'search' && values[0].notify) page.watch(values[0].ticket);
             return { ok: true, value: await page[name](...values) };
           }
           catch (error) { return { ok: false, message: String(error.message || error).slice(0, 240) }; }
@@ -76,16 +75,10 @@
       return true;
     }
     function current(key, sequence) { return pending.get(key)?.sequence === sequence; }
-    function pageResults(value, tab, target, terms = 0) {
+    function pageResults(value, tab, target) {
       if (!value || value.url !== tab.url || !Array.isArray(value.results)) throw new Error('Page changed or returned invalid results.');
-      const count = value => Number.isSafeInteger(value) && value >= 0;
-      if (terms && !(count(value.ranked?.units) && count(value.ranked.length) && Array.isArray(value.ranked.dfs) &&
-          value.ranked.dfs.length === terms && value.ranked.dfs.every(count))) throw new Error('Page returned invalid term statistics.');
       return value.results.slice(0, 200).map(result => {
         if (!Number.isInteger(result.index) || result.index < 0 || result.index >= 200 || typeof result.preview !== 'string') {
-          throw new Error('Page returned an invalid passage.');
-        }
-        if (terms && !(count(result.length) && Array.isArray(result.tfs) && result.tfs.length === terms && result.tfs.every(count))) {
           throw new Error('Page returned an invalid passage.');
         }
         const preview = result.preview.slice(0, 460), marks = [];
@@ -98,35 +91,16 @@
         return { ...target, windowId: tab.windowId, index: result.index, url: value.url, preview, marks,
           title: String(value.title || tab.title || 'Untitled page').slice(0, 300),
           locator: typeof result.locator === 'string' ? result.locator.slice(0, 80) : '',
-          leading: Boolean(result.leading), trailing: Boolean(result.trailing), ...(terms ? { tfs: result.tfs, length: result.length } : {}) };
+          leading: Boolean(result.leading), trailing: Boolean(result.trailing) };
       });
-    }
-    // Corpus-wide BM25: sum every tab's unit counts, lengths and document
-    // frequencies, then rescore each page's local candidates with them.
-    function rankGlobally(pages) {
-      let units = 0, length = 0;
-      const dfs = [];
-      for (const { stats } of pages) {
-        units += stats.units; length += stats.length;
-        stats.dfs.forEach((df, i) => { dfs[i] = (dfs[i] || 0) + df; });
-      }
-      const average = length / Math.max(1, units), core = global.LegalPinpointerFindCore, scored = [];
-      pages.forEach(({ results }, order) => results.forEach(result => {
-        const score = core.bm25(result.tfs, result.length, dfs, units, average);
-        const { tfs, length: _, ...rest } = result;
-        if (score > 0) scored.push({ score, order, result: rest });
-      }));
-      return scored.sort((a, b) => b.score - a.score || a.order - b.order || a.result.index - b.result.index)
-        .slice(0, RANKED_RESULTS).map(entry => entry.result);
     }
     async function search(message, sender) {
       if (typeof message.query !== 'string' || message.query.length > 1024 || !['p', 's'].includes(message.mode) ||
           !['current', 'all', 'group'].includes(message.scope) || (message.refresh !== undefined && typeof message.refresh !== 'boolean')) {
         throw new Error('Invalid search request.');
       }
-      const core = global.LegalPinpointerFindCore, ranked = core.ranked(message.query, message.mode);
-      const compiled = ranked ? { tree: true, mode: 'p' } : core.compile(message.query, message.mode), key = sessionKey(sender);
-      const terms = ranked ? core.rankTerms(message.query).terms.length : 0, rankedPages = [];
+      // Ranked (plain-word) queries run in the side panel's own index; see SONAR_ISSUE.
+      const compiled = global.LegalPinpointerFindCore.compile(message.query, message.mode), key = sessionKey(sender);
       if (!claim(key, message.sequence)) return { stale: true };
       const run = { cancelled: false, state: null };
       running.set(key, run);
@@ -161,7 +135,7 @@
         // Fixed batches cap running page jobs, intermediate results, and storage
         // writes. Stop launching work once the aggregate result budget is full.
         for (let offset = 0; offset < candidates.length && alive(); offset += CONCURRENCY) {
-          if ((!ranked && results.length >= MAX_RESULTS) || characters >= MAX_INDEX_CHARS || Date.now() >= deadline) {
+          if (results.length >= MAX_RESULTS || characters >= MAX_INDEX_CHARS || Date.now() >= deadline) {
             limited = true;
             for (const tab of candidates.slice(offset)) skip(tab, results.length >= MAX_RESULTS ? 'Result limit; narrow the search' : characters >= MAX_INDEX_CHARS ? 'Text budget; narrow the scope' : 'Search time limit; refresh to retry');
             break;
@@ -191,10 +165,9 @@
               const value = await timeout(invoke(target, 'search', [{ query: message.query, mode: compiled.mode,
                 ticket: state.ticket, deadline: end, refresh: Boolean(message.refresh), notify: Boolean(state.panel) }]), Math.max(1, end - Date.now()));
               if (!alive()) return [];
-              const normalized = pageResults(value, tab, target, terms);
+              const normalized = pageResults(value, tab, target);
               characters += Number.isSafeInteger(value.characters) ? Math.max(0, Math.min(4_000_000, value.characters)) : 0;
               searched++; limited ||= Boolean(value.limited) || value.results.length > 200;
-              if (ranked) { rankedPages.push({ tabId: tab.id, stats: value.ranked, results: normalized }); return []; }
               return normalized;
             } catch (error) {
               // Promise.race alone does not cancel an executeScript job.
@@ -209,18 +182,13 @@
           }
         }
         if (!alive()) { await dispose(state, true); return { stale: true }; }
-        if (ranked) {
-          // Equal scores keep tab order, then document order.
-          rankedPages.sort((a, b) => candidates.findIndex(t => t.id === a.tabId) - candidates.findIndex(t => t.id === b.tabId));
-          results.push(...rankGlobally(rankedPages));
-        }
         // Store issued navigation handles, not snippets/marks. Reading one result
         // after a worker restart need not deserialize a megabyte of preview text.
         state.results = results.map(({ tabId, documentId, windowId, index, url }) => ({ tabId, documentId, windowId, index, url }));
         state.updated = Date.now();
         await exclusive(key, async () => { if (alive()) await save(key, state); });
         if (!alive()) return { stale: true };
-        return { session: key, ticket: state.ticket, results, mode: compiled.mode, ranked,
+        return { session: key, ticket: state.ticket, results, mode: compiled.mode,
           searched, total: candidates.length, skipped, limited, origin: state.origin,
           note: message.scope === 'group' && origin.groupId < 0 ? 'This tab is not in a tab group. No other ungrouped tabs were searched.' : '' };
       } finally {
@@ -247,24 +215,85 @@
       }
       return { state, result, tab };
     }
-    // Passage text of issued results, for the panel's on-device reranker.
-    async function passageTexts(message, sender) {
-      if (!Array.isArray(message.ids) || message.ids.length > 64 || !message.ids.every(id => Number.isInteger(id) && id >= 0)) throw new Error('Choose search results.');
-      const state = await issuedState(message, sender), groups = new Map(), texts = message.ids.map(() => null);
-      message.ids.forEach((id, at) => {
-        const result = state.results[id];
-        if (!result) return;
-        const key = `${result.tabId}:${result.documentId}`;
-        if (!groups.has(key)) groups.set(key, { target: result, positions: [], slots: [] });
-        groups.get(key).positions.push(result.index); groups.get(key).slots.push(at);
-      });
-      await Promise.all([...groups.values()].map(async ({ target, positions, slots }) => {
+    // Paragraph text of up to four eligible tabs for the side panel's own ranked
+    // index. The exact documents read are recorded so Close can release them.
+    async function units(message, sender) {
+      if (!sender.workspace || !Array.isArray(message.tabIds) || !message.tabIds.length || message.tabIds.length > CONCURRENCY ||
+          !message.tabIds.every(Number.isInteger) || typeof message.known !== 'object' || !message.known) throw new Error('Invalid read request.');
+      const pages = await Promise.all(message.tabIds.map(async tabId => {
+        let tab;
+        try { tab = await api.tabs.get(tabId); } catch (_) { return { tabId, skipped: 'Closed' }; }
+        const title = String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 300);
+        const reason = Boolean(tab.incognito) !== sender.incognito ? 'Cannot mix private and normal windows.' : !supported(tab) ? 'Browser-restricted or unsupported page'
+          : tab.discarded || tab.frozen ? 'Discarded or frozen; open it and refresh' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
+        if (reason) return { tabId, title, skipped: reason };
         try {
-          const values = await timeout(invoke(target, 'texts', [state.ticket, positions]), 3000);
-          slots.forEach((slot, i) => { if (typeof values?.[i] === 'string') texts[slot] = values[i].slice(0, 3000); });
-        } catch (_) { /* A tab that closed or changed keeps its first-pass rank. */ }
+          const target = await timeout(install(tab.id));
+          const known = typeof message.known[tabId] === 'string' ? message.known[tabId] : '';
+          const value = await timeout(invoke(target, 'units', [{ known, workspace: sender.workspace, deadline: Date.now() + 9000 }]), 10_000);
+          if (!value || value.url !== tab.url || typeof value.revision !== 'string' || value.revision.length > 40) throw new Error('Page changed or returned invalid text.');
+          const page = { tabId, ...target, windowId: tab.windowId, url: value.url, title: String(value.title || title).slice(0, 300), revision: value.revision };
+          if (value.same) return { ...page, same: true };
+          let count = 0;
+          if (typeof value.text === 'string' && value.text.length <= 4_200_000) for (let at = -1; count <= 200_000 && (count++, at = value.text.indexOf('\n', at + 1)) >= 0;);
+          if (!count || !value.text || !Array.isArray(value.locators) || value.locators.length !== count) throw new Error('Page returned invalid text.');
+          return { ...page, text: value.text, limited: Boolean(value.limited),
+            locators: value.locators.map(locator => typeof locator === 'string' ? locator.slice(0, 80) : '') };
+        } catch (error) { return { tabId, title, skipped: `Unavailable: ${String(error.message || error).slice(0, 180)}` }; }
       }));
-      return { texts };
+      const key = unitsKey(sender.workspace);
+      await exclusive(key, async () => {
+        const state = (await load(key)) || { targets: [], incognito: sender.incognito };
+        for (const page of pages) {
+          state.targets = state.targets.filter(t => t.tabId !== page.tabId);
+          if (page.documentId) state.targets.push({ tabId: page.tabId, documentId: page.documentId, url: page.url });
+        }
+        state.updated = Date.now();
+        await save(key, state);
+      });
+      return { pages };
+    }
+    // Handles for ranked results the side panel found in its own index. Each must
+    // name a document this workspace read; the page revalidates the unit's text.
+    async function issue(message, sender) {
+      const valid = r => Number.isInteger(r?.tabId) && typeof r.documentId === 'string' && Number.isInteger(r.unit) && r.unit >= 0 && Number.isSafeInteger(r.hash);
+      if (!sender.workspace || typeof message.query !== 'string' || message.query.length > 1024 || !['current', 'all', 'group'].includes(message.scope) ||
+          !Array.isArray(message.results) || message.results.length > RANKED_RESULTS || !message.results.every(valid)) throw new Error('Invalid search request.');
+      const key = sessionKey(sender);
+      if (!claim(key, message.sequence)) return { stale: true };
+      const run = { cancelled: false, state: null };
+      running.set(key, run);
+      const alive = () => !run.cancelled && current(key, message.sequence);
+      try {
+        const origin = await api.tabs.get(message.originTabId);
+        if (Boolean(origin.incognito) !== sender.incognito) throw new Error('Cannot mix private and normal windows.');
+        const read = new Map(((await load(unitsKey(sender.workspace)))?.targets || []).map(t => [t.tabId, t]));
+        const windows = new Map();
+        for (const tabId of new Set(message.results.map(r => r.tabId))) windows.set(tabId, await api.tabs.get(tabId).then(tab => tab.windowId, () => undefined));
+        const results = message.results.map(({ tabId, documentId, unit, hash }) => {
+          const target = read.get(tabId);
+          if (target?.documentId !== documentId) throw new Error('Search expired. Refresh the results.');
+          return { tabId, documentId, windowId: windows.get(tabId), url: target.url, unit, hash };
+        });
+        let state;
+        await exclusive(key, async () => {
+          const existing = await load(key);
+          if (!alive() || (existing?.sequence ?? -1) >= message.sequence) { run.cancelled = true; return; }
+          state = { ticket: crypto.randomUUID(), sequence: message.sequence, origin: { tabId: origin.id, documentId: '', url: origin.url },
+            panel: true, groupId: origin.groupId, windowId: origin.windowId, incognito: sender.incognito, scope: message.scope,
+            ranked: true, query: message.query, targets: [], results, updated: Date.now() };
+          await save(key, state);
+          void dispose(existing, true);
+        });
+        return state && alive() ? { session: key, ticket: state.ticket, origin: state.origin } : { stale: true };
+      } finally { if (running.get(key) === run) running.delete(key); }
+    }
+    // What a page needs to find a result: an exact search's position, or a ranked
+    // unit with its text hash, the query, and its siblings in that document.
+    function pageKey(state, result) {
+      if (!state.ranked) return result.index;
+      const others = state.results.filter(r => r !== result && r.tabId === result.tabId && r.documentId === result.documentId);
+      return { query: state.query, unit: result.unit, hash: result.hash, others: others.slice(0, 63).map(({ unit, hash }) => ({ unit, hash })) };
     }
     // Copy uses Pinpointer's own quote/pinpoint/link builders where the page has
     // them (content.js on supported legal sites), else a text-fragment link.
@@ -274,10 +303,10 @@
       const [probe] = await api.scripting.executeScript({ target: keyFor(result),
         func: () => Boolean(globalThis.LegalPinpointerSonarCopy || globalThis.LegalPinpointerTextFragments) });
       if (!probe?.result) await api.scripting.executeScript({ target: keyFor(result), files: ['canlii-courts.js', 'core.js', 'text-fragments.js'] });
-      const [entry] = await api.scripting.executeScript({ target: keyFor(result), args: [state.ticket, result.index, message.mode],
-        func: async (ticket, index, mode) => {
+      const [entry] = await api.scripting.executeScript({ target: keyFor(result), args: [state.ticket, pageKey(state, result), message.mode],
+        func: async (ticket, key, mode) => {
           try {
-            const page = globalThis.LegalPinpointerSearchPage, range = page.passage(ticket, index);
+            const page = globalThis.LegalPinpointerSearchPage, range = await page.passage(ticket, key);
             if (globalThis.LegalPinpointerSonarCopy) {
               try { return { ok: true, value: (await globalThis.LegalPinpointerSonarCopy(range, mode)).payload }; }
               catch (error) { if (!/supported legal document|No page, paragraph, or provision/.test(error.message)) throw error; }
@@ -292,8 +321,8 @@
     }
     async function go(message, sender) {
       const { state, result, tab } = await issued(message, sender);
-      if (state.panel || result.tabId === state.origin.tabId) await invoke(result, 'preview', [state.ticket, result.index, true]);
-      else await invoke(result, 'reveal', [state.ticket, result.index, message.session]);
+      if (state.panel || result.tabId === state.origin.tabId) await invoke(result, 'preview', [state.ticket, pageKey(state, result), true]);
+      else await invoke(result, 'reveal', [state.ticket, pageKey(state, result), message.session]);
       if (message.type === 'SONAR_PREVIEW') return { previewed: true };
       await api.tabs.update(result.tabId, { active: true });
       await api.windows.update(tab.windowId, { focused: true });
@@ -322,6 +351,8 @@
       } else if (message.workspace !== undefined || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 || typeof sender.documentId !== 'string' ||
           !/^(https?|file):/.test(sender.url || '')) throw new Error('Invalid search sender.');
       if (message.type === 'SONAR_SEARCH') return search(message, sender);
+      if (message.type === 'SONAR_UNITS') return units(message, sender);
+      if (message.type === 'SONAR_ISSUE') return issue(message, sender);
       if (message.type === 'SONAR_CLOSE' || message.type === 'SONAR_CANCEL') {
         const key = sessionKey(sender), keepIndex = message.type === 'SONAR_CANCEL';
         if (!claim(key, message.sequence)) return { stale: true };
@@ -341,6 +372,11 @@
           } else await api.storage.session.remove(key);
         });
         await dispose(state, keepIndex);
+        if (!keepIndex && sender.workspace) {
+          const read = await load(unitsKey(sender.workspace));
+          await api.storage.session.remove(unitsKey(sender.workspace));
+          await dispose(read);
+        }
         return {};
       }
       if (typeof message.session !== 'string' || !message.session.startsWith(prefix)) throw new Error('Invalid search session.');
@@ -363,7 +399,6 @@
       }
       if (message.type === 'SONAR_GO' || message.type === 'SONAR_PREVIEW') return go(message, sender);
       if (message.type === 'SONAR_COPY') return copyResult(message, sender);
-      if (message.type === 'SONAR_TEXTS') return passageTexts(message, sender);
       return returnToSearch(message, sender);
     }
     async function open(tab) {

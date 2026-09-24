@@ -56,6 +56,11 @@ test('runtime scripts contain no remote-code or network primitives', () => {
   assert.equal((worker.match(/\bimportScripts\s*\(/g) || []).length, 1);
   assert.match(worker, /importScripts\('canlii-legislation\.js', 'find-core\.js', 'find-worker\.js', 'sonar-launcher\.js'\)/);
   assert.doesNotMatch(worker, /\b(?:XMLHttpRequest|WebSocket|EventSource|eval|Function|sendBeacon)\s*\(/);
+
+  const index = fs.readFileSync(path.join(root, 'sonar-index.js'), 'utf8');
+  assert.equal((index.match(/\bimportScripts\s*\(/g) || []).length, 1);
+  assert.match(index, /importScripts\('find-core\.js'\)/);
+  assert.doesNotMatch(index, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|eval|Function|sendBeacon)\s*\(/);
 });
 
 test('clipboard data is accessed only in the user-invoked copy path and is never persisted', () => {
