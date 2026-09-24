@@ -35,11 +35,14 @@ Selections include every structural unit crossed. Rich clipboard output links th
 **Ctrl+Shift+S** opens Chrome's native side panel. **Tab** cycles `/p` (same
 paragraph) and `/s` (same sentence). **Shift+Tab** cycles **Current tab → All
 tabs → Current tab group**. Start with `privileg* waiv*`; quoted phrases,
-Boolean groups and explicit `/p` or `/s` also work. **Enter / Shift+Enter**
-preview passages. **Click a result or Ctrl+Enter** to jump to its exact source
-text while the query/results remain visible. Alt+wheel previews; release Alt
-to open. **Back to start** restores the source scroll position. **Use active
-tab** explicitly changes the pinned search origin.
+Boolean groups and explicit `/p` or `/s` also work. Results list as you type,
+each titled with the citation Pinpointer copies. **Enter** puts keyboard focus on
+the first result and arrows move among them; clicking a result only selects it.
+**Open** (or Enter on a result) jumps to its exact source text while the
+query/results remain visible. **Ctrl+X**, **Ctrl+Shift+X** and **Alt+X** copy
+the selected result's pinpoint, quotation or citation, as on its page. **Use
+active tab** explicitly changes the pinned search origin. Escape clears the
+search; the panel stays open, so it never replays Chrome's slide-in.
 
 Other-window results open that window's panel
 and hand off the search without moving tabs. All tabs includes other windows in
@@ -47,7 +50,7 @@ the same normal/incognito context; an ungrouped origin's Group scope is empty,
 not all ungrouped tabs. Restricted/unavailable pages and partial results are
 reported, not silently counted as zero-hit documents.
 
-**Alt+Shift+C** opens **CanLII document-text search from any browser tab,
+**Alt+Shift+S** opens **CanLII document-text search from any browser tab,
 including blank/new tabs**. The browser command needs no source-page injection.
 Type a query and press Enter: CanLII results open in a new tab, leaving the
 starting tab untouched. Nothing is sent while typing. Open-tab and CanLII
@@ -93,7 +96,7 @@ Local search queries are not written to disk or sync. Navigation handles use
 Chrome's private RAM session storage. A deliberate cross-window handoff also
 stores a one-shot bounded query/result snapshot there; the receiving panel
 consumes/removes it. Unconsumed snapshots older than 60 seconds are pruned on
-next launch. Clear in Open tabs releases its shared search session. Native panel
+next launch. Escape in the Open tabs query releases its shared search session. Native panel
 X closure relies on the existing 15-minute page-cache/session expiry, rather
 than destroying a workspace open in another window. Browser suspension can
 delay timers. There is no background crawling, polling or worker keepalive.

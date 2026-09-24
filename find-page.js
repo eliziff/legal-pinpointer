@@ -201,7 +201,7 @@
         }
         if (sentenceCache) paragraph.sentences = sentenceCache;
       }
-      return publish(snapshot, ticket, check, found, limited || hitCount > MAX_PAINT);
+      return publish(snapshot, ticket, check, found, limited || hitCount > MAX_PAINT, { title: await pageTitle() });
     } finally {
       if (jobs.get(ticket) === job) jobs.delete(ticket);
     }
@@ -242,6 +242,10 @@
     return +(/^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '')?.[1] || 0);
   }
   const locatorOf = node => { const number = paraNumber(node); return number ? `para ${number}` : ''; };
+  // The citation Pinpointer's Alt+X copies on supported legal pages, else the page title.
+  async function pageTitle() {
+    try { return (await global.LegalPinpointerSonarCitation?.()) || document.title; } catch (_) { return document.title; }
+  }
   // Every paragraph's text for the side panel's own ranked index, joined by
   // newlines (units never contain one). The revision names the exact text, so an
   // unchanged page answers `same` without sending it. The page then drops its
@@ -251,7 +255,7 @@
     watching = { ...watching, workspace }; notified = false;
     return withJob(async check => {
       const snapshot = await ensureIndex(check), texts = snapshot.paragraphs.map(p => p.text), text = texts.join('\n');
-      const reply = { url: location.href, title: document.title, revision: `${texts.length}:${core.hash(text)}` };
+      const reply = { url: location.href, title: await pageTitle(), revision: `${texts.length}:${core.hash(text)}` };
       if (!exactCaches() && index === snapshot) index = null;
       if (known === reply.revision) return { ...reply, same: true };
       return { ...reply, text, paras: snapshot.paragraphs.map(p => paraNumber(p.parts[0]?.node)), characters: snapshot.characters, limited: snapshot.limited };

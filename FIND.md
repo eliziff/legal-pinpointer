@@ -1,8 +1,7 @@
 # Tab Sonar: persistent proximity search
 
-Tab Sonar now opens in Chrome's **native side panel**, not a floating document
-modal. The query, virtualized result list, and passage preview remain visible
-when a source tab is activated. Chrome 116 or newer is required. Existing
+Tab Sonar opens in Chrome's **native side panel**. The query and the virtualized
+result list remain visible when a source tab is activated. Chrome 116 or newer is required. Existing
 citation-copying shortcuts and output formats are unchanged.
 
 ## Controls
@@ -12,41 +11,41 @@ citation-copying shortcuts and output formats are unchanged.
 | Ctrl+Shift+S | Open/focus Open tabs search. macOS uses Control, not Command. |
 | Tab | Cycle /p (same paragraph) and /s (same sentence). |
 | Shift+Tab | Cycle Current tab, All tabs, Current tab group. |
-| Enter / Shift+Enter in the query | Preview next/previous passage. |
-| Ctrl+Enter or click a result | Open the exact matching passage in its source tab. |
-| Alt+wheel; release Alt | Preview passages, then open the displayed result. |
-| Back to start | Restore the source scroll position and return to the originating tab. |
-| Copy quote / Ctrl+Shift+X | Copy the selected passage as Pinpointer's quotation: the linked paragraph or provision marker and the text. Unnumbered text and other sites copy `[Link]: text` with a link to the passage. |
-| Copy pinpoint / Ctrl+X | Copy the pinpoint (for example `at para 12`) linked to the paragraph, as the in-page shortcut does. Ctrl+X on a selection in the query still cuts. |
-| Copy link | Copy a text-fragment link that opens the page scrolled to and highlighting the passage. |
-| Alt+X | Copy the document's citation. |
+| Enter in the query | Put keyboard focus on the first result. Nothing opens. |
+| Arrows, PageUp/PageDown, Home, End | Move among results. ArrowUp from the first result returns to the query. |
+| Click a result | Select it. Nothing opens. |
+| Open, or Enter on a result | Jump to the exact matching passage in its source tab. |
+| Ctrl+Shift+X | Copy the selected passage as Pinpointer's quotation: the linked paragraph or provision marker and the text. Unnumbered text and other sites copy `[Link]: text` with a link to the passage. |
+| Ctrl+X | Copy the pinpoint (for example `at para 12`) linked to the paragraph. |
+| Alt+X | Copy the document's citation (the result's title). |
 | Use active tab | Explicitly change the origin of Current tab/group search. |
-| Refresh | Re-read tabs/group membership and rebuild the source text index. |
-| Clear | Clear the current route's query; in Open tabs, release its shared search session. |
+| Escape | In the list, return to the query; in the query, clear it (in Open tabs, also release its shared search session). The panel stays open. |
 | F6 / Shift+F6 | Move among controls because Tab and Shift+Tab control proximity/scope. |
-| Alt+Shift+C | Open CanLII document-text search from any browser tab, including blank/new tabs. |
+| Alt+Shift+S | Open CanLII document-text search from any browser tab, including blank/new tabs. |
 
-With focus on the result list, arrows, PageUp/PageDown, Home and End preview
-results; Enter opens one. In Current tab scope, preview also highlights/scrolls
-the source **without activating it or stealing query focus**. Multi-tab preview
-does not activate any source until a click, Ctrl+Enter, or Alt release.
+The copy shortcuts act on the result with keyboard focus exactly as they would
+on that paragraph in its own tab; in the query box Ctrl+X still cuts. Selecting a
+result never scrolls or activates its source: only Open (or Enter on a result) does.
 
-Escape clears the active route and closes the native side panel where Chrome's
-close API is available; older supported Chrome versions can use its native X.
-The popup provides both search buttons and reports unassigned shortcut bindings.
-Chrome or another extension may claim a shortcut: assign it at
-`chrome://extensions/shortcuts`. The extension does not override the new-tab page.
+Escape does not close the panel. Chrome animates the side panel every time it
+opens and extensions cannot turn that off (Chrome skips it only when Windows'
+Animation effects setting is off), so the panel stays open and the shortcuts
+just focus its search box; close it with the panel's X. The popup provides both
+search buttons and reports unassigned shortcut bindings. Chrome or another
+extension may claim a shortcut: assign it at `chrome://extensions/shortcuts`.
+Chrome itself uses Alt+Shift+C (add a new tab to a group), which is why CanLII
+search is Alt+Shift+S. The extension does not override the new-tab page.
 
 ## CanLII document-text search, including from new tabs
 
-Alt+Shift+C is a **chrome.commands** command handled by the service worker. The
+Alt+Shift+S is a **chrome.commands** command handled by the service worker. The
 handler opens the native panel synchronously in the keyboard gesture, before
 awaiting storage, tab lookup, or page access. It never injects into the originating
 page. Blank tabs, `chrome://newtab/`, and other browser-owned pages therefore need
 no document script to launch this form. The same approach opens Open tabs search
 from restricted pages; their contents remain unsearchable and are reported as such.
 
-Type a query and press Enter or Search CanLII. A **new tab** opens at CanLII's
+Type a query and press Enter. A **new tab** opens at CanLII's
 `/en/#search/text=...` URL with the complete query encoded as the text parameter.
 The starting tab is not navigated/replaced. Typing alone sends nothing. This is
 CanLII document-text search, not title/citation lookup and not a search of open
@@ -58,10 +57,11 @@ No selected document text is automatically placed into the remote query.
 
 ## Stable results and cross-window navigation
 
-The header, status, list viewport, and preview occupy fixed grid regions. Long
-text scrolls inside its region; loading, errors, empty results, proximity/scope
-changes and skipped-tab details do not expand/collapse the panel. There are no
-animated height transitions. Results have fixed 132-pixel rows and mount only
+The header and the result list occupy fixed grid regions, with one line below
+for errors and copy confirmations. New results replace the previous ones in
+place; nothing is dimmed, disabled or collapsed while a search runs, and there
+are no animations. Results have fixed 104-pixel rows (the page's icon, title,
+pinpoint and Open above three lines of excerpt) and mount only
 the viewport plus three overscan rows on either side. Scroll/resize redraws are
 coalesced through animation frames. Result text is escaped into DOM text/mark
 nodes, never injected as source HTML. Dark and forced-color modes are supported.
@@ -70,18 +70,20 @@ Copying runs in the source tab with Pinpointer's own formatting code and the
 pinpoint wording option from the popup. The copied passage is the whole matching
 paragraph (or sentence in /s mode), rechecked against the page before copying.
 
-Every result carries the source's title, observed pinpoint where available,
-excerpt and highlighted matches. A click uses an issued result handle, exact
+Every result carries its source's title (on legal pages Pinpointer supports, the
+citation Alt+X copies, such as `Alpha v Beta, 2024 SCC 1`; elsewhere the page
+title), the page's icon, the observed pinpoint where available, the excerpt and
+highlighted matches. Open uses an issued result handle, exact
 Chrome document ID, URL and current group/window checks, then revalidates the
-source ranges. Changed or unavailable passages require Refresh rather than an
-approximate jump. Existing renderer indexes and highlight reuse remain intact.
+source ranges. Changed or unavailable passages refuse to open (search again)
+rather than jump approximately. Existing renderer indexes and highlight reuse remain intact.
 
 Current tab and Current tab group stay pinned to the originating tab while
 visiting results. All tabs includes other windows without mixing normal and
 incognito contexts. A source in another window opens that window's native panel
 **within the original click/key gesture** and hands off the query, result list,
 selection and list scroll. No source tab is moved or regrouped. A window whose
-shared search has been changed or cleared elsewhere shows a refresh notice.
+shared search has been changed or cleared elsewhere says so.
 
 ## Query language
 
@@ -89,8 +91,7 @@ shared search has been changed or cleared elsewhere shows a refresh notice.
 parentheses, `*`, `/p`, `/s` or upper-case AND/OR/NOT) finds paragraphs across
 the searched tabs that share its words and lists them best first, not in page
 order: `whether an employer must accommodate to the point of undue hardship`.
-Lower-case and/or/not are ordinary words here. The status line reads
-"N matching paragraphs, best first"; there are no scores or badges.
+Lower-case and/or/not are ordinary words here. There are no scores or badges.
 
 - The side panel reads each searchable tab's paragraphs once, in idle time after
   it opens (the starting tab first), into an index in a worker of its own:
@@ -113,9 +114,10 @@ Lower-case and/or/not are ordinary words here. The status line reads
   is absent or fails (or Chrome is older than 137, which the runtime needs), the
   first-pass order stays.
 - The list never jumps under the user: the reranked order replaces the first
-  one once, and only while the pointer is off the list and the selection has
-  not been moved. Otherwise it waits for the pointer to leave, or is dropped once
-  a result has been chosen. Open, preview and the copy commands use the result's
+  one once, and only while the pointer is off the list and no result has been
+  clicked or arrowed to (a first result focused with Enter stays first: the best
+  one after reordering). Otherwise it waits for the pointer to leave, or is
+  dropped once a result has been chosen. Open and the copy commands use the result's
   issued handle, so they work from either order.
 
 Measured 2026-09-23 on an i3-1315U laptop with Intel UHD graphics, loaded to
@@ -178,7 +180,7 @@ results and drafts. The receiving panel consumes/removes it. Unconsumed snapshot
 older than 60 seconds are pruned on the next launch; no disk or sync storage is
 used for these snapshots. Chrome restart clears session storage.
 
-Clear in Open tabs or Escape from that route releases the shared session. Native
+Escape in the Open tabs query releases the shared session. Native
 X closure does not globally destroy a workspace still in use in another window;
 existing page cache timers expire after 15 minutes and release on pagehide.
 Abandoned broker records are pruned on next launch. Browser suspension can delay
@@ -193,8 +195,9 @@ to 32 million characters across tabs, keeps the best 200 (the 1,000-result stop
 does not apply) and reranks the top 30, each cut to 620 characters and 192 tokens. Physical paragraphs over
 65,536 UTF-16 characters and budget-truncated units are skipped whole, not split
 into misleading proximity/NOT matches. Highlight caps are 100 ranges/unit and
-2,000 background ranges; previews contain at most 460 characters. Partial work
-and skipped tabs are visible through the fixed status area and Details popover.
+2,000 background ranges; excerpts contain at most 460 characters. Skipped tabs
+(other than browser-restricted pages, which can never be searched) and partial
+results show a Skipped tabs or Partial results button beside the scope.
 
 Search covers loaded visible top-document HTML and open shadows. Browser-internal
 pages, Web Store, built-in PDF viewers, scans, canvas text, closed shadows, iframe
