@@ -1,7 +1,7 @@
 'use strict';
 
 (function exposeResults(global) {
-  const ROW_HEIGHT = 104, OVERSCAN = 3;
+  const ROW_HEIGHT = 132, OVERSCAN = 3;
   function markedText(document, text, marks = []) {
     const fragment = document.createDocumentFragment();
     let offset = 0;
@@ -19,8 +19,8 @@
     const start = Math.max(0, Math.min(count, Math.floor(top / ROW_HEIGHT) - OVERSCAN));
     return { start, end: Math.min(count, start + Math.ceil(height / ROW_HEIGHT) + OVERSCAN * 2) };
   }
-  // `choose(index, open)` selects a result, opening it only from its Open button
-  // or Enter. `icon(url)` is the page's favicon; `leave()` runs on ArrowUp from the top.
+  // `choose(index, action)` selects a result; its buttons (or Enter, which opens) add
+  // the action. `icon(url)` is the page's favicon; `leave()` runs on ArrowUp from the top.
   class ResultsList {
     constructor(viewport, spacer, rows, { choose, icon = () => '', leave = () => {} }) {
       Object.assign(this, { viewport, spacer, rows, choose, icon, results: [], selected: -1, start: -1, end: -1, frame: 0 });
@@ -33,7 +33,7 @@
         const row = event.target.closest('[data-result]');
         if (!row) return;
         viewport.focus({ preventScroll: true });
-        choose(Number(row.dataset.result), Boolean(event.target.closest('.result-open')));
+        choose(Number(row.dataset.result), event.target.closest('[data-action]')?.dataset.action || '');
       });
       viewport.addEventListener('keydown', event => {
         if (event.altKey || event.ctrlKey || event.metaKey) return;
@@ -41,11 +41,11 @@
         if (event.key === 'ArrowUp' && this.selected <= 0) {
           event.preventDefault(); leave();
         } else if (event.key in steps) {
-          event.preventDefault(); choose(Math.max(0, Math.min(this.results.length - 1, this.selected + steps[event.key])), false);
+          event.preventDefault(); choose(Math.max(0, Math.min(this.results.length - 1, this.selected + steps[event.key])));
         } else if (event.key === 'Home' || event.key === 'End') {
-          event.preventDefault(); choose(event.key === 'Home' ? 0 : this.results.length - 1, false);
+          event.preventDefault(); choose(event.key === 'Home' ? 0 : this.results.length - 1);
         } else if (event.key === 'Enter' && this.selected >= 0) {
-          event.preventDefault(); choose(this.selected, true);
+          event.preventDefault(); choose(this.selected, 'open');
         }
       });
     }
@@ -81,11 +81,16 @@
           const title = document.createElement('span'); title.className = 'result-title'; title.textContent = result.title; title.title = result.title;
           head.append(title);
           if (result.locator) { const locator = document.createElement('span'); locator.className = 'result-locator'; locator.textContent = result.locator; head.append(locator); }
-          const open = document.createElement('button'); open.type = 'button'; open.className = 'result-open'; open.tabIndex = -1; open.textContent = 'Open';
-          head.append(open);
+          const button = (action, label, className, hint = '') => {
+            const element = document.createElement('button'); element.type = 'button'; element.className = className; element.tabIndex = -1;
+            element.dataset.action = action; element.textContent = label; if (hint) element.title = hint; return element;
+          };
+          head.append(button('open', 'Open', 'result-open'));
           const text = document.createElement('p'); text.className = 'result-text';
           if (result.leading) text.append('…'); text.append(markedText(document, result.preview, result.marks)); if (result.trailing) text.append('…');
-          row.append(head, text); fragment.append(row);
+          const actions = document.createElement('div'); actions.className = 'result-actions';
+          actions.append(button('quote', 'Copy quote', 'result-copy', 'Ctrl+Shift+X'), button('pinpoint', 'Copy pinpoint', 'result-copy', 'Ctrl+X'), button('link', 'Copy link', 'result-copy'));
+          row.append(head, text, actions); fragment.append(row);
         }
         this.rows.replaceChildren(fragment); this.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
         this.start = start; this.end = end;

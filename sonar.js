@@ -21,7 +21,7 @@
   let indexer = null, indexReady = false, indexCalls = 0, reading = 0, contact = 0, rewatch = false;
   const favicon = url => url ? `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=16` : '';
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'),
-    { choose: (index, open) => choose(index, open), icon: favicon, leave: () => $('query').focus() });
+    { choose: (index, action) => choose(index, action), icon: favicon, leave: () => $('query').focus() });
   const inList = () => $('list-viewport').contains(document.activeElement);
   function nextSequence() { sequence = Math.max(sequence + 2, Date.now()); return sequence; }
   function tell(text, error = false) {
@@ -266,17 +266,18 @@
     $('query').focus({ preventScroll: true }); $('query').select();
   }
   // Selecting never moves the browser; only Open (or Enter on a result) does.
-  function choose(index, open = false, byUser = true) {
+  // The copy buttons copy that result, as its hotkeys do.
+  function choose(index, action = '', byUser = true) {
     if (route !== 'tabs' || !result?.results[index]) return;
     if (byUser) navigated = true;
     current = index; list.select(index);
-    if (open) visit();
+    if (action === 'open') visit(); else if (action) copyPassage(action);
   }
   // Enter in the search box: keyboard focus on the first result, nothing opened.
   function focusFirst() {
     if (busy) { focusOnResults = true; return; }
     if (!result?.results.length) return;
-    $('list-viewport').focus({ preventScroll: true }); choose(0, false, false);
+    $('list-viewport').focus({ preventScroll: true }); choose(0, '', false);
   }
   // The model loads in idle time and is released after a few idle minutes.
   function warmReranker() {
@@ -342,7 +343,7 @@
     } catch (error) { if (token === sequence) tell(error.message, true); }
     finally { opening = false; }
   }
-  // The clipboard write starts inside the key gesture; its contents resolve
+  // The clipboard write starts inside the click/key gesture; its contents resolve
   // once the source tab has built them with Pinpointer's formatting.
   async function copyPassage(mode) {
     if (busy || result?.stale || route !== 'tabs' || current < 0 || !result) return;
