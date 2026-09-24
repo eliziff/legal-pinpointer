@@ -9,7 +9,7 @@
   <main id="root">
     <p id="p32">[<a id="par32">32</a>] Alpha opening <em>emphasized words</em> and closing text.</p>
     <p id="p33">[<a id="par33">33</a>] Beta opening <strong>strong words</strong> and ending text.</p>
-    <blockquote>This unnumbered quotation is outside paragraph 33.</blockquote>
+    <blockquote>This unnumbered quotation continues paragraph 33.</blockquote>
     <p id="p34">[<a id="par34">34</a>] Gamma is outside the tested range.</p>
     <div id="law7"><a id="sec7">7</a> Parent provision text.
       <div id="law7-2"><a id="sec7-2">(2)</a> Nested provision text.<br>Continuation within subsection: &lt;unsafe&gt; &amp; safe.<span aria-hidden="true"> Copy controls</span></div>
@@ -110,7 +110,6 @@
       locator,
       element: document.getElementById(`p${locator}`),
       anchor: `par${locator}`,
-      fragment: '',
       markerText: locator,
       source: 'provider-native'
     }));
@@ -182,12 +181,59 @@
         <span class="SS_BasicNote" data-id="HideShow_HistoryNotes"><p>History must not enter the section.</p></span>
       </main>`;
       const lawUrl = new URL('https://advance.lexis.com/document/?pdmfid=1505209&pddocfullpath=%2Fshared%2Fdocument%2Flegislation-ca%2Furn%3AcontentItem%3Atest&pdtocnodeidentifier=AAHAACAAB');
+      const caseDocument = document.implementation.createHTMLDocument('Provider case');
+      const westlawUrl = new URL('https://nextcanada.westlaw.com/Document/I123?contextData=discard');
+      caseDocument.body.innerHTML = `<div id="co_docHeader"><h1 id="co_docHeaderTitleLine">Example v Example</h1>
+        <div id="citeInfo">175 NR 1 | [1994] S.C.J. No. 12 | 1994 CarswellNat 99</div></div>
+        <main id="co_document_0" class="crsw_caselaw"><p id="crsw_paragraph_num_1">1 Body cites 2009 SCC 32.</p></main>`;
+      let providerCase = providerAdapters.inspectWestlaw(caseDocument, westlawUrl);
+      assert(providerCase.citation.citation === '175 NR 1' && !providerCase.canliiUrl, 'McGill: a printed reporter outranks database citations.');
+      const originalModel = { ...window.__model };
+      Object.assign(window.__model, providerCase, { root });
+      const reporterCopy = await copy('citation');
+      assert(reporterCopy.html.includes('href="https://nextcanada.westlaw.com/Document/I123">175 NR 1</a>'), 'Without a CanLII copy the citation links to the current Westlaw document.');
+      caseDocument.getElementById('citeInfo').textContent = '1994 CarswellNat 99 | [1994] S.C.J. No. 12';
+      providerCase = providerAdapters.inspectWestlaw(caseDocument, westlawUrl);
+      assert(providerCase.citation.citation === '1994 CarswellNat 99 (WL Can)', 'McGill: a Westlaw-only case cites Carswell with (WL Can).');
+      caseDocument.getElementById('citeInfo').textContent = '175 NR 1 | [1994] S.C.J. No. 12 | 1994 CarswellNat 99 | 1994 CanLII 17 (SCC)';
+      providerCase = providerAdapters.inspectWestlaw(caseDocument, westlawUrl);
+      assert(providerCase.citation.citation === '175 NR 1' && providerCase.canliiUrl.endsWith('/1994canlii17/1994canlii17.html'), 'A parallel CanLII citation identifies the CanLII copy even when a reporter is displayed.');
+      Object.assign(window.__model, providerCase, { root });
+      const canliiCopy = await copy('citation');
+      assert(canliiCopy.html.includes('>175 NR 1</a>'), 'The displayed reporter citation must carry the link.');
+      caseDocument.getElementById('citeInfo').textContent += ' | 1994 SCC 7';
+      providerCase = providerAdapters.inspectWestlaw(caseDocument, westlawUrl);
+      assert(providerCase.citation.citation === '1994 SCC 7' && providerCase.canliiUrl.endsWith('/1994scc7/1994scc7.html'), 'Neutral citation must outrank CanLII and control the link.');
+      caseDocument.body.innerHTML = `<main id="document"><h1 id="SS_DocumentTitle">Example v Example, [1994] S.C.J. No. 12</h1>
+        <div class="SS_LeftAlign"><div>175 NR 1 | 1994 CarswellNat 99</div></div>
+        <p id="PARA_1">1 Body cites 2009 SCC 32.</p></main>`;
+      providerCase = providerAdapters.inspectLexis(caseDocument, new URL(lexisUrl));
+      assert(providerCase.citation.citation === '175 NR 1' && !providerCase.canliiUrl, 'McGill: the printed reporter outranks the Quicklaw heading citation; body cross-references are ignored.');
+      Object.assign(window.__model, providerCase, { root });
+      const lexisCopy = await copy('citation');
+      assert(lexisCopy.html.includes('175 NR 1</a>') && lexisCopy.html.includes('pddocfullpath='), 'Lexis citation must retain the current document identifier.');
+      caseDocument.querySelector('#PARA_1').removeAttribute('id');
+      providerCase = providerAdapters.inspectLexis(caseDocument, new URL(lexisUrl));
+      assert(providerCase.citation.citation === '[1994] SCJ No 12 (QL)' && !providerCase.canliiUrl, 'A page without native paragraph IDs must not use a body citation.');
+      caseDocument.querySelector('.SS_LeftAlign > div').textContent = '1994 CarswellNat 99';
+      providerCase = providerAdapters.inspectLexis(caseDocument, new URL(lexisUrl));
+      assert(providerCase.citation.citation === '[1994] SCJ No 12 (QL)', 'McGill: a Quicklaw-only case cites QL with (QL).');
+      Object.assign(window.__model, originalModel);
+
+      const metadataDocument = document.implementation.createHTMLDocument('Example Act, RSA 2000, c E-1 | CanLII');
+      metadataDocument.body.innerHTML = '<h1>Example Act</h1><main><p>Unnumbered body refers to Other Act, SA 2020, c O-1.</p></main>';
+      const metadataBase = providerAdapters.inspectCanlii(metadataDocument, new URL('https://www.canlii.org/en/ab/laws/stat/rsa-2000-c-e-1/latest/rsa-2000-c-e-1.html'));
+      assert(metadataBase.citation.plain === 'Example Act, RSA 2000, c E-1', `Missing metadata citation fallback: ${metadataBase.citation.plain}`);
+      metadataDocument.title = 'Lexis legislation';
+      metadataDocument.body.innerHTML = '<h1 id="SS_DocumentTitle">Example Act</h1><div class="SS_DocumentInfo">RSA 2000, c E-1</div><main>Body</main>';
+      assert(providerAdapters.inspectLexis(metadataDocument, lawUrl).citation.citation === 'RSA 2000, c E-1', 'Separate Lexis citation metadata was lost.');
+
       const lawBase = providerAdapters.inspectLexis(lawDocument, lawUrl);
       const resolvedLaw = await providerAdapters.inspect(lawDocument, lawUrl, async () => ({ ok: true, offset_unit: 'utf16', nodes: [] }));
       const lawPlane = LegalPinpointerTextFragments.buildStructureIndex(lawBase.root);
       lawPlane.root = lawBase.root;
       const lawInput = providerAdapters.engineInput(lawBase, lawPlane);
-      assert(lawBase.citation.html === '<i>ADULT GUARDIANSHIP AND TRUSTEESHIP ACT</i>, SA 2008, c. A-4.2', `Lexis legislation citation core or italics were wrong: ${lawBase.citation.html}`);
+      assert(lawBase.citation.html === '<i>ADULT GUARDIANSHIP AND TRUSTEESHIP ACT</i>, SA 2008, c A-4.2', `Lexis legislation citation core or italics were wrong: ${lawBase.citation.html}`);
       assert(resolvedLaw.canliiUrl === 'https://www.canlii.org/en/ab/laws/stat/sa-2008-c-a-4.2/latest/sa-2008-c-a-4.2.html', `Lexis legislation did not receive its snapshot-backed CanLII equivalent: ${resolvedLaw.canliiUrl}`);
       assert(lawInput.provider === 'lexis', 'The provider-text request must retain its actual provider.');
       assert(lawInput.section_map.length === 1 && lawInput.section_map[0][0] === '1', 'Lexis SECTION 1 was not sent as ordered provider evidence.');
@@ -210,6 +256,15 @@
       assert(range.html.includes('#par32') && range.html.includes('#par33'), 'Each range endpoint must have its own native anchor.');
       assert((range.html.match(/<a /g) || []).length === 2, 'A two-ended range must contain exactly two links.');
       assert(!document.getElementById('legal-pinpointer-status'), 'Popup actions must not also create an in-page toast.');
+
+      const blockquote = root.querySelector('blockquote');
+      select(blockquote, 0, blockquote, blockquote.childNodes.length);
+      const inherited = await copy('pinpoint');
+      assert(inherited.plain === 'at para 33', `Block quote did not inherit paragraph 33: ${inherited.plain}`);
+      const inheritedQuote = await copy('quote');
+      assert(inheritedQuote.plain.includes('[33]') && inheritedQuote.plain.includes('unnumbered quotation'), 'Inherited quote lost its passage.');
+      assert(!/[\r\n]$/.test(inheritedQuote.plain) && !/<\/?p[ >]|<br>$/.test(inheritedQuote.html), 'Quote adds a paragraph boundary when pasted.');
+      select(p32, 0, p33, p33.childNodes.length);
 
       const caseCitation = await copy('citation');
       assert(caseCitation.plain === 'Example v Example, 2024 SCC 1', `Unexpected case citation text: ${caseCitation.plain}`);
@@ -239,7 +294,7 @@
       assert(boundaryQuote.plain.startsWith('[33] Beta opening'), `A boundary-only predecessor must not affect the quote: ${boundaryQuote.plain}`);
       assert(!boundaryQuote.plain.startsWith('[32]') && !boundaryQuote.plain.startsWith('32-33'), 'The preceding paragraph leaked into quote display.');
       assert(!boundaryQuote.plain.startsWith('[33] \u2026'), 'Omitting only the prior DOM boundary must not create a leading ellipsis.');
-      assert(boundaryQuote.html.startsWith('<p><a ') && boundaryQuote.html.endsWith('</p>') && boundaryQuote.html.includes('#par33'), 'The paragraph marker must carry the link inside a semantic paragraph block.');
+      assert(boundaryQuote.html.startsWith('<a ') && !/<\/?p[ >]/.test(boundaryQuote.html) && boundaryQuote.html.includes('#par33'), 'The paragraph marker must carry the link inside a semantic paragraph block.');
 
       select(p33.firstChild, 0, p33, p33.childNodes.length);
       const splitMarkerQuote = await copy('quote');
@@ -258,7 +313,7 @@
       assert(partialQuote.html.includes('#par32') && partialQuote.html.includes('#par33'), 'Every quoted paragraph marker must carry its own link.');
       assert(partialQuote.html.includes('<em>emphasized words</em>'), 'Inline emphasis was not preserved.');
       assert(partialQuote.html.includes('<strong>strong words</strong>'), 'Strong formatting was not preserved.');
-      assert((partialQuote.html.match(/<p>/g) || []).length === 2, 'The rich quote must preserve both semantic paragraph blocks.');
+      assert((partialQuote.html.match(/<br>/g) || []).length === 1, 'The rich quote must preserve both semantic paragraph blocks.');
 
       select(p32, 0, p33, p33.childNodes.length);
       const fullQuote = await copy('quote');
@@ -288,7 +343,7 @@
       const fragmentQuote = await copy('quote');
       assert((fragmentQuote.html.match(/<a /g) || []).length === 2, 'A text-fragment quote must link only its structural markers.');
       assert(fragmentQuote.html.includes('>[32]</a>') && fragmentQuote.html.includes('>[33]</a>'), 'Each quote marker must carry the text-fragment link.');
-      assert(fragmentQuote.html.endsWith('</p>') && !fragmentQuote.html.endsWith('</a>'), 'Text-fragment quote prose must remain outside the hyperlink inside paragraph blocks.');
+      assert(!fragmentQuote.html.endsWith('<br>') && !fragmentQuote.html.endsWith('</a>'), 'Text-fragment quote prose must remain outside the hyperlink inside paragraph blocks.');
       assert(fragmentQuote.html.includes('<em>emphasized words</em>') && fragmentQuote.html.includes('<strong>strong words</strong>'), 'Text-fragment quotes must preserve rich formatting outside the marker links.');
 
       window.__linkFullTextFragmentPinpoint = false;
@@ -340,7 +395,6 @@
       window.__model.structure.source = 'provider-native';
       nodes[0].source = 'provider-native';
       nodes[0].anchor = 'par32';
-      nodes[0].fragment = '';
 
       window.__model.documentType = 'legislation';
       const law7 = document.getElementById('law7');
@@ -372,7 +426,7 @@
       wrapProbe.style.cssText = 'position:fixed;left:0;top:0;width:150px;font:16px Arial';
       wrapProbe.innerHTML = provisionQuote.html;
       document.body.appendChild(wrapProbe);
-      const wrappedBody = wrapProbe.querySelectorAll('p')[1].childNodes[1];
+      const wrappedBody = wrapProbe.querySelectorAll(':scope > span')[1].childNodes[1];
       const wrappedRange = document.createRange();
       wrappedRange.selectNodeContents(wrappedBody);
       const wrappedLines = Array.from(wrappedRange.getClientRects());
@@ -382,7 +436,7 @@
 
       select(document.getElementById('sec7-2').firstChild, 1, law72, law72.childNodes.length);
       const partialMarkerQuote = await copy('quote');
-      assert(partialMarkerQuote.plain.startsWith('\t(2) Nested provision text.'), `A selection beginning inside a marker must restore only its literal marker: ${partialMarkerQuote.plain}`);
+      assert(partialMarkerQuote.plain.startsWith('(2) Nested provision text.'), `A selection beginning inside a marker must restore only its literal marker: ${partialMarkerQuote.plain}`);
       assert(!partialMarkerQuote.plain.includes('…') && !partialMarkerQuote.plain.includes('(2) 2)'), `A partial marker was treated as omitted prose or duplicated: ${partialMarkerQuote.plain}`);
 
       const law1t = document.getElementById('law1-t');
@@ -404,9 +458,9 @@
       ];
       select(law1t, 0, law1ui, law1ui.childNodes.length);
       const letterProvisionQuote = await copy('quote');
-      assert(letterProvisionQuote.plain === '\t(t) "health information" means information about an identifiable individual;\n\t(u) "interested person" means\n\t\tand includes\n\t\t(i) the Public Guardian.', `Lettered provision markers or continuation indentation regressed: ${letterProvisionQuote.plain}`);
+      assert(letterProvisionQuote.plain === '(t) "health information" means information about an identifiable individual;\n(u) "interested person" means\n\tand includes\n\t(i) the Public Guardian.', `Lettered provision markers or continuation indentation regressed: ${letterProvisionQuote.plain}`);
       assert(!/1\((?:t|u)\)/.test(letterProvisionQuote.plain), `Canonical provision paths leaked into displayed quote text: ${letterProvisionQuote.plain}`);
-      assert(letterProvisionQuote.html.includes('<br>and includes') && letterProvisionQuote.html.includes('margin:0 0 0 6em;text-indent:-2em') && letterProvisionQuote.html.includes('>(i)</a>'), `Rich-text provision indentation or local marker linking regressed: ${letterProvisionQuote.html}`);
+      assert(letterProvisionQuote.html.includes('<br>and includes') && letterProvisionQuote.html.includes('margin:0 0 0 4em;text-indent:-2em') && letterProvisionQuote.html.includes('>(i)</a>'), `Rich-text provision indentation or local marker linking regressed: ${letterProvisionQuote.html}`);
 
       window.__model.structure.nodes = [
         { kind: 'section', locator: '1(u)', element: law1u, anchor: 'sec1subsecu', markerText: '(u)', source: 'provider-native' },
@@ -446,7 +500,7 @@
       const lexisRangeQuote = await copy('quote');
       assert(lexisRangeQuote.plain.includes('\n[2] The transaction') && lexisRangeQuote.plain.includes('\n[3] On September'), `Lexis paragraph boundaries collapsed: ${lexisRangeQuote.plain}`);
       assert(!lexisRangeQuote.plain.includes('\n\n'), `Plain-text paragraph boundaries must not introduce blank lines: ${lexisRangeQuote.plain}`);
-      assert((lexisRangeQuote.html.match(/<p>/g) || []).length === 3, `Lexis rich-text paragraph boundaries collapsed: ${lexisRangeQuote.html}`);
+      assert((lexisRangeQuote.html.match(/<br>/g) || []).length === 2, `Lexis rich-text paragraph boundaries collapsed: ${lexisRangeQuote.html}`);
 
       const directive = [
         `${encodeURIComponent('in February 2005.')}-`,
@@ -479,13 +533,104 @@
       assert(fallbackPage.plain === 'Janet Walker, Canadian Conflict of Laws, 7th Ed.', `A structureless page must fall back to its citation label: ${fallbackPage.plain}`);
       assert(fallbackPage.html.includes('pdtocnodeidentifier=AAKAADAAC'), `A structureless page must retain its cleaned page URL: ${fallbackPage.html}`);
 
+      const secondaryBody = document.getElementById('secondary-body');
+      select(secondaryBody, 0, secondaryBody, secondaryBody.childNodes.length);
+      const fallbackQuote = await copy('quote');
+      assert(fallbackQuote.plain === '[Link]: A court will not enforce an inconsistent foreign judgment.', `Structureless quote lost selected prose: ${fallbackQuote.plain}`);
+      assert(fallbackQuote.html.includes('>[Link]</a>: A court') && !/[\r\n]/.test(fallbackQuote.html), 'Fallback quote must be inline after the linked label.');
+      window.__clipboardInput = `${secondaryUrl}#:~:text=A%20court%20will%20not%20enforce`;
+      const fallbackFragmentQuote = await copy('quote');
+      assert(fallbackFragmentQuote.plain.endsWith(': A court will not enforce') && fallbackFragmentQuote.html.includes('#:~:text='), 'Structureless text-fragment quote lost its target or exact range.');
+      window.__clipboardInput = '';
+      const nativeWrite = navigator.clipboard.write;
+      const nativeExec = document.execCommand;
+      navigator.clipboard.write = async () => { throw new Error('Use fallback'); };
+      document.execCommand = (command) => {
+        assert(command === 'copy', 'Unexpected clipboard command');
+        const data = {};
+        const event = new Event('copy', { cancelable: true });
+        Object.defineProperty(event, 'clipboardData', { value: { setData(type, value) { data[type] = value; } } });
+        document.dispatchEvent(event);
+        window.__clipboardOutput = { plain: data['text/plain'], html: data['text/html'] };
+        return true;
+      };
+      const fallbackClipboard = await copy('quote');
+      assert(fallbackClipboard.plain === fallbackQuote.plain && fallbackClipboard.html === fallbackQuote.html, 'Fallback clipboard API changed the quote or added whitespace.');
+      navigator.clipboard.write = nativeWrite;
+      document.execCommand = nativeExec;
+      window.__model.structure = null;
+      const noStructureInspection = await send({ type: 'LEGAL_PINPOINTER_INSPECT' });
+      assert(noStructureInspection.ok, 'Inspecting a structureless selection failed.');
+
+      // A judgment with printed markers but no anchors and no derived paragraphs still gets units,
+      // and newlines inside preformatted text are line breaks.
+      const preformatted = document.createElement('pre');
+      preformatted.textContent = 'REASONS\n\n[1] First reasons.\n\n[2] Second reasons, citing [1993] MJ No 661.\n\n[3] Third reasons.';
+      document.body.appendChild(preformatted);
+      const markerPlane = LegalPinpointerTextFragments.buildStructureIndex(preformatted);
+      markerPlane.root = preformatted;
+      const markerStructure = providerAdapters.engineStructure(
+        { documentType: 'case', nativeNodes: [], citation: { title: 'Example' }, provider: 'canlii' },
+        markerPlane,
+        { offset_unit: 'utf16', nodes: [] }
+      );
+      assert(markerStructure.source === 'visible-marker' && markerStructure.nodes.map((node) => node.locator).join() === '1,2,3',
+        `Printed paragraph markers were not recovered: ${markerStructure.source} ${markerStructure.nodes.map((node) => node.locator)}`);
+      preformatted.remove();
+
+      // Built text fragments follow the WICG spec and Chromium: terms stay inside one block and never
+      // cross <br> or preformatted line breaks; a non-breaking space is its own space; a directive is
+      // accepted only when the passage is the page's single match; short exact text carries context.
+      const fragmentPage = document.createElement('section');
+      fragmentPage.innerHTML = '<p>The appeal is allowed.&nbsp; The order below is set aside.</p>'
+        + '<p>The appeal is allowed.</p><p>Costs follow<br>the event in the ordinary way.</p>'
+        + '<p>[7] The respondent seeks costs on a full indemnity basis.</p>'
+        + '<p>Alpha <span style="display:inline-block">beta</span> gamma <span style="visibility:hidden">delta</span> epsilon</p>';
+      document.body.appendChild(fragmentPage);
+      const built = (paragraph, from, to) => {
+        const text = fragmentPage.querySelectorAll('p')[paragraph].firstChild;
+        const range = document.createRange();
+        range.setStart(text, from);
+        range.setEnd(text, to);
+        const link = LegalPinpointerTextFragments.buildPassageLink(range, { contextRoot: fragmentPage });
+        const directive = link && link.directive;
+        const resolved = directive && LegalPinpointerTextFragments.resolveUrl(`https://example.test/#:~:${directive}`, fragmentPage);
+        return { directive, text: resolved && resolved.text, range: link && link.range.toString() };
+      };
+      // A selection that misses a paragraph marker's opening bracket starts after the marker.
+      const marked = built(3, 1, 30);
+      assert(marked.directive && marked.directive.startsWith('text=The%20respondent') && marked.range.startsWith('The respondent'),
+        `A leading paragraph marker must be dropped from the linked passage: ${marked.directive} / ${marked.range}`);
+      const find = (directive) => LegalPinpointerTextFragments.resolveUrl(`https://example.test/#:~:${directive}`, fragmentPage);
+      assert(!find('text=alpha%20beta'), 'An inline-block is a block of its own; no term spans into it.');
+      assert(find('text=gamma%20%20epsilon') && !find('text=gamma%20epsilon'),
+        'Invisible text is skipped after layout, so the spaces on both sides of it remain.');
+      const repeated = built(0, 0, 23);
+      assert(repeated.directive && repeated.directive.includes('-,') === false && repeated.directive.includes(',-'),
+        `A passage repeated elsewhere must be disambiguated with context: ${repeated.directive}`);
+      const spaced = built(0, 13, 44);
+      assert(spaced.directive && spaced.directive.includes('allowed.%20%20The'), `A non-breaking space must survive as its own space: ${spaced.directive}`);
+      const brokenLine = (LegalPinpointerTextFragments.buildPassageLink((() => {
+        const range = document.createRange();
+        range.selectNodeContents(fragmentPage.querySelectorAll('p')[2]);
+        return range;
+      })(), { contextRoot: fragmentPage }) || {}).directive;
+      assert(brokenLine && !brokenLine.includes('follow%20the') && brokenLine.includes(','), `A term must not cross a <br>: ${brokenLine}`);
+      assert(!LegalPinpointerTextFragments.resolveUrl('https://example.test/#:~:text=follow%20the%20event', fragmentPage), 'The matcher must not match across a <br>.');
+      fragmentPage.remove();
+
       clearSelection();
       document.getElementById('result').textContent = 'PASS';
       document.title = 'PASS';
     }
 
     const holdBrowser = window.setInterval(() => {}, 50);
-    run()
+    // Start once parsing is done: the parser's trailing text would otherwise count as a document
+    // change during the first copy.
+    const parsed = document.readyState === 'loading'
+      ? new Promise((resolve) => document.addEventListener('DOMContentLoaded', resolve, { once: true }))
+      : Promise.resolve();
+    parsed.then(run)
       .catch((error) => {
         document.getElementById('result').textContent = `FAIL: ${error.stack || error}`;
         document.title = 'FAIL';

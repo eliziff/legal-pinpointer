@@ -29,6 +29,7 @@ test('the extension permission and host surface is frozen to the minimum contrac
     'https://canlii.org/*/doc/*',
     'https://canlii.org/*/laws/*',
     'https://advance.lexis.com/document/*',
+    'https://advance.lexis.com/search/*',
     'https://nextcanada.westlaw.com/Document/*',
     'https://www.nextcanada.westlaw.com/Document/*'
   ]);
@@ -50,9 +51,10 @@ test('runtime scripts contain no remote-code or network primitives', () => {
   }
 
   const worker = fs.readFileSync(path.join(root, 'engine-worker.js'), 'utf8');
-  assert.equal((worker.match(/\bfetch\s*\(/g) || []).length, 2);
+  assert.equal((worker.match(/\bfetch\s*\(/g) || []).length, 3);
   assert.match(worker, /fetch\(chrome\.runtime\.getURL\('legal-structure\.wasm'\)\)/);
   assert.match(worker, /fetch\(chrome\.runtime\.getURL\('canlii-legislation\.tsv'\)\)/);
+  assert.match(worker, /fetch\(chrome\.runtime\.getURL\('canlii-case-aliases\.tsv'\)\)/);
   assert.equal((worker.match(/\bimportScripts\s*\(/g) || []).length, 1);
   assert.match(worker, /importScripts\('canlii-legislation\.js', 'find-core\.js', 'find-worker\.js', 'sonar-launcher\.js'\)/);
   assert.doesNotMatch(worker, /\b(?:XMLHttpRequest|WebSocket|EventSource|eval|Function|sendBeacon)\s*\(/);

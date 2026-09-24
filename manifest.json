@@ -10,7 +10,7 @@
   "cross_origin_embedder_policy": {"value": "require-corp"},
   "cross_origin_opener_policy": {"value": "same-origin"},
   "content_scripts": [{
-    "matches": ["https://www.canlii.org/*/doc/*", "https://www.canlii.org/*/laws/*", "https://canlii.org/*/doc/*", "https://canlii.org/*/laws/*", "https://advance.lexis.com/document/*", "https://nextcanada.westlaw.com/Document/*", "https://www.nextcanada.westlaw.com/Document/*"],
+    "matches": ["https://www.canlii.org/*/doc/*", "https://www.canlii.org/*/laws/*", "https://canlii.org/*/doc/*", "https://canlii.org/*/laws/*", "https://advance.lexis.com/document/*", "https://advance.lexis.com/search/*", "https://nextcanada.westlaw.com/Document/*", "https://www.nextcanada.westlaw.com/Document/*"],
     "js": ["canlii-courts.js", "core.js", "text-fragments.js", "providers.js", "content.js"],
     "css": ["content.css"], "run_at": "document_idle"
   }],
