@@ -3,7 +3,7 @@
   "name": "Legal Pinpointer",
   "version": "0.2.0",
   "description": "Canadian legal pinpoints, Tab Sonar, and local semantic passage search across tabs and A2AJ Parquet files.",
-  "permissions": ["clipboardRead", "clipboardWrite", "storage", "unlimitedStorage", "activeTab", "scripting", "sidePanel"],
+  "permissions": ["clipboardRead", "clipboardWrite", "storage", "unlimitedStorage", "activeTab", "scripting", "sidePanel", "favicon"],
   "background": {"service_worker": "engine-worker.js"},
   "action": {"default_popup": "popup.html", "default_title": "Legal Pinpointer"},
   "side_panel": {"default_path": "sonar.html"},
@@ -17,7 +17,7 @@
   "content_security_policy": {"extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self'; connect-src 'self' blob: data:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"},
   "commands": {
     "find-in-page": {"suggested_key": {"default": "Ctrl+Shift+S", "mac": "MacCtrl+Shift+S"}, "description": "Tab Sonar: find in page, all tabs or current tab group"},
-    "canlii-text-search": {"suggested_key": {"default": "Alt+Shift+C", "mac": "Alt+Shift+C"}, "description": "CanLII document text search (including from new tabs)"}
+    "canlii-text-search": {"suggested_key": {"default": "Alt+Shift+S", "mac": "Alt+Shift+S"}, "description": "CanLII document text search (including from new tabs)"}
   },
   "minimum_chrome_version": "116",
   "host_permissions": ["http://*/*", "https://*/*"]

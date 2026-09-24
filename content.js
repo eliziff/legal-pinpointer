@@ -824,6 +824,8 @@
   }
 
   globalThis.LegalPinpointerSonarCopy = (range, mode) => copy(mode, false, range);
+  // Tab Sonar titles its results with the citation Alt+X copies.
+  globalThis.LegalPinpointerSonarCitation = async () => (await inspectPage(true)).citation.plain;
 
   globalThis.LegalPinpointerLensBridge={collect:lensCollect,prepare:lensPrepare,open:lensOpen,
     formatRange(range,mode,options={}){

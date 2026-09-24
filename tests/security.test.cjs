@@ -9,11 +9,11 @@ const root = path.resolve(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 
 test('the extension permission and host surface is frozen to the minimum contract', () => {
-  assert.deepEqual(manifest.permissions, ['clipboardRead', 'clipboardWrite', 'storage', 'unlimitedStorage', 'activeTab', 'scripting', 'sidePanel']);
+  assert.deepEqual(manifest.permissions, ['clipboardRead', 'clipboardWrite', 'storage', 'unlimitedStorage', 'activeTab', 'scripting', 'sidePanel', 'favicon']);
   assert.deepEqual(manifest.host_permissions, ['http://*/*', 'https://*/*']);
   assert.equal(manifest.commands['find-in-page'].suggested_key.default, 'Ctrl+Shift+S');
   assert.equal(manifest.commands['find-in-page'].suggested_key.mac, 'MacCtrl+Shift+S');
-  assert.deepEqual(manifest.commands['canlii-text-search'].suggested_key, { default: 'Alt+Shift+C', mac: 'Alt+Shift+C' });
+  assert.deepEqual(manifest.commands['canlii-text-search'].suggested_key, { default: 'Alt+Shift+S', mac: 'Alt+Shift+S' });
   assert.deepEqual(manifest.side_panel, { default_path: 'sonar.html' });
   assert.equal(manifest.minimum_chrome_version, '116');
   assert.equal(manifest.chrome_url_overrides, undefined, 'New-tab shortcuts must not replace the new-tab page');

@@ -1,7 +1,7 @@
 'use strict';
 
 (function exposeResults(global) {
-  const ROW_HEIGHT = 132, OVERSCAN = 3;
+  const ROW_HEIGHT = 104, OVERSCAN = 3;
   function markedText(document, text, marks = []) {
     const fragment = document.createDocumentFragment();
     let offset = 0;
@@ -19,9 +19,11 @@
     const start = Math.max(0, Math.min(count, Math.floor(top / ROW_HEIGHT) - OVERSCAN));
     return { start, end: Math.min(count, start + Math.ceil(height / ROW_HEIGHT) + OVERSCAN * 2) };
   }
+  // `choose(index, open)` selects a result, opening it only from its Open button
+  // or Enter. `icon(url)` is the page's favicon; `leave()` runs on ArrowUp from the top.
   class ResultsList {
-    constructor(viewport, spacer, rows, choose) {
-      Object.assign(this, { viewport, spacer, rows, choose, results: [], selected: -1, start: -1, end: -1, frame: 0 });
+    constructor(viewport, spacer, rows, { choose, icon = () => '', leave = () => {} }) {
+      Object.assign(this, { viewport, spacer, rows, choose, icon, results: [], selected: -1, start: -1, end: -1, frame: 0 });
       this.onScroll = () => {
         if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.render(); });
       };
@@ -29,11 +31,16 @@
       this.resize = new ResizeObserver(this.onScroll); this.resize.observe(viewport);
       rows.addEventListener('click', event => {
         const row = event.target.closest('[data-result]');
-        if (row) choose(Number(row.dataset.result), true);
+        if (!row) return;
+        viewport.focus({ preventScroll: true });
+        choose(Number(row.dataset.result), Boolean(event.target.closest('.result-open')));
       });
       viewport.addEventListener('keydown', event => {
-        const steps = { ArrowDown: 1, ArrowUp: -1, PageDown: Math.max(1, Math.floor(viewport.clientHeight / ROW_HEIGHT)), PageUp: -Math.max(1, Math.floor(viewport.clientHeight / ROW_HEIGHT)) };
-        if (event.key in steps) {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const page = Math.max(1, Math.floor(viewport.clientHeight / ROW_HEIGHT)), steps = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page };
+        if (event.key === 'ArrowUp' && this.selected <= 0) {
+          event.preventDefault(); leave();
+        } else if (event.key in steps) {
           event.preventDefault(); choose(Math.max(0, Math.min(this.results.length - 1, this.selected + steps[event.key])), false);
         } else if (event.key === 'Home' || event.key === 'End') {
           event.preventDefault(); choose(event.key === 'Home' ? 0 : this.results.length - 1, false);
@@ -42,15 +49,15 @@
         }
       });
     }
-    setResults(results, selected = 0, top = 0) {
+    setResults(results, selected = -1, top = 0) {
       this.results = results; this.selected = selected; this.start = this.end = -1;
       this.spacer.style.height = `${results.length * ROW_HEIGHT}px`;
       this.viewport.scrollTop = top; this.render();
     }
     redraw() { this.start = this.end = -1; this.render(); }
-    select(index, scroll = true) {
+    select(index) {
       this.selected = index;
-      if (scroll && index >= 0) {
+      if (index >= 0) {
         const top = index * ROW_HEIGHT, bottom = top + ROW_HEIGHT;
         if (top < this.viewport.scrollTop) this.viewport.scrollTop = top;
         else if (bottom > this.viewport.scrollTop + this.viewport.clientHeight) this.viewport.scrollTop = bottom - this.viewport.clientHeight;
@@ -65,14 +72,20 @@
           const result = this.results[i], row = document.createElement('div');
           row.className = 'result-row'; row.dataset.result = i; row.id = `sonar-result-${i}`;
           row.setAttribute('role', 'option'); row.setAttribute('aria-posinset', i + 1); row.setAttribute('aria-setsize', this.results.length);
-          const title = document.createElement('div'); title.className = 'result-title'; title.textContent = result.title; title.title = result.title;
-          const meta = document.createElement('div'); meta.className = 'result-meta';
-          const label = document.createElement('span'), action = document.createElement('span');
-          let site = ''; try { site = new URL(result.url).hostname; } catch (_) { /* Text only. */ }
-          label.textContent = result.locator || site || 'Page text'; action.textContent = 'Open ↗'; meta.append(label, action);
+          const head = document.createElement('div'); head.className = 'result-head';
+          const src = this.icon(result.url);
+          if (src) {
+            const icon = document.createElement('img'); icon.className = 'result-icon'; icon.alt = ''; icon.src = src;
+            icon.onerror = () => { icon.hidden = true; }; head.append(icon);
+          }
+          const title = document.createElement('span'); title.className = 'result-title'; title.textContent = result.title; title.title = result.title;
+          head.append(title);
+          if (result.locator) { const locator = document.createElement('span'); locator.className = 'result-locator'; locator.textContent = result.locator; head.append(locator); }
+          const open = document.createElement('button'); open.type = 'button'; open.className = 'result-open'; open.tabIndex = -1; open.textContent = 'Open';
+          head.append(open);
           const text = document.createElement('p'); text.className = 'result-text';
           if (result.leading) text.append('…'); text.append(markedText(document, result.preview, result.marks)); if (result.trailing) text.append('…');
-          row.append(title, meta, text); fragment.append(row);
+          row.append(head, text); fragment.append(row);
         }
         this.rows.replaceChildren(fragment); this.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
         this.start = start; this.end = end;
