@@ -83,6 +83,13 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
       assert.ok(!(await active()).includes(tab.url()), label);
       assert.equal(await tab.evaluate(() => CSS.highlights.has('legal-pinpointer-sonar-active')), false, label);
     };
+    // A result's own copy buttons.
+    const copyButton = async (at, label) => {
+      await panel.evaluate(() => { document.querySelector('#notice').textContent = ''; });
+      await row(at).getByRole('button', { name: label, exact: true }).click();
+      await panel.waitForFunction(() => /^Copied/.test(document.querySelector('#notice').textContent));
+      return clipboard();
+    };
     const opened = async (tab, at) => {
       await tab.evaluate(() => CSS.highlights.delete('legal-pinpointer-sonar-active'));
       await row(at).locator('.result-open').click();
@@ -116,6 +123,13 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
     assert.match(copied.plain, /^\[1\] Waiver of privilege requires an intention to waive\.$/);
     copied = await copy(other, 'Alt+x');
     assert.equal(copied.plain, found[other].title, 'the title is the citation Alt+X copies');
+    // The same three copies from the result's buttons, plus its passage link.
+    copied = await copyButton(other, 'Copy pinpoint');
+    assert.equal(copied.plain, 'at para 1');
+    copied = await copyButton(other, 'Copy quote');
+    assert.match(copied.plain, /^\[1\] Waiver of privilege requires an intention to waive\.$/);
+    copied = await copyButton(other, 'Copy link');
+    assert.match(copied.plain, /2024scc2\.html#:~:text=/);
 
     // A page without legal structure copies the passage with a text-fragment link.
     copied = await copy(found.findIndex(item => item.title === 'Plain notes'), 'Control+Shift+x');

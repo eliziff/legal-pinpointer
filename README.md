@@ -39,8 +39,9 @@ Boolean groups and explicit `/p` or `/s` also work. Results list as you type,
 each titled with the citation Pinpointer copies. **Enter** puts keyboard focus on
 the first result and arrows move among them; clicking a result only selects it.
 **Open** (or Enter on a result) jumps to its exact source text while the
-query/results remain visible. **Ctrl+X**, **Ctrl+Shift+X** and **Alt+X** copy
-the selected result's pinpoint, quotation or citation, as on its page. **Use
+query/results remain visible. Each result's **Copy quote**, **Copy pinpoint** and
+**Copy link** buttons copy it; **Ctrl+X**, **Ctrl+Shift+X** and **Alt+X** copy the
+selected result's pinpoint, quotation or citation, as on its page. **Use
 active tab** explicitly changes the pinned search origin. Escape clears the
 search; the panel stays open, so it never replays Chrome's slide-in.
 

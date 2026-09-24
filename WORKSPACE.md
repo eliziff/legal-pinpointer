@@ -12,7 +12,7 @@ longer called by the browser commands or popup.
 
 - One native, extension-owned workspace keeps results visible during source-tab
   activation. It does not depend on a provider's page DOM or CSS.
-- Fixed grid regions and virtual 104-pixel result rows prevent content-driven
+- Fixed grid regions and virtual 132-pixel result rows prevent content-driven
   modal movement. Only visible/overscan rows exist in the DOM. No height animation,
   per-frame polling, external assets or UI framework is introduced.
 - Exact range navigation keeps the existing document-ID/URL/ticket/group checks;
