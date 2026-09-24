@@ -34,11 +34,11 @@ test('words are scanned exactly like the Unicode word pattern', () => {
 
 test('the panel index ranks the tabs in scope with corpus-wide BM25, incrementally', async () => {
   const index = createIndex(core);
-  const page = (tabId, units, locators = units.map(() => '')) => ({ tabId, documentId: `doc${tabId}`, windowId: 10, url: `https://site${tabId}.test/`,
-    title: `Page ${tabId}`, revision: `r${tabId}`, text: units.join('\n'), locators });
+  const page = (tabId, units, paras = units.map(() => 0)) => ({ tabId, documentId: `doc${tabId}`, windowId: 10, url: `https://site${tabId}.test/`,
+    title: `Page ${tabId}`, revision: `r${tabId}`, text: units.join('\n'), paras });
   // Tab 1 is all about waiver, so waiver is common and the passage with the rare
   // term, privilege, must rank first although it says waiver only once.
-  await index.put(page(1, ['Waiver waiver of rights.', 'A waiver was given.', 'Nothing here.'], ['para 1', '', 'para 3']));
+  await index.put(page(1, ['Waiver waiver of rights.', 'A waiver was given.', 'Nothing here.'], [1, 0, 3]));
   await index.put(page(2, ['The privilege and waiver.', 'Costs.']));
   let found = index.search({ query: 'waiver and privilege', tabIds: [1, 2], depth: 2 });
   assert.deepEqual(found.results.map(r => [r.tabId, r.unit]), [[2, 0], [1, 0], [1, 1]]);
@@ -80,7 +80,7 @@ test('the broker reads tab text for the panel and issues ranked handles only for
       const [method, values] = args;
       calls.push([method, target.tabId, values]);
       const value = method === 'units' ? { url: `https://site${target.tabId}.test/`, title: `Page ${target.tabId}`, revision: 'r1',
-        ...(values[0].known === 'r1' ? { same: true } : { text: 'Waiver of privilege.\nCosts.', locators: ['para 1', ''] }) } : true;
+        ...(values[0].known === 'r1' ? { same: true } : { text: 'Waiver of privilege.\nCosts.', paras: [1, 0] }) } : true;
       return [{ documentId: `doc${target.tabId}`, result: { ok: true, value } }];
     } }
   };
@@ -88,7 +88,7 @@ test('the broker reads tab text for the panel and issues ranked handles only for
   const panel = { id: 'extension', url: 'chrome-extension://extension/sonar.html' }, ask = message => broker.handle({ workspace, incognito: false, ...message }, panel);
   const { pages } = await ask({ type: 'SONAR_UNITS', tabIds: [1, 2, 3], known: {} });
   assert.deepEqual(pages.map(p => p.text ?? p.skipped), ['Waiver of privilege.\nCosts.', 'Waiver of privilege.\nCosts.', 'Browser-restricted or unsupported page']);
-  assert.deepEqual(pages[0].locators, ['para 1', '']);
+  assert.deepEqual(pages[0].paras, [1, 0]);
   assert.equal(calls[0][2][0].workspace, workspace, 'the page reports its changes to this workspace');
   assert.equal((await ask({ type: 'SONAR_UNITS', tabIds: [1], known: { 1: 'r1' } })).pages[0].same, true, 'an unchanged page sends no text');
   await assert.rejects(broker.handle({ type: 'SONAR_UNITS', tabIds: [1], known: {} }, { id: 'extension', tab: tabs[0], frameId: 0, documentId: 'doc1', url: tabs[0].url }), /Invalid read request/);

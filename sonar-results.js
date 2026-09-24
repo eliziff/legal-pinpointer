@@ -47,6 +47,7 @@
       this.spacer.style.height = `${results.length * ROW_HEIGHT}px`;
       this.viewport.scrollTop = top; this.render();
     }
+    redraw() { this.start = this.end = -1; this.render(); }
     select(index, scroll = true) {
       this.selected = index;
       if (scroll && index >= 0) {

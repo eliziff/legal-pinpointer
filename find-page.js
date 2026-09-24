@@ -232,13 +232,16 @@
     try { return await task(() => { if (job.cancelled || Date.now() > job.deadline) throw new Error('Search cancelled or timed out.'); }); }
     finally { jobs.delete(key); }
   }
+  // Exact searches keep the page index warm for the next exact search; ranked
+  // work does not need it once the panel has the text.
+  const exactCaches = () => [...caches.values()].some(cache => !cache.units);
   // The observed paragraph number around a text node, for example `para 12`.
-  function locatorOf(node) {
+  function paraNumber(node) {
     const container = node?.parentElement?.closest('p, li, [role="paragraph"]');
     const marker = container?.querySelector('a[name^="par"], a[id^="par"], [id^="PARA_"]');
-    const number = /^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '');
-    return number ? `para ${number[1]}` : '';
+    return +(/^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '')?.[1] || 0);
   }
+  const locatorOf = node => { const number = paraNumber(node); return number ? `para ${number}` : ''; };
   // Every paragraph's text for the side panel's own ranked index, joined by
   // newlines (units never contain one). The revision names the exact text, so an
   // unchanged page answers `same` without sending it. The page then drops its
@@ -249,9 +252,9 @@
     return withJob(async check => {
       const snapshot = await ensureIndex(check), texts = snapshot.paragraphs.map(p => p.text), text = texts.join('\n');
       const reply = { url: location.href, title: document.title, revision: `${texts.length}:${core.hash(text)}` };
-      if (!caches.size && index === snapshot) index = null;
+      if (!exactCaches() && index === snapshot) index = null;
       if (known === reply.revision) return { ...reply, same: true };
-      return { ...reply, text, locators: snapshot.paragraphs.map(p => locatorOf(p.parts[0]?.node)), characters: snapshot.characters, limited: snapshot.limited };
+      return { ...reply, text, paras: snapshot.paragraphs.map(p => paraNumber(p.parts[0]?.node)), characters: snapshot.characters, limited: snapshot.limited };
     }, Math.max(1, deadline - Date.now()));
   }
   // One result: absolute hit ranges in the paragraph, a 460-character preview
@@ -289,7 +292,7 @@
           if (found) { cache.units.set(unit, found); cache.results.push(found); }
         }
         // The resolved passages keep what they need; drop the rest of the page text.
-        if (!caches.size && index === snapshot) index = null;
+        if (!exactCaches() && index === snapshot) index = null;
         caches.set(ticket, cache);
         while (caches.size > 3) caches.delete(caches.keys().next().value);
       }
