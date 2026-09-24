@@ -4,33 +4,22 @@
 // token against Hugging Face tokenizers (tests/rerank.test.cjs). No model code here.
 (function exposeRerankCore(global) {
   const CLS = 101, SEP = 102, UNK = 100;
-  const punctuation = code => (code >= 33 && code <= 47) || (code >= 58 && code <= 64) || (code >= 91 && code <= 96) || (code >= 123 && code <= 126);
-  const chinese = code => (code >= 0x4e00 && code <= 0x9fff) || (code >= 0x3400 && code <= 0x4dbf) || (code >= 0x20000 && code <= 0x2a6df) ||
-    (code >= 0x2a700 && code <= 0x2b73f) || (code >= 0x2b740 && code <= 0x2b81f) || (code >= 0x2b820 && code <= 0x2ceaf) ||
-    (code >= 0xf900 && code <= 0xfaff) || (code >= 0x2f800 && code <= 0x2fa1f);
+  // Dropped characters (NUL, U+FFFD, controls and formats other than tab and
+  // newlines), CJK ideographs (each its own word) and the punctuation BERT splits on.
+  const CONTROL = /[\0�]|(?![\t\n\r])[\p{Cc}\p{Cf}]/gu;
+  const CJK = /[一-鿿㐀-䶿\u{20000}-\u{2a6df}\u{2a700}-\u{2b73f}\u{2b740}-\u{2b81f}\u{2b820}-\u{2ceaf}豈-﫿\u{2f800}-\u{2fa1f}]/gu;
+  const PUNCTUATION = /([!-/:-@[-`{-~]|\p{P})/u;
 
   function createTokenizer(vocabulary) {
     const vocab = vocabulary instanceof Map ? vocabulary : new Map(Object.entries(vocabulary));
     const cache = new Map();
     function words(text) {
       // BertNormalizer: clean text, pad CJK, strip accents, lower case; then split
-      // on whitespace and on every punctuation character.
-      let clean = '';
-      for (const char of String(text)) {
-        const code = char.codePointAt(0);
-        if (code === 0 || code === 0xfffd || (/[\p{Cc}\p{Cf}]/u.test(char) && !/[\t\n\r]/.test(char))) continue;
-        clean += /\s/u.test(char) ? ' ' : chinese(code) ? ` ${char} ` : char;
-      }
-      clean = clean.normalize('NFD').replace(/\p{Mn}/gu, '').toLowerCase();
+      // on whitespace and on every punctuation character (whole-text passes, not per character).
+      const clean = String(text).replace(CONTROL, '').replace(/\s/gu, ' ').replace(CJK, ' $& ')
+        .normalize('NFD').replace(/\p{Mn}/gu, '').toLowerCase();
       const out = [];
-      for (const piece of clean.split(' ')) {
-        let word = '';
-        for (const char of piece) {
-          if (punctuation(char.codePointAt(0)) || /\p{P}/u.test(char)) { if (word) out.push(word); out.push(char); word = ''; }
-          else word += char;
-        }
-        if (word) out.push(word);
-      }
+      for (const piece of clean.split(' ')) if (piece) for (const part of piece.split(PUNCTUATION)) if (part) out.push(part);
       return out;
     }
     function wordPiece(word) {
