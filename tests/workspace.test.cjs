@@ -3,7 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 require('../find-core.js');
 const {createBroker} = require('../find-worker.js');
 const {createLauncher, canliiURL} = require('../sonar-launcher.js');
-const {visibleRange} = require('../sonar-results.js');
+const {visibleRange, ROW_HEIGHT} = require('../sonar-results.js');
 const UUID = '12345678-1234-1234-1234-123456789abc';
 function fixture() {
   const tabs = [
@@ -91,7 +91,7 @@ test('back to start restores exact source ranges and clear releases shared works
 test('virtual list work is proportional to viewport size, not the result count',()=>{
   for(const size of [1,200,1000])for(const top of [0,1000,131000]){
     const {start,end}=visibleRange(size,top,440);
-    assert.ok(end-start<=10);assert.ok(start>=0&&end<=size&&end>=start);
+    assert.ok(end-start<=Math.ceil(440/ROW_HEIGHT)+6);assert.ok(start>=0&&end<=size&&end>=start);
   }
 });
 

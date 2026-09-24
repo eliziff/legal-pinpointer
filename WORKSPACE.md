@@ -12,18 +12,17 @@ longer called by the browser commands or popup.
 
 - One native, extension-owned workspace keeps results visible during source-tab
   activation. It does not depend on a provider's page DOM or CSS.
-- Fixed grid regions and virtual 132-pixel result rows prevent content-driven
+- Fixed grid regions and virtual 104-pixel result rows prevent content-driven
   modal movement. Only visible/overscan rows exist in the DOM. No height animation,
   per-frame polling, external assets or UI framework is introduced.
 - Exact range navigation keeps the existing document-ID/URL/ticket/group checks;
-  result handles also record their window. Current-tab previews do not activate
-  tabs or refocus windows. Preview requests are serialized with one newest pending
-  request instead of queueing every arrow press.
+  result handles also record their window. Selecting a result neither scrolls
+  nor activates its source; only Open (or Enter on a result) does.
 - Cross-window panel opening occurs synchronously inside the click/key gesture,
   before IPC or storage awaits; a one-shot private RAM handoff transfers the list,
   selected passage and query without moving the source tab. Stale shared searches
   are explicitly disabled rather than navigating obsolete handles.
-- Alt+Shift+C is dispatched by chrome.commands, including on chrome://newtab and
+- Alt+Shift+S is dispatched by chrome.commands, including on chrome://newtab and
   about:blank. It opens the native CanLII query form with **zero source injections**.
   Only submitting the form creates a CanLII /#search/text= URL in a new tab.
 - Sender identity is checked against the packaged panel/popup URL. Page senders
@@ -35,6 +34,9 @@ longer called by the browser commands or popup.
   are preserved. See FIND.md for transient handoff/cleanup limits.
 
 ## Validation actually run
+
+This record predates the 2026-09-24 panel, which no longer has the passage preview,
+Alt+wheel or Back to start; `npm run test:extension` is the current installed-extension gate.
 
 Linux container, Node 22.16.0, Chromium 144.0.7559.96.
 
@@ -79,15 +81,15 @@ visible in release/PR notes.
 Load/update the branch as an unpacked extension in Chrome 116+, reload the
 extension and previously injected source pages, then check:
 
-- Ctrl+T followed by Alt+Shift+C opens/focuses CanLII document-text search while
+- Ctrl+T followed by Alt+Shift+S opens/focuses CanLII document-text search while
   the new tab remains open. Enter submits a Unicode/operator query in a new
   CanLII results tab. Repeat from about:blank and a normal webpage.
 - Ctrl+Shift+S opens the same native workspace. Tab switches /p and /s;
-  Shift+Tab cycles Current/All/Group. Click real passages in two tabs, then a
+  Shift+Tab cycles Current/All/Group. Open real passages in two tabs, then a
   different window. Query and results remain visible, with exact source text
-  highlighted and no tabs moved. Back restores the prior source position.
-- Change source content or reload it before clicking a saved result: require
-  Refresh rather than opening the wrong passage. Restrict a site's access and
+  highlighted and no tabs moved.
+- Change source content or reload it before opening a saved result: require
+  searching again rather than opening the wrong passage. Restrict a site's access and
   confirm it is listed as unavailable, not counted as a zero-hit search.
 - Check keyboard shortcut assignments and conflicts at
   chrome://extensions/shortcuts. The popup must warn about unassigned commands

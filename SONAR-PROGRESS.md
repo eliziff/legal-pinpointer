@@ -84,3 +84,8 @@ workers, tab pages) and reported everywhere.
 - node scratch/sonar-fast/quality3.cjs score <specs> ; quality3.cjs report > quality3.json
 - node scratch/sonar-fast/bench3.cjs "<specs>" > bench3.json
 - node scratch/sonar-fast/eval-fast.cjs --tabs 30 --rate 4; index-bench.cjs
+
+## Paused 2026-09-24 (panel UI changed)
+- The panel has no #summary/#detail status lines any more: eval-fast.cjs must detect first
+  results as rows appearing (#result-rows [data-result]) with #list-viewport aria-busy="false".
+- Rows are 104 px (was 132); the passage preview, Alt+wheel and Back to start are gone.

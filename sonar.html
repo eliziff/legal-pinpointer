@@ -6,36 +6,24 @@
   <title>Tab Sonar · Legal Pinpointer</title>
   <link rel="stylesheet" href="sonar.css">
 </head>
-<body>
+<body data-route="tabs">
   <main id="workspace">
     <header id="search-header">
-      <div class="brand"><span class="sonar-mark" aria-hidden="true">◎</span><h1>Tab Sonar</h1><span id="privacy">ON DEVICE</span></div>
       <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button></nav>
       <form id="search-form" role="search">
-        <label class="sr-only" for="query">Find terms in open tabs</label>
-        <div class="input-row"><input id="query" type="text" placeholder="Find terms together…" autocomplete="off" spellcheck="false" maxlength="1024" aria-describedby="keyboard-help"><button id="mode" type="button" title="Same paragraph; Tab switches proximity">/p</button></div>
-        <div id="scope-row"><button id="scope" type="button">Current tab</button><button id="use-active" type="button" class="quiet">Use active tab</button></div>
-        <p id="origin" title="The starting tab remains fixed when you visit a result.">From the active tab</p>
+        <label class="sr-only" for="query">Search open tabs</label>
+        <div class="input-row"><input id="query" type="text" placeholder="Search open tabs" autocomplete="off" spellcheck="false" maxlength="1024"><button id="mode" type="button">/p</button></div>
+        <div id="scope-row"><button id="scope" type="button">Current tab</button><button id="issues" type="button" class="quiet" hidden>Skipped tabs</button><button id="use-active" type="button" class="quiet">Use active tab</button></div>
+        <p id="origin"></p>
       </form>
     </header>
-    <section id="search-status" aria-label="Search status">
-      <div class="status-line"><strong id="summary" role="status" aria-live="polite">Ready to search</strong><button id="refresh" class="quiet">Refresh</button></div>
-      <div class="status-line"><span id="detail">Loaded page text only. Nothing leaves your browser.</span><button id="issues" class="quiet" hidden>Details</button></div>
-      <p id="notice" role="status" aria-live="polite"></p>
-    </section>
     <div id="list-viewport" role="listbox" aria-label="Matching passages" tabindex="0">
       <div id="result-spacer"><div id="result-rows"></div></div>
-      <div id="empty"><span class="empty-symbol" aria-hidden="true">⌕</span><h2>Find the passage, not just the tab.</h2><p>Search words or quoted phrases.<br>Use <strong>/p</strong> for a paragraph or <strong>/s</strong> for a sentence.</p></div>
+      <p id="empty" hidden>No matching passages.</p>
     </div>
-    <section id="passage-preview" aria-label="Selected passage">
-      <div class="preview-head"><h2>PASSAGE PREVIEW</h2><span id="counter">—</span></div>
-      <p id="preview-source"></p><blockquote id="preview-text">Select a match to inspect the excerpt. Your search and results stay here when you open its source.</blockquote>
-      <div class="preview-actions"><button id="previous" aria-label="Previous passage" disabled>↑</button><button id="next" aria-label="Next passage" disabled>↓</button><button id="back" class="quiet" disabled>Back to start</button><button id="open" class="primary" disabled>Open passage ↗</button></div>
-      <div class="copy-actions" aria-label="Copy the selected passage"><button id="copy-quote" disabled title="Quotation with its pinpoint link (Ctrl+Shift+X)">Copy quote</button><button id="copy-pinpoint" disabled title="Pinpoint linked to the passage (Ctrl+X)">Copy pinpoint</button><button id="copy-link" disabled title="Link that opens the page at this passage">Copy link</button></div>
-    </section>
-    <footer id="keyboard-help"><span>Tab: proximity · Shift+Tab: scope</span><span>Enter: next · Ctrl+Enter: open · F6: controls</span><button id="clear" class="quiet" title="Clear query and release this search">Clear</button></footer>
+    <p id="notice" role="status" aria-live="polite"></p>
   </main>
-  <section id="issue-popover" popover aria-label="Skipped tabs and limits"><h2>Search details</h2><p id="limit-detail"></p><ul id="issue-list"></ul><button popovertarget="issue-popover" popovertargetaction="hide">Close details</button></section>
+  <section id="issue-popover" popover aria-label="Skipped tabs"><p id="limit-detail"></p><ul id="issue-list"></ul></section>
   <script src="find-core.js"></script>
   <script src="rerank-core.js"></script>
   <script src="sonar-results.js"></script>

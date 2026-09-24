@@ -49,49 +49,76 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
     }
     assert.ok(panel, 'the native side panel opened');
     const errors = []; panel.on('pageerror', error => errors.push(error.message));
+    // Rows are the only search feedback: wait for the search to settle, then read them.
     const search = async text => {
       await panel.fill('#query', text);
-      await panel.waitForFunction(() => /matching|could not/i.test(document.querySelector('#summary').textContent), null, { timeout: 20_000 });
-      return panel.evaluate(() => ({ summary: document.querySelector('#summary').textContent, detail: document.querySelector('#detail').textContent,
-        rows: [...document.querySelectorAll('#result-rows > *')].map(row => row.textContent) }));
+      await panel.waitForFunction(() => document.querySelector('#list-viewport').getAttribute('aria-busy') === 'false' &&
+        (document.querySelector('#result-rows [data-result]') || document.querySelector('#notice.error')), null, { timeout: 20_000 });
+      return rows();
     };
+    const rows = () => panel.evaluate(() => [...document.querySelectorAll('#result-rows [data-result]')].map(row => ({ at: row.dataset.result,
+      title: row.querySelector('.result-title').textContent, text: row.querySelector('.result-text').textContent.replace(/^…|…$/g, '') })));
+    const row = at => panel.locator(`#result-rows [data-result="${at}"]`);
     const clipboard = () => panel.evaluate(async () => {
       const [item] = await navigator.clipboard.read();
       return { plain: await (await item.getType('text/plain')).text(), html: await (await item.getType('text/html')).text() };
     });
+    // Pinpointer's own hotkeys on a passage selected in the list.
+    const copy = async (at, keys) => {
+      await panel.evaluate(() => { document.querySelector('#notice').textContent = ''; });
+      await row(at).locator('.result-text').click();
+      await panel.keyboard.press(keys);
+      await panel.waitForFunction(() => /^Copied/.test(document.querySelector('#notice').textContent));
+      return clipboard();
+    };
+    // Headless tabs all report visible: the active tab and the passage highlight show a jump.
+    const active = () => worker.evaluate(async () => (await chrome.tabs.query({ active: true })).map(tab => tab.url));
+    const jumped = async tab => {
+      await tab.waitForFunction(() => CSS.highlights.has('legal-pinpointer-sonar-active'));
+      for (let i = 0; i < 50 && !(await active()).includes(tab.url()); i++) await new Promise(r => setTimeout(r, 100));
+      assert.ok((await active()).includes(tab.url()), `${tab.url()} is the active tab`);
+    };
+    const unmoved = async (tab, label) => {
+      await panel.waitForTimeout(300);
+      assert.ok(!(await active()).includes(tab.url()), label);
+      assert.equal(await tab.evaluate(() => CSS.highlights.has('legal-pinpointer-sonar-active')), false, label);
+    };
+    const opened = async (tab, at) => {
+      await tab.evaluate(() => CSS.highlights.delete('legal-pinpointer-sonar-active'));
+      await row(at).locator('.result-open').click();
+      await jumped(tab);
+    };
+    const shot = name => process.env.SONAR_SHOTS && panel.screenshot({ path: path.join(process.env.SONAR_SHOTS, `${name}.png`) });
 
     let found = await search('waiv* privilege');
-    assert.match(found.summary, /^2 matching/, 'current tab: headnote and para 2');
+    assert.equal(found.length, 2, 'current tab: headnote and para 2');
+    await panel.waitForFunction(() => document.querySelector('#origin').textContent === 'From Alpha v Beta, 2024 SCC 1');
     await panel.click('#scope');
     found = await search('waiv* privilege');
-    assert.match(found.detail, /^3\/3 tabs searched/);
-    assert.equal(found.rows.length, 5);
+    assert.equal(found.length, 5);
+    // Titles are the citations Pinpointer copies, each with its page's icon.
+    assert.ok(found.every(item => !/CanLII\)|\| CanLII/.test(item.title)), found.map(item => item.title).join(' / '));
+    await panel.waitForFunction(() => [...document.querySelectorAll('.result-icon')].every(icon => icon.complete && icon.naturalWidth > 0));
+    await shot('all-tabs');
 
-    // Jump to a passage in another tab: the tab activates and the passage is highlighted.
-    const other = found.rows.findIndex(row => row.includes('requires an intention'));
-    await panel.locator('#result-rows > *').nth(other).click({ position: { x: 4, y: 4 } });
-    await panel.waitForFunction(() => /Opened the exact passage/.test(document.querySelector('#notice').textContent));
-    assert.equal(await tabs[1].evaluate(() => document.visibilityState), 'visible');
-    assert.ok(await tabs[1].evaluate(() => CSS.highlights.has('legal-pinpointer-sonar-active')));
+    // Selecting a result opens nothing; its Open button jumps to the exact passage.
+    const other = found.findIndex(item => item.text.includes('requires an intention'));
+    await row(other).locator('.result-text').click();
+    assert.equal(await row(other).getAttribute('aria-selected'), 'true');
+    await unmoved(tabs[1], 'clicking a result does not open it');
+    await opened(tabs[1], other);
 
-    // Copy uses Pinpointer's own formats and native paragraph links.
-    await panel.click('#copy-pinpoint'); await panel.waitForFunction(() => /^Copied/.test(document.querySelector('#notice').textContent));
-    let copied = await clipboard();
+    // Hotkeys copy in Pinpointer's own formats with native paragraph links.
+    let copied = await copy(other, 'Control+x');
     assert.equal(copied.plain, 'at para 1');
     assert.match(copied.html, /href="https:\/\/www\.canlii\.org\/en\/ca\/scc\/doc\/2024\/2024scc2\/2024scc2\.html#par1"/);
-    await panel.click('#copy-quote'); await panel.waitForFunction(() => /^Copied: \[1\]/.test(document.querySelector('#notice').textContent));
-    copied = await clipboard();
+    copied = await copy(other, 'Control+Shift+x');
     assert.match(copied.plain, /^\[1\] Waiver of privilege requires an intention to waive\.$/);
-    await panel.click('#copy-link'); await panel.waitForFunction(() => /^Copied: https/.test(document.querySelector('#notice').textContent));
-    copied = await clipboard();
-    assert.match(copied.plain, /2024scc2\.html#:~:text=/);
+    copied = await copy(other, 'Alt+x');
+    assert.equal(copied.plain, found[other].title, 'the title is the citation Alt+X copies');
 
     // A page without legal structure copies the passage with a text-fragment link.
-    const plain = found.rows.findIndex(row => row.includes('Plain notes'));
-    await panel.locator('#result-rows > *').nth(plain).click({ position: { x: 4, y: 4 } });
-    await panel.waitForFunction(() => /Opened the exact passage/.test(document.querySelector('#notice').textContent));
-    await panel.click('#copy-quote'); await panel.waitForFunction(() => /^Copied: \[Link\]/.test(document.querySelector('#notice').textContent));
-    copied = await clipboard();
+    copied = await copy(found.findIndex(item => item.title === 'Plain notes'), 'Control+Shift+x');
     assert.equal(copied.plain, '[Link]: Implied waiver of privilege may arise from fairness.');
     assert.match(copied.html, /notes#:~:text=/);
 
@@ -104,39 +131,49 @@ test('Tab Sonar searches, opens and copies passages in the installed extension',
     await panel.click('#use-active');
     await panel.click('#scope');
     found = await search('waiv* privilege');
-    assert.match(found.detail, /^2\/2 tabs searched/);
+    assert.equal(found.length, 4, 'headnote and one paragraph in each grouped judgment');
 
     // Plain words rank by relevance across the group; jump and copy use the same handles.
     assert.equal(await panel.evaluate(() => crossOriginIsolated), true, 'the panel is cross-origin isolated for threaded WASM');
     found = await search('intention to waive privilege');
-    assert.match(found.summary, /best first$/);
-    assert.match(found.rows[0], /requires an intention to waive/);
+    assert.match(found[0].text, /requires an intention to waive/);
     if (fs.existsSync(path.join(root, 'vendor/rerank/model-cpu.onnx'))) {
       await panel.waitForFunction(() => document.body.dataset.order === 'reranked', null, { timeout: 60_000 });
-      assert.match(await panel.locator('#result-rows > *').first().textContent(), /requires an intention to waive/);
+      assert.match((await rows())[0].text, /requires an intention to waive/);
     }
-    await panel.locator('#result-rows > *').first().click({ position: { x: 4, y: 4 } });
-    await panel.waitForFunction(() => /Opened the exact passage/.test(document.querySelector('#notice').textContent));
-    assert.equal(await tabs[1].evaluate(() => document.visibilityState), 'visible');
-    assert.ok(await tabs[1].evaluate(() => CSS.highlights.has('legal-pinpointer-sonar-active')));
-    await panel.click('#copy-pinpoint'); await panel.waitForFunction(() => /^Copied: at para 1/.test(document.querySelector('#notice').textContent));
-    copied = await clipboard();
+    // Enter in the search box puts keyboard focus on the first result without opening it;
+    // Enter there opens it.
+    await tabs[0].bringToFront();
+    await tabs[1].evaluate(() => CSS.highlights.delete('legal-pinpointer-sonar-active'));
+    await panel.focus('#query'); await panel.keyboard.press('Enter');
+    await panel.waitForFunction(() => document.activeElement.id === 'list-viewport' && document.querySelector('[data-result="0"]').getAttribute('aria-selected') === 'true');
+    await unmoved(tabs[1], 'Enter in the search box does not open a result');
+    await panel.keyboard.press('Enter');
+    await jumped(tabs[1]);
+    copied = await copy(0, 'Control+x');
     assert.equal(copied.plain, 'at para 1');
     assert.match(copied.html, /2024scc2\.html#par1"/);
+    await shot('ranked');
     // Every row of the ranked (possibly reordered) list opens and copies its own passage.
-    const ranked = await panel.evaluate(() => [...document.querySelectorAll('#result-rows [data-result]')].map(row => ({
-      at: row.dataset.result, title: row.querySelector('.result-title').textContent, text: row.querySelector('.result-text').textContent.replace(/^…|…$/g, '') })));
+    const ranked = await rows();
     assert.ok(ranked.length >= 3);
-    for (const row of ranked) {
-      await panel.evaluate(() => { document.querySelector('#notice').textContent = ''; });
-      await panel.locator(`#result-rows [data-result="${row.at}"]`).click({ position: { x: 4, y: 4 } });
-      await panel.waitForFunction(() => /Opened the exact passage/.test(document.querySelector('#notice').textContent));
-      await panel.evaluate(() => { document.querySelector('#notice').textContent = ''; });
-      await panel.click('#copy-quote'); await panel.waitForFunction(() => /^Copied/.test(document.querySelector('#notice').textContent));
-      copied = await clipboard();
-      assert.ok(copied.plain.includes(row.text), `row ${row.at} copies its own passage: ${copied.plain}`);
-      assert.match(copied.html, row.title.startsWith('Alpha') ? /2024scc1\.html/ : /2024scc2\.html/, `row ${row.at} links its own judgment`);
+    for (const item of ranked) {
+      await opened(item.title.startsWith('Alpha') ? tabs[0] : tabs[1], item.at);
+      copied = await copy(item.at, 'Control+Shift+x');
+      assert.ok(copied.plain.includes(item.text), `row ${item.at} copies its own passage: ${copied.plain}`);
+      assert.match(copied.html, item.title.startsWith('Alpha') ? /2024scc1\.html/ : /2024scc2\.html/, `row ${item.at} links its own judgment`);
     }
+
+    // The CanLII route is the search box alone.
+    await panel.click('#canlii-route');
+    for (const id of ['mode', 'scope-row', 'origin', 'list-viewport']) assert.equal(await panel.locator(`#${id}`).isVisible(), false, `${id} is hidden on the CanLII route`);
+    await shot('canlii');
+    await panel.click('#tabs-route');
+    // Escape clears the search and leaves the panel open (reopening would replay Chrome's slide-in).
+    await panel.focus('#query'); await panel.keyboard.press('Escape');
+    await panel.waitForFunction(() => document.querySelector('#query').value === '' && !document.querySelector('[data-result]'));
+    await panel.waitForTimeout(300);
+    assert.equal(panel.isClosed(), false);
     assert.deepEqual(errors, []);
   } finally {
     await cdp?.close().catch(() => {});

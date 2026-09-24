@@ -145,13 +145,13 @@ test('warm indexes and paint are reused; cancellation, mutation and pathological
       const baseline = reads;
       await page.search(request('warm', 's'));
       const warmReads = reads - baseline;
-      page.preview('warm', 0);
+      await page.preview('warm', 0);
       const highlight = CSS.highlights.get('legal-pinpointer-sonar-hits'), sheet = document.adoptedStyleSheets.at(-1);
-      page.preview('warm', 1);
+      await page.preview('warm', 1);
       const reused = highlight === CSS.highlights.get('legal-pinpointer-sonar-hits') && sheet === document.adoptedStyleSheets.at(-1);
       document.querySelector('#first').firstChild.nodeValue = 'Changed text.';
       let staleRejected = false;
-      try { page.preview('warm', 0); } catch (_) { staleRejected = true; }
+      try { await page.preview('warm', 0); } catch (_) { staleRejected = true; }
       const big = document.createElement('p');
       big.textContent = 'needle ' + 'word '.repeat(14000) + 'forbidden';
       document.body.append(big);
@@ -165,7 +165,7 @@ test('warm indexes and paint are reused; cancellation, mutation and pathological
       let cancelledRejected = false;
       try { await cancelled; } catch (_) { cancelledRejected = true; }
       let resurrected = false;
-      try { page.preview('cancelled', 0); resurrected = true; } catch (_) { /* Expected. */ }
+      try { await page.preview('cancelled', 0); resurrected = true; } catch (_) { /* Expected. */ }
       const next = await page.search(request('reopened'));
       // Search highlights can be capped; match existence is never inferred from a
       // truncated paragraph, which would make NOT/AND proximity misleading.
