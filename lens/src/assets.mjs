@@ -10,6 +10,19 @@ function embeddedBlob(name){
 export function assetURL(name){if(!urls.has(name)){const blob=embeddedBlob(name);urls.set(name,blob?URL.createObjectURL(blob):new URL(`assets/${name}`,import.meta.url).href);}return urls.get(name);}
 function workerAsset(name){return embeddedBlob(name)||assetURL(name);}
 export function saveBlob(blob,name){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+// The chronology row classifier: loads once, scores many rows per message.
+export function createRowScorer(){
+  let worker=null,init=null,next=0;const pending=new Map();
+  const request=(type,payload)=>new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});worker.postMessage({id,type,...payload});});
+  function start(){
+    if(init)return init;
+    worker=new Worker(assetURL('row-worker.js'));
+    worker.onmessage=({data})=>{const p=pending.get(data.id);if(!p)return;pending.delete(data.id);data.error?p.reject(new Error(data.error)):p.resolve(data.result);};
+    init=request('init',{assets:Object.fromEntries(['rowmodel.onnx','rowmodel-tokenizer.json','rowmodel-tokenizer_config.json','rowmodel.json','ort-wasm-simd-threaded.mjs','ort-wasm-simd-threaded.wasm'].map(n=>[n,workerAsset(n)]))});
+    return init;
+  }
+  return {start,async score(texts){const {threshold}=await start();return {threshold,scores:texts.length?await request('score',{texts}):[]};}};
+}
 export function createDecisions(onStatus=()=>{}){
   let worker=null,init=null,next=0;const pending=new Map();
   function fail(error){for(const p of pending.values())p.reject(error);pending.clear();worker?.terminate();worker=null;init=null;}
