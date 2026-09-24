@@ -5,6 +5,7 @@
   const fragments = globalThis.LegalPinpointerTextFragments;
   const providers = globalThis.LegalPinpointerProviders;
   let lastHoverTarget = null;
+  let lastPointer = null;
   let modelCache = null;
   let rememberedFragment = null;
   let toastTimer = 0;
@@ -14,6 +15,9 @@
   document.addEventListener('pointerover', (event) => {
     lastHoverTarget = event.target instanceof Element ? event.target : event.target.parentElement;
   }, true);
+  document.addEventListener('pointermove', (event) => {
+    lastPointer = { x: event.clientX, y: event.clientY };
+  }, { capture: true, passive: true });
 
   function storageGet(defaults) {
     return new Promise((resolve) => chrome.storage.local.get(defaults, resolve));
@@ -23,7 +27,8 @@
     const key = window.location.href;
     if (modelCache && modelCache.key === key && modelCache.promise) {
       const cached = await modelCache.promise;
-      if (cached && cached.root && cached.root.isConnected) return cached;
+      if (cached && cached.root && cached.root.isConnected
+          && !(cached.documentType === 'legislation' && !cached.citation.citation)) return cached;
     }
 
     const promise = providers.inspect(document, window.location);
@@ -94,14 +99,21 @@
     }
   }
 
+  // A unit starts at its marker, or earlier where the previous unit's derived range ends before it:
+  // the gap is the marginal note or heading introducing this unit.
+  function nodeUnitStart(model, node) {
+    const start = nodeBoundary(node, true);
+    const previous = model.structure.nodes[model.structure.nodes.indexOf(node) - 1];
+    const previousEnd = previous && previous.endPoint && previous.endPoint.node && previous.endPoint.node.isConnected
+      ? nodeBoundary(previous, false)
+      : null;
+    return start && previousEnd && previousEnd.compareBoundaryPoints(Range.START_TO_START, start) < 0 ? previousEnd : start;
+  }
+
   function nodeUnitEnd(model, node) {
-    const nativeBlock = node.element && node.element.matches
-      && node.element.matches('p, li, [id^="PARA_"], [id^="crsw_paragraph_num_"]')
-      && ['paragraph', 'pilcrow', 'silcrow'].includes(node.kind);
-    if (nativeBlock) return nodeBoundary(node, false);
     const index = model.structure.nodes.indexOf(node);
     const next = model.structure.nodes[index + 1];
-    if (next) return nodeBoundary(next, true);
+    if (next) return nodeUnitStart(model, next);
     if (node.endPoint && node.endPoint.node && node.endPoint.node.isConnected) {
       return nodeBoundary(node, false);
     }
@@ -109,7 +121,7 @@
   }
 
   function intersectNodeUnit(model, range, node) {
-    const start = nodeBoundary(node, true);
+    const start = nodeUnitStart(model, node);
     const end = nodeUnitEnd(model, node);
     if (!start || !end) return null;
     try {
@@ -129,7 +141,7 @@
   }
 
   function nodesForRange(model, range, preserveProvisionAncestors) {
-    if (!range || range.collapsed || !rangeIntersects(range, model.root)) return [];
+    if (!model.structure || !range || range.collapsed || !rangeIntersects(range, model.root)) return [];
     let nodes = model.structure.nodes.filter((node) => {
       const piece = intersectNodeUnit(model, range, node);
       return Boolean(piece && normalizeQuoteText(piece.toString()));
@@ -208,7 +220,7 @@
 
   function nativeCanliiTarget(model, node) {
     if (!model.canliiUrl || !['case', 'legislation'].includes(model.documentType)) return '';
-    const fragment = core.canliiAnchorForLocator(model.structure.kind, node.locator);
+    const fragment = core.canliiAnchorForLocator(model.structure.kind, node.locator, model.canliiUrl);
     if (!fragment || fragment.includes(':~:text=')) return '';
     return core.withFragment(model.canliiUrl, fragment);
   }
@@ -249,7 +261,7 @@
     }
     const groups = core.locatorGroups(nodes.map((node) => node.locator));
     const pieces = groups.map((group) => {
-      const first = anchorHtml(group.first, targetForNode(model, sourceInfo, nodes[group.start]));
+      const first = anchorHtml(group.firstDisplay, targetForNode(model, sourceInfo, nodes[group.start]));
       if (group.end === group.start) return first;
       const last = anchorHtml(group.lastDisplay, targetForNode(model, sourceInfo, nodes[group.end]));
       return `${first}-${last}`;
@@ -294,17 +306,25 @@
     }
   }
 
-  function quoteLeadingOmitted(model, range, nodes) {
+  // How a unit's selected text relates to its own marker: `strip` is the part of the marker the
+  // selection still contains (the quote supplies a clean marker instead), and `omitted` means real
+  // text precedes the selection. A selection starting inside the marker ("3]" of "[3]") omits nothing.
+  function leadingMarkerState(model, range, node) {
     const selectionStart = collapsedBoundary(range, true);
-    const contentStart = boundaryFromPoint(nodes[0].contentStartPoint);
+    const contentStart = boundaryFromPoint(node.contentStartPoint);
     if (contentStart) {
-      if (selectionStart.compareBoundaryPoints(Range.START_TO_START, contentStart) <= 0) return false;
-      return Boolean(normalizeQuoteText(textBetween(contentStart, selectionStart)));
+      if (selectionStart.compareBoundaryPoints(Range.START_TO_START, contentStart) <= 0) {
+        return { omitted: false, strip: textBetween(selectionStart, contentStart).length };
+      }
+      return { omitted: Boolean(normalizeQuoteText(textBetween(contentStart, selectionStart))), strip: 0 };
     }
-    const structureStart = nodeBoundary(nodes[0], true);
-    const beforeText = textBetween(structureStart, selectionStart)
-      .replace(leadingMarkerPattern(model.structure.kind, nodes[0].locator), '');
-    return Boolean(normalizeQuoteText(beforeText));
+    const structureStart = nodeBoundary(node, true);
+    const before = textBetween(structureStart, selectionStart);
+    const marker = textBetween(structureStart, nodeUnitEnd(model, node))
+      .match(leadingMarkerPattern(model.structure.kind, node.locator));
+    const markerLength = marker ? marker[0].length : 0;
+    if (before.length < markerLength) return { omitted: false, strip: markerLength - before.length };
+    return { omitted: Boolean(normalizeQuoteText(before.slice(markerLength))), strip: 0 };
   }
 
   function escapeRegex(value) {
@@ -352,7 +372,8 @@
 
     function render(node) {
       if (node.nodeType === Node.TEXT_NODE) {
-        return { plain: node.nodeValue, html: core.escapeHtml(node.nodeValue) };
+        const text = node.nodeValue.replace(/\s+/g, ' ');
+        return { plain: text, html: core.escapeHtml(text) };
       }
       if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
         return { plain: '', html: '' };
@@ -378,7 +399,7 @@
     return {
       plain: normalizeQuoteText(rendered.plain),
       html: rendered.html
-        .replace(/^(?:<br>)+|(?:<br>)+$/g, '')
+        .replace(/^(?:\s|<br>)+|(?:\s|<br>)+$/g, '')
         .replace(/(?:<br>){2,}/g, '<br>')
     };
   }
@@ -392,24 +413,9 @@
       .trim();
   }
 
-  function quoteContent(range, model, firstNode, leadingOmitted) {
+  function quoteContent(range, strip) {
     const fragment = range.cloneContents();
-    const raw = fragment.textContent || '';
-    let remove = 0;
-    if (!leadingOmitted) {
-      const selectionStart = collapsedBoundary(range, true);
-      const selectionEnd = collapsedBoundary(range, false);
-      const contentStart = boundaryFromPoint(firstNode.contentStartPoint);
-      if (contentStart
-          && selectionStart.compareBoundaryPoints(Range.START_TO_START, contentStart) <= 0
-          && contentStart.compareBoundaryPoints(Range.START_TO_START, selectionEnd) <= 0) {
-        remove = textBetween(selectionStart, contentStart).length;
-      } else {
-        const match = raw.match(leadingMarkerPattern(model.structure.kind, firstNode.locator));
-        if (match) remove = match[0].length;
-      }
-    }
-    stripLeadingCharacters(fragment, remove);
+    stripLeadingCharacters(fragment, Math.min(strip, (fragment.textContent || '').length));
     return renderSelectionFragment(fragment);
   }
 
@@ -427,22 +433,24 @@
   }
 
   function quoteMarkup(model, sourceInfo, range, nodes) {
-    const leadingOmitted = quoteLeadingOmitted(model, range, nodes);
     const provision = ['section', 'rule', 'article', 'silcrow'].includes(model.structure.kind);
+    // Indent relative to the shallowest quoted unit: a lone (b)(i) is flush, its children nest.
+    const baseDepth = provision ? Math.min(...nodes.map((node) => core.provisionDepth(node.locator))) : 0;
     const pieces = nodes.map((node, index) => {
       const unitRange = intersectNodeUnit(model, range, node);
       if (!unitRange) return null;
-      const leading = index === 0 && leadingOmitted;
-      const content = quoteContent(unitRange, model, node, leading);
+      const markerState = leadingMarkerState(model, unitRange, node);
+      const leading = index === 0 && markerState.omitted;
+      const content = quoteContent(unitRange, markerState.strip);
       const marker = quoteMarker(model.structure.kind, node);
-      const depth = provision ? core.provisionDepth(node.locator) : 0;
+      const depth = provision ? core.provisionDepth(node.locator) - baseDepth : 0;
       const continuationPlain = '\t'.repeat(depth + 1);
       const lead = leading ? ' \u2026' : '';
       const bodyPlain = content.plain ? ` ${content.plain.replace(/\n/g, `\n${continuationPlain}`)}` : '';
       const bodyHtml = content.html ? ` ${content.html}` : '';
       const markerHtml = anchorHtml(marker, targetForNode(model, sourceInfo, node));
       const markerColumn = Math.max(2, Math.ceil((Array.from(marker).length + 1) * 5) / 10);
-      const provisionHtml = `<p style="margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em"><span style="display:inline-block;width:${markerColumn}em;text-indent:0">${markerHtml}&nbsp;</span>${lead.trimStart()}${leading && bodyHtml ? ' ' : ''}${bodyHtml.trimStart()}</p>`;
+      const provisionHtml = `<span style="display:inline-block;margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em"><span style="display:inline-block;width:${markerColumn}em;text-indent:0">${markerHtml}&nbsp;</span>${lead.trimStart()}${leading && bodyHtml ? ' ' : ''}${bodyHtml.trimStart()}</span>`;
       return {
         plain: `${'\t'.repeat(depth)}${marker}${lead}${bodyPlain}`,
         html: `${'&emsp;'.repeat(depth)}${markerHtml}${lead}${bodyHtml}`,
@@ -453,9 +461,9 @@
     const quote = {
       plain: pieces.map((piece) => piece.plain).join('\n'),
       html: provision
-        ? pieces.map((piece) => piece.provisionHtml).join('')
+        ? pieces.map((piece) => piece.provisionHtml).join('<br>')
         : paragraphBlocks
-        ? pieces.map((piece) => `<p>${piece.html}</p>`).join('')
+        ? pieces.map((piece) => piece.html).join('<br>')
         : pieces.map((piece) => piece.html).join('<br>')
     };
     return quote;
@@ -508,6 +516,46 @@
     }, 2800);
   }
 
+  // Opt-in fallback for documents with no structure: link the selected passage (or the hovered
+  // paragraph) with a text fragment built and verified against this page. A copied fragment link
+  // still takes precedence.
+  // The hovered passage: the block (or preformatted paragraph) under the pointer.
+  function hoveredPassage(model, index) {
+    if (!lastHoverTarget || !lastHoverTarget.isConnected || !model.root.contains(lastHoverTarget)) return null;
+    const caret = lastPointer && typeof document.caretPositionFromPoint === 'function'
+      ? document.caretPositionFromPoint(lastPointer.x, lastPointer.y)
+      : null;
+    if (caret && caret.offsetNode && lastHoverTarget.contains(caret.offsetNode)) {
+      return fragments.passageRange(caret.offsetNode, caret.offset, index);
+    }
+    const walker = document.createTreeWalker(lastHoverTarget, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      if (text.nodeValue.trim()) return fragments.passageRange(text, text.nodeValue.search(/\S/), index);
+    }
+    return null;
+  }
+
+  async function builtPassageSource(model) {
+    const settings = await storageGet({ buildTextFragmentWithoutStructure: false });
+    if (!settings.buildTextFragmentWithoutStructure || await clipboardFragment(model)) return null;
+    const index = fragments.buildTextIndex(document.body);
+    const range = liveSelectionRange() || hoveredPassage(model, index);
+    if (!range || !rangeIntersects(range, model.root)) return null;
+    const built = fragments.buildPassageLink(range, { contextRoot: model.root, index });
+    if (!built || !built.range) {
+      throw new Error('No link can single out that passage: its opening words recur elsewhere on the page. Start the selection at the beginning of its paragraph.');
+    }
+    return { kind: 'text-fragment', range: built.range, url: core.withFragment(model.cleanUrl, `#:~:${built.directive}`) };
+  }
+
+  function pageQuote(model, sourceInfo) {
+    if (!rangeIntersects(sourceInfo.range, model.root)) throw new Error('Select text within the document first.');
+    const passage = renderSelectionFragment(sourceInfo.range.cloneContents());
+    if (!passage.plain) throw new Error('The resolved range contains no copyable text.');
+    const link = core.outputCitationLink(model.citation, sourceInfo.url || model.canliiUrl || model.cleanUrl);
+    return { plain: `${link.plain}, ${passage.plain}`, html: `${link.html}, ${passage.html}` };
+  }
+
   async function copy(mode, showFeedback = true) {
     const model = await inspectPage();
     let payload;
@@ -522,28 +570,42 @@
       const target = model.canliiUrl || model.cleanUrl;
       payload = core.outputCitationLink(model.citation, target);
       message = `Copied page: ${model.citation.plain}`;
+      const built = await builtPassageSource(model);
+      if (built) {
+        payload = mode === 'quote' ? pageQuote(model, built) : core.outputCitationLink(model.citation, built.url);
+        message = `Copied ${mode === 'quote' ? 'quote with ' : ''}passage link: ${model.citation.plain}`;
+      } else if (mode === 'quote') {
+        const sourceInfo = await copySource(model, mode);
+        if (sourceInfo.kind === 'text-fragment') fragmentSource = sourceInfo;
+        payload = pageQuote(model, sourceInfo);
+      }
     } else {
       const sourceInfo = await copySource(model, mode);
       if (sourceInfo.kind === 'text-fragment') fragmentSource = sourceInfo;
       const nodes = sourceInfo.range ? nodesForRange(model, sourceInfo.range, mode === 'quote') : [sourceInfo.node];
-      if (!nodes.length) throw new Error('No page, paragraph, or provision overlaps that range.');
-      const settings = await storageGet({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false });
-      const pinpoint = pinpointMarkup(
-        model,
-        sourceInfo,
-        nodes,
-        settings.pinpointStyle,
-        settings.linkFullTextFragmentPinpoint
-      );
-
-      if (mode === 'quote') {
-        const quote = quoteMarkup(model, sourceInfo, sourceInfo.range, nodes);
-        if (!quote.plain) throw new Error('The resolved range contains no copyable text.');
-        payload = quote;
-        message = `Copied quote from ${pinpoint.plain}`;
+      if (!nodes.length && mode === 'quote') {
+        payload = pageQuote(model, sourceInfo);
+        message = `Copied quote from ${model.citation.plain}`;
       } else {
-        payload = pinpoint;
-        message = `Copied pinpoint: ${pinpoint.plain}`;
+        if (!nodes.length) throw new Error('No page, paragraph, or provision overlaps that range.');
+        const settings = await storageGet({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false });
+        const pinpoint = pinpointMarkup(
+          model,
+          sourceInfo,
+          nodes,
+          settings.pinpointStyle,
+          settings.linkFullTextFragmentPinpoint
+        );
+
+        if (mode === 'quote') {
+          const quote = quoteMarkup(model, sourceInfo, sourceInfo.range, nodes);
+          if (!quote.plain) throw new Error('The resolved range contains no copyable text.');
+          payload = quote;
+          message = `Copied quote from ${pinpoint.plain}`;
+        } else {
+          payload = pinpoint;
+          message = `Copied pinpoint: ${pinpoint.plain}`;
+        }
       }
     }
 

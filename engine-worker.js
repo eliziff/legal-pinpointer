@@ -15,6 +15,7 @@ const ALLOWED_HOSTS = new Set([
 
 let enginePromise;
 let legislationPromise;
+let caseAliasPromise;
 
 async function loadEngine() {
   if (!enginePromise) {
@@ -49,6 +50,32 @@ async function loadLegislationIndex() {
   return legislationPromise;
 }
 
+// Reporter/alias citation key -> CanLII target, built by tools/build-canlii-case-aliases.py.
+async function loadCaseAliasIndex() {
+  if (!caseAliasPromise) {
+    caseAliasPromise = fetch(chrome.runtime.getURL('canlii-case-aliases.tsv'))
+      .then((response) => {
+        if (!response.ok) throw new Error(`CanLII case alias index failed to load (${response.status}).`);
+        return response.text();
+      })
+      .then((text) => new Map(text.split('\n').filter((line) => line && !line.startsWith('#')).map((line) => line.split('\t'))))
+      .catch((error) => {
+        caseAliasPromise = undefined;
+        throw error;
+      });
+  }
+  return caseAliasPromise;
+}
+
+async function resolveCase(input) {
+  const keys = input && Array.isArray(input.keys) ? input.keys : null;
+  if (!keys || keys.length > 50 || keys.some((key) => typeof key !== 'string' || key.length > 200)) {
+    throw new Error('The CanLII case request is invalid or too large.');
+  }
+  const index = await loadCaseAliasIndex();
+  return Array.from(new Set(keys.map((key) => index.get(key)).filter(Boolean)));
+}
+
 function validSender(sender) {
   try {
     if (!sender || sender.id !== chrome.runtime.id || !sender.tab || !sender.url) return false;
@@ -56,7 +83,7 @@ function validSender(sender) {
     const host = url.hostname.toLowerCase();
     if (url.protocol !== 'https:' || !ALLOWED_HOSTS.has(host)) return false;
     if (host === 'canlii.org' || host === 'www.canlii.org') return /\/(?:doc|laws)\//i.test(url.pathname);
-    if (host === 'advance.lexis.com') return /^\/document\//i.test(url.pathname);
+    if (host === 'advance.lexis.com') return /^\/(?:document|search)\//i.test(url.pathname);
     return /^\/Document\//.test(url.pathname);
   } catch (_) {
     return false;
@@ -108,14 +135,16 @@ async function resolveLegislation(input) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || !['LEGAL_PINPOINTER_DERIVE_STRUCTURE', 'LEGAL_PINPOINTER_RESOLVE_LEGISLATION'].includes(message.type)) return false;
+  if (!message || !['LEGAL_PINPOINTER_DERIVE_STRUCTURE', 'LEGAL_PINPOINTER_RESOLVE_LEGISLATION', 'LEGAL_PINPOINTER_RESOLVE_CASE'].includes(message.type)) return false;
   if (!validSender(sender)) {
     sendResponse({ ok: false, message: 'Legal Pinpointer requests are limited to supported document pages.' });
     return false;
   }
   const task = message.type === 'LEGAL_PINPOINTER_DERIVE_STRUCTURE'
     ? derive(message.input)
-    : resolveLegislation(message.input).then((url) => ({ ok: true, url }));
+    : message.type === 'LEGAL_PINPOINTER_RESOLVE_CASE'
+      ? resolveCase(message.input).then((targets) => ({ ok: true, targets }))
+      : resolveLegislation(message.input).then((url) => ({ ok: true, url }));
   task.then((result) => sendResponse(result))
     .catch((error) => sendResponse({ ok: false, message: error.message || 'Legal Pinpointer request failed.' }));
   return true;
