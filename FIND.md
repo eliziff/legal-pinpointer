@@ -92,41 +92,50 @@ order: `whether an employer must accommodate to the point of undue hardship`.
 Lower-case and/or/not are ordinary words here. The status line reads
 "N matching paragraphs, best first"; there are no scores or badges.
 
+- The side panel reads each searchable tab's paragraphs once, in idle time after
+  it opens (the starting tab first), into an index in a worker of its own:
+  UTF-8 text and compact postings. A tab is read again only when it navigates,
+  finishes loading or its text changes. Plain-word queries never touch the tabs.
 - First pass, shown at once: Okapi BM25 (k1 1.2, b 0.75) over paragraphs, with
   unit counts, lengths and document frequencies summed over every searched tab,
   so a rare word weighs the same whichever tab it is in. Words are folded for
   scoring only (case, accents, light English/French inflection: `Waivers` ~
   `waiver`, `accommodating` ~ `accommodate`, `généraux` ~ `general`); offsets,
-  highlights and copies always refer to the original text. Each page proposes
-  its 64 best paragraphs with their term counts; the broker rescores them with
-  the corpus-wide statistics and keeps the best 200.
-- Second pass: the top 30 are rescored on the device by a cross-encoder
-  (ms-marco-MiniLM-L6-v2, int8 ONNX, 23 MB) in a worker of the side panel,
-  reading each whole paragraph up to 512 tokens. The model loads only after the
-  first results are on screen. It is English-only, so French queries keep the
-  first-pass order. If the model is absent or fails, the first-pass order stays.
+  highlights and copies always refer to the original text. The best 200 are listed.
+- Second pass: the top 30 are rescored on the device by a cross-encoder in a
+  worker of the side panel, each reading a 620-character window around its
+  densest query words (192 tokens). A GPU with 16-bit shaders runs
+  ms-marco-MiniLM-L4-v2 (fp16 ONNX, 38 MB) through WebGPU; any other machine runs
+  ms-marco-TinyBERT-L2-v2 (int8 ONNX, 4.5 MB) on up to four WASM threads. The
+  30 pairs run in three batches sorted by length, so little is padded. The model
+  loads once the tabs have been read and is released after three idle minutes.
+  It is English-only, so French queries keep the first-pass order. If the model
+  is absent or fails (or Chrome is older than 137, which the runtime needs), the
+  first-pass order stays.
 - The list never jumps under the user: the reranked order replaces the first
-  one once, when all 30 are scored, and only while the pointer is off the list
-  and the selection has not been moved. Otherwise it waits for the pointer to
-  leave, or is dropped once a result has been chosen. Open, preview and the
-  copy commands use the result's issued handle, so they work from either order.
+  one once, and only while the pointer is off the list and the selection has
+  not been moved. Otherwise it waits for the pointer to leave, or is dropped once
+  a result has been chosen. Open, preview and the copy commands use the result's
+  issued handle, so they work from either order.
 
-Measured in the installed extension (headless Chromium, 30 tabs holding the 30
-longest A2AJ judgments, 20.4M characters, cross-origin isolated so the model
-uses 4 threads; 2026-09-23 on a loaded laptop at 75% CPU from other work). The
-run's memory guard stopped it after 38 of the 51 queries, so the quality rows
-cover those 38 and the 60-tab run was not reached.
+Measured 2026-09-23 on an i3-1315U laptop with Intel UHD graphics, loaded to
+80-90% CPU by other work: the 38 judged queries over 30 tabs holding the 30
+longest A2AJ judgments (20.4M characters), each query's top 30 from the panel's
+own index given to the shipped reranker worker in headless Chromium. "4x" slows
+the whole renderer process (worker and WASM threads included) to a quarter
+speed; DevTools CPU throttling would miss the workers.
 
-| Mode | Target in top 10 | MRR | First results p50 / p95 | Reranked p50 / p95 |
-| --- | ---: | ---: | ---: | ---: |
-| Ranked, first pass (BM25) | 0.698 | 0.503 | 0.35 / 0.79 s | - |
-| Ranked + on-device rerank | 0.836 | 0.709 | 0.30 / 0.41 s | 1.83 / 2.57 s |
+| Ranking | Target in top 10 | MRR | Rerank p50 / p95, 1x | Rerank p50 / p95, 4x | Worker memory |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First pass (BM25) | 0.698 | 0.503 | - | - | - |
+| GPU: MiniLM-L4 fp16, WebGPU | 0.809 | 0.711 | 361 / 493 ms | 406 / 477 ms | 250 MB + 175 MB GPU process |
+| CPU: TinyBERT-L2 int8, WASM | 0.737 | 0.585 | 103 / 125 ms | 440 / 755 ms | 160 MB |
+| Before: MiniLM-L6 int8, WASM | 0.836 | 0.724 | 1.48 s | 4.06 s | 445 MB (peak 742) |
 
-The first search after opening (every page indexed, term statistics built,
-model loaded) returned first results in 3.1-4.8 s and the reranked order in
-5.8-6.8 s. The rerank itself takes 1.2-2.7 s for 30 paragraphs. Memory was
-100 MB for the panel with its model worker and 108 MB of heap across the 30 tab
-pages.
+The L6 model on WASM, which this replaces, ranked best but took 1.5 s on this
+laptop and 4 s at 4x for the same 30 passages; on this GPU it still takes
+0.52 s, so L4 is the largest model that fits half a second. The index answers
+a query in 5.7 ms (p50; p95 11.9 ms) at 1x.
 
 **Exact search** keeps document order and Boolean matching.
 `privileg* waiv*` requires both prefixes in one unit, in either order.
@@ -152,11 +161,12 @@ scripting and HTTP/HTTPS host access support user-invoked cross-tab searches.
 Automatic citation scripts keep their original provider matches. Search code is
 not injected into every website on page load. No backend, telemetry, polling or
 worker-keepalive loop is added. The one packaged dependency is the reranker in
-`vendor/rerank/` (onnxruntime-web 1.30.0 WASM and the int8 model, 37 MB, not
-committed): `npm run fetch:rerank` downloads it and checks every file against a
-pinned SHA-256; nothing is fetched at run time. The manifest makes extension
-pages cross-origin isolated (COOP/COEP), which lets the panel's reranker use up
-to four WASM threads; its pool threads sleep rather than spin between operators.
+`vendor/rerank/` (onnxruntime-web 1.30.0's JSPI build for WebGPU and WASM, and
+the two models; 60 MB, not committed): `npm run fetch:rerank` downloads it and
+checks every file against a pinned SHA-256; nothing is fetched at run time. The
+manifest makes extension pages cross-origin isolated (COOP/COEP), which lets the
+panel's reranker use up to four WASM threads on machines without a suitable GPU;
+its pool threads sleep rather than spin between operators.
 
 The broker stores compact navigation handles in extension-private RAM session
 storage; queries/previews normally remain in the panel instance. For a deliberate
@@ -175,9 +185,9 @@ on every browser-owned close event is made.
 Existing search caps remain: four-tab batches; 200 units per page and 1,000 total
 previews; four million text characters/150,000 traversal steps per page; a
 32-million-character queue-start threshold across pages (last batch may overshoot);
-five-second operation waits within an 18-second deadline. Ranked mode takes 64
-candidates per page and keeps 200 in total (the 1,000-result stop does not apply),
-and reranks the top 30, each cut to 3,000 characters and 512 tokens. Physical paragraphs over
+five-second operation waits within an 18-second deadline. Ranked mode indexes up
+to 32 million characters across tabs, keeps the best 200 (the 1,000-result stop
+does not apply) and reranks the top 30, each cut to 620 characters and 192 tokens. Physical paragraphs over
 65,536 UTF-16 characters and budget-truncated units are skipped whole, not split
 into misleading proximity/NOT matches. Highlight caps are 100 ranges/unit and
 2,000 background ranges; previews contain at most 460 characters. Partial work

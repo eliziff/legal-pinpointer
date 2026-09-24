@@ -1,8 +1,9 @@
 'use strict';
 
-// Vendors the on-device reranker into vendor/rerank/: onnxruntime-web's WASM
-// runtime and the int8 MiniLM-L6 ms-marco cross-encoder. Every byte is pinned by
-// SHA-256; nothing is fetched at extension runtime. Usage: npm run fetch:rerank
+// Vendors the on-device reranker into vendor/rerank/: onnxruntime-web's JSPI
+// runtime (WebGPU and WASM), the fp16 MiniLM-L4 ms-marco cross-encoder for GPUs
+// and the int8 TinyBERT-L2 one for CPUs. Every byte is pinned by SHA-256; nothing
+// is fetched at extension runtime. Usage: npm run fetch:rerank
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,15 +14,18 @@ const ORT = {
   url: 'https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.30.0.tgz',
   sha256: 'd2228df7e4616bc3348bf504ee888f3bec43789a273f0a63f3e68d203ce3bf71',
   files: {
-    'package/dist/ort.wasm.min.mjs': ['ort.wasm.min.mjs', '219e6a1fc8a9938268d18efca3c91d310bd2f4a59bbd13744df5b2b7fc6cee3b'],
-    'package/dist/ort-wasm-simd-threaded.mjs': ['ort-wasm-simd-threaded.mjs', 'e13f7f94fc51b4ca72b12faeb1ee95f4ace6dfbc8939bc718aabdc0a27c4299b'],
-    'package/dist/ort-wasm-simd-threaded.wasm': ['ort-wasm-simd-threaded.wasm', '3398c10d07d229bd91b364548e130e0e51a8e5704b88c7c083ebbeb78842dee2']
+    'package/dist/ort.jspi.min.mjs': ['ort.jspi.min.mjs', 'bc57179d923fda2d88d4a395359c8df44399dde087bf9ff44fc0e40ab398e4d9'],
+    'package/dist/ort-wasm-simd-threaded.jspi.mjs': ['ort-wasm-simd-threaded.jspi.mjs', '270e2c6da9f297239d301d329782b6446641cb1e16a77967690adcfca35f3268'],
+    'package/dist/ort-wasm-simd-threaded.jspi.wasm': ['ort-wasm-simd-threaded.jspi.wasm', 'a54c76f86b0f0d9572380cf1c6292a7b3903716ffcbcd6b0e5c7050bf430eb93']
   }
 };
-const MODEL = 'https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/a09144355adeed5f58c8ed011d209bf8ee5a1fec/';
+const GPU = 'https://huggingface.co/Xenova/ms-marco-MiniLM-L-4-v2/resolve/e8fdba61d478d042b338f7bcf7ba4e48ed7d46d7/';
+const CPU = 'https://huggingface.co/Xenova/ms-marco-TinyBERT-L-2-v2/resolve/b76bb5e1fefd66aa36cd108622d768e86c015ff1/';
 const DIRECT = [
-  [`${MODEL}onnx/model_int8.onnx`, 'model.onnx', 'a13ec391ca99f49886694e12d3e800521f36d4267d7d448c34421c541a2baf50'],
-  [`${MODEL}tokenizer.json`, 'tokenizer.json', 'd241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66']
+  [`${GPU}onnx/model_fp16.onnx`, 'model-gpu.onnx', '9ed87a768b2d6d204674c2278199c8cd353a0fdacfb3bb1acad464c42cbdd576'],
+  [`${CPU}onnx/model_int8.onnx`, 'model-cpu.onnx', 'f24d6dcf08df3d26b8fba3886942575b64856deba7ac2aa0962c2fb2ccd6d895'],
+  // Both models share this uncased BERT vocabulary (identical files).
+  [`${GPU}tokenizer.json`, 'tokenizer.json', 'd241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66']
 ];
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const fresh = (name, hash) => { try { return sha256(fs.readFileSync(path.join(out, name))) === hash; } catch (_) { return false; } };
@@ -61,5 +65,8 @@ function write(name, bytes, hash) {
     }
   }
   for (const [url, name, hash] of DIRECT) if (!fresh(name, hash)) write(name, await download(url, hash), hash);
+  // Earlier runtimes and models are removed so they are not packaged.
+  const keep = new Set([...Object.values(ORT.files).map(([name]) => name), ...DIRECT.map(([, name]) => name)]);
+  for (const name of fs.readdirSync(out)) if (!keep.has(name)) fs.rmSync(path.join(out, name));
   console.log('Reranker assets verified in vendor/rerank/.');
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

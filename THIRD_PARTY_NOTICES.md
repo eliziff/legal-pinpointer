@@ -30,6 +30,8 @@ SOFTWARE.
 
 `vendor/rerank/` (fetched and SHA-256 verified by `npm run fetch:rerank`, not committed) contains
 `onnxruntime-web` 1.30.0 (<https://github.com/microsoft/onnxruntime>, MIT License, Copyright (c)
-Microsoft Corporation) and the int8 ONNX export
-(<https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2>) of `cross-encoder/ms-marco-MiniLM-L6-v2`
-(<https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2>, Apache License 2.0).
+Microsoft Corporation), the fp16 ONNX export (<https://huggingface.co/Xenova/ms-marco-MiniLM-L-4-v2>)
+of `cross-encoder/ms-marco-MiniLM-L4-v2` (<https://huggingface.co/cross-encoder/ms-marco-MiniLM-L4-v2>,
+Apache License 2.0) and the int8 ONNX export (<https://huggingface.co/Xenova/ms-marco-TinyBERT-L-2-v2>)
+of `cross-encoder/ms-marco-TinyBERT-L2-v2` (<https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L2-v2>,
+Apache License 2.0).
