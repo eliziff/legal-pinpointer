@@ -129,7 +129,7 @@
     quote.append(document.createTextNode(selected.preview.slice(offset))); if (selected.trailing) quote.append(document.createTextNode('…'));
     counter.textContent = `${current + 1} / ${result.results.length}`;
     if (scope === 'current') {
-      try { page.preview(result.ticket, selected.index, true); } catch (error) { tell(error.message, true); }
+      page.preview(result.ticket, selected.index, true).catch(error => tell(error.message, true));
     }
   }
   function move(delta) {
