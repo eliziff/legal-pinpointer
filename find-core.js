@@ -263,13 +263,16 @@
     return hits.length ? hits : loose;
   }
   // The hit that starts the window (`lead` characters before it, `width` long)
-  // holding the most distinct matched words.
+  // holding the most distinct matched words (hits in text order). The window
+  // slides forward, so each hit enters and leaves it once.
   function densest(text, hits, lead = 90, width = 460) {
-    let anchor = hits[0]?.start ?? 0, best = 0;
+    const words = hits.map(hit => text.slice(hit.start, hit.end).toLowerCase()), counts = new Map();
+    let anchor = hits[0]?.start ?? 0, best = 0, first = 0, next = 0;
     for (const hit of hits) {
-      const from = hit.start - lead, words = new Set();
-      for (const other of hits) if (other.start >= from && other.end <= from + width) words.add(text.slice(other.start, other.end).toLowerCase());
-      if (words.size > best) { best = words.size; anchor = hit.start; }
+      const from = hit.start - lead;
+      for (; next < hits.length && hits[next].end <= from + width; next++) counts.set(words[next], (counts.get(words[next]) || 0) + 1);
+      for (; first < next && hits[first].start < from; first++) { const left = counts.get(words[first]) - 1; if (left) counts.set(words[first], left); else counts.delete(words[first]); }
+      if (counts.size > best) { best = counts.size; anchor = hit.start; }
     }
     return anchor;
   }
