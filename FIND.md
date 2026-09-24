@@ -123,9 +123,10 @@ Measured 2026-09-23 on an i3-1315U laptop with Intel UHD graphics, loaded to
 longest A2AJ judgments (20.4M characters), each query's top 30 from the panel's
 own index given to the shipped reranker worker in headless Chromium. "4x" slows
 the whole renderer process (worker and WASM threads included) to a quarter
-speed; DevTools CPU throttling would miss the workers.
+speed; DevTools CPU throttling would miss the workers. It slows the CPU only: the
+GPU runs at full speed.
 
-| Ranking | Target in top 10 | MRR | Rerank p50 / p95, 1x | Rerank p50 / p95, 4x | Worker memory |
+| Ranking | Target in top 10 | MRR | Rerank p50 / p95, 1x | Rerank p50 / p95, 4x | Memory over an idle renderer |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | First pass (BM25) | 0.698 | 0.503 | - | - | - |
 | GPU: MiniLM-L4 fp16, WebGPU | 0.809 | 0.711 | 361 / 493 ms | 406 / 477 ms | 250 MB + 175 MB GPU process |
@@ -133,9 +134,11 @@ speed; DevTools CPU throttling would miss the workers.
 | Before: MiniLM-L6 int8, WASM | 0.836 | 0.724 | 1.48 s | 4.06 s | 445 MB (peak 742) |
 
 The L6 model on WASM, which this replaces, ranked best but took 1.5 s on this
-laptop and 4 s at 4x for the same 30 passages; on this GPU it still takes
-0.52 s, so L4 is the largest model that fits half a second. The index answers
-a query in 5.7 ms (p50; p95 11.9 ms) at 1x.
+laptop and 4.1 s at 4x per 30 passages (timed separately on three queries' top
+30); on this GPU it still takes 0.52 s, so L4 is the largest model that fits in
+half a second. Both new paths rank below L6: on the GPU by one query in 38, on
+CPU-only machines by a real margin, traded for speed. The index answers a query
+in 5.7 ms (p50; p95 11.9 ms) at 1x.
 
 **Exact search** keeps document order and Boolean matching.
 `privileg* waiv*` requires both prefixes in one unit, in either order.
