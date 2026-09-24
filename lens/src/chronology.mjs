@@ -235,7 +235,18 @@ export async function collateEvents(catalogue,decisions,{signal,onProgress=()=>{
 export async function makeChronology(sources,catalogue,decisions,options={}){
   // Default is fast: documents and dated sentences, no model load. {deep:true}
   // also asks the model about every sentence (much slower).
-  if(options.deep)await decisions.start();cancelled(options.signal);await discoverEvents(sources,catalogue,decisions,options);return collateEvents(catalogue,decisions,options);
+  if(options.deep)await decisions.start();cancelled(options.signal);await discoverEvents(sources,catalogue,decisions,options);
+  const events=await collateEvents(catalogue,decisions,options);
+  if(options.rowScorer){
+    // A small model trained on real affidavit chronologies marks which found rows are
+    // events a litigator would keep; the rest stay available under "All found".
+    const titles=new Map(sources.map(s=>[s.id,documentEntry(s)?.text||s.subject||s.name])),mention=new Map(catalogue.mentions.map(m=>[m.id,m]));
+    const texts=events.map(e=>{const m=mention.get(e.mentionIds[0]);return `${titles.get(m?.sourceId)||''} | ${e.date||'undated'} | ${e.text}`.slice(0,700);});
+    try{const {threshold,scores}=await options.rowScorer.score(texts);
+      events.forEach((e,i)=>{e.eventScore=scores[i];e.likely=e.manual||e.edited||scores[i]>=threshold;});}
+    catch(_){for(const e of events)e.likely=true;} // a build without the row model shows every row
+  }
+  return events;
 }
 export function ungroup(catalogue,event){for(let i=0;i<event.mentionIds.length;i++)for(let j=i+1;j<event.mentionIds.length;j++)catalogue.separations.push([event.mentionIds[i],event.mentionIds[j]].sort().join('\0'));}
 export function eventOrder(a,b){return (a.date||'9999').localeCompare(b.date||'9999')||a.text.localeCompare(b.text)||a.id.localeCompare(b.id);}
