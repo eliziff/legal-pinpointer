@@ -1,8 +1,6 @@
 name: Lens source integration snapshot
 on:
-  push:
-    branches: [codex/pinpointer-lens-event-strip]
-    paths: ['.github/workflows/lens-source-export.yml']
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

@@ -1,8 +1,6 @@
 name: Lens semantic resources
 on:
-  push:
-    branches: [codex/pinpointer-lens-event-strip]
-    paths: ['.github/workflows/lens-resources.yml']
+  workflow_dispatch:
 permissions:
   contents: read
   actions: read
