@@ -1,8 +1,6 @@
 name: Event Strip general chronology
 on:
-  push:
-    branches: [codex/pinpointer-lens-event-strip]
-    paths: ['lens/src/chronology.mjs', 'lens/src/event-strip*', 'lens/src/documents.mjs', 'lens/src/zip.mjs', 'lens/src/assets.mjs', 'lens/src/decision-worker.mjs', 'lens/test/chronology*', 'lens/event-build.mjs', '.github/workflows/event-strip.yml']
+  workflow_dispatch:
 permissions:
   contents: write
 concurrency:

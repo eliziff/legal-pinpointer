@@ -1,8 +1,6 @@
 name: Pinpointer Lens offline package
 on:
-  push:
-    branches: [codex/pinpointer-lens-event-strip]
-    paths: ['lens/**', '.github/workflows/lens-package.yml', 'manifest.json', 'sonar.html', 'lens-launcher.js', 'content.js', 'text-fragments.js', 'core.js', 'providers.js']
+  workflow_dispatch:
 permissions:
   contents: write
 concurrency:
