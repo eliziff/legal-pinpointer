@@ -15,16 +15,19 @@ citation-copying shortcuts and output formats are unchanged.
 | Arrows, PageUp/PageDown, Home, End | Move among results. ArrowUp from the first result returns to the query. |
 | Click a result | Select it. Nothing opens. |
 | Open, or Enter on a result | Jump to the exact matching passage in its source tab. |
-| Ctrl+Shift+X | Copy the selected passage as Pinpointer's quotation: the linked paragraph or provision marker and the text. Unnumbered text and other sites copy `[Link]: text` with a link to the passage. |
-| Ctrl+X | Copy the pinpoint (for example `at para 12`) linked to the paragraph. |
+| Copy quote / Ctrl+Shift+X | Copy the passage as Pinpointer's quotation: the linked paragraph or provision marker and the text. Unnumbered text and other sites copy `[Link]: text` with a link to the passage. |
+| Copy pinpoint / Ctrl+X | Copy the pinpoint (for example `at para 12`) linked to the paragraph. |
+| Copy link | Copy a text-fragment link that opens the page scrolled to and highlighting the passage. |
 | Alt+X | Copy the document's citation (the result's title). |
 | Use active tab | Explicitly change the origin of Current tab/group search. |
 | Escape | In the list, return to the query; in the query, clear it (in Open tabs, also release its shared search session). The panel stays open. |
 | F6 / Shift+F6 | Move among controls because Tab and Shift+Tab control proximity/scope. |
 | Alt+Shift+S | Open CanLII document-text search from any browser tab, including blank/new tabs. |
 
-The copy shortcuts act on the result with keyboard focus exactly as they would
-on that paragraph in its own tab; in the query box Ctrl+X still cuts. Selecting a
+Each result has its Copy quote, Copy pinpoint and Copy link buttons on one line
+below its excerpt. The copy shortcuts act on the result with keyboard focus
+exactly as they would on that paragraph in its own tab; in the query box Ctrl+X
+still cuts. Selecting a
 result never scrolls or activates its source: only Open (or Enter on a result) does.
 
 Escape does not close the panel. Chrome animates the side panel every time it
@@ -60,8 +63,8 @@ No selected document text is automatically placed into the remote query.
 The header and the result list occupy fixed grid regions, with one line below
 for errors and copy confirmations. New results replace the previous ones in
 place; nothing is dimmed, disabled or collapsed while a search runs, and there
-are no animations. Results have fixed 104-pixel rows (the page's icon, title,
-pinpoint and Open above three lines of excerpt) and mount only
+are no animations. Results have fixed 132-pixel rows (the page's icon, title,
+pinpoint and Open; three lines of excerpt; the copy buttons) and mount only
 the viewport plus three overscan rows on either side. Scroll/resize redraws are
 coalesced through animation frames. Result text is escaped into DOM text/mark
 nodes, never injected as source HTML. Dark and forced-color modes are supported.

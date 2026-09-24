@@ -7,6 +7,7 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 require('../find-core.js');
 const {createBroker} = require('../find-worker.js');
 const {createLauncher} = require('../sonar-launcher.js');
+const {ROW_HEIGHT} = require('../sonar-results.js');
 const root = path.resolve(__dirname,'..');
 
 test('persistent workspace navigates real ranges across documents with stable layout, plus new-tab CanLII launch', {timeout:60000}, async()=>{
@@ -81,7 +82,7 @@ test('persistent workspace navigates real ranges across documents with stable la
     }
     const p=await newPanel(10),other=sources.get(2);
     const until=async(f,label)=>{for(let i=0;i<100&&!f();i++)await new Promise(r=>setTimeout(r,50));assert.ok(f(),label)};
-    const rows=n=>p.waitForFunction(n=>document.getElementById('list-viewport').getAttribute('aria-busy')==='false'&&document.getElementById('result-spacer').style.height===`${n*104}px`,n);
+    const rows=n=>p.waitForFunction(([n,h])=>document.getElementById('list-viewport').getAttribute('aria-busy')==='false'&&document.getElementById('result-spacer').style.height===`${n*h}px`,[n,ROW_HEIGHT]);
     const fill=async text=>{await p.locator('#query').fill(text);};
     const geometry=()=>p.evaluate(()=>['query','list-viewport','notice'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {id,x:r.x,y:r.y,height:r.height}}));
     const opened=()=>calls.filter(([type,,method])=>type==='inject'&&method==='preview').length;
@@ -150,15 +151,15 @@ test('persistent workspace navigates real ranges across documents with stable la
     const sample={tabId:1,windowId:10,documentId:'doc1',url:tabs[0].url,title:tabs[0].title,preview:'The privilege remains unless waiver is established. '.repeat(8),marks:[{start:4,end:13}],locator:'para 42'};
     const items=Array.from({length:1000},(_,i)=>({...sample,index:i,locator:`para ${i+1}`}));
     const fake={session:stored[0],ticket:stored[1].ticket,results:items,mode:'s',searched:5,total:5,skipped:[],limited:false};
-    await api.storage.session.set({'sonar-launch:10':{nonce:'render-test',created:Date.now(),route:'tabs',origin:tabs[0],handoff:{workspace,origin:tabs[0],query:'privileg* waiv*',mode:'s',scope:'all',sequence:Date.now(),result:fake,current:999,scrollTop:103700}}});
+    await api.storage.session.set({'sonar-launch:10':{nonce:'render-test',created:Date.now(),route:'tabs',origin:tabs[0],handoff:{workspace,origin:tabs[0],query:'privileg* waiv*',mode:'s',scope:'all',sequence:Date.now(),result:fake,current:999,scrollTop:ROW_HEIGHT*998}}});
     await p.waitForFunction(()=>document.querySelector('.result-row[data-result="999"][aria-selected=true]'));
     const mounted=await p.locator('.result-row').count();
-    assert.ok(mounted<=await p.evaluate(()=>Math.ceil(document.getElementById('list-viewport').clientHeight/104)+6));
+    assert.ok(mounted<=await p.evaluate(h=>Math.ceil(document.getElementById('list-viewport').clientHeight/h)+6,ROW_HEIGHT));
     assert.deepEqual(await geometry(),baseGeometry);
     await p.screenshot({path:process.env.SONAR_SCREENSHOT || path.join(root,'..','sonar-finished-preview.png')});
     // Font/viewport changes keep virtualization mathematically aligned.
     await p.setViewportSize({width:320,height:560});await p.waitForTimeout(80);
-    assert.equal(await p.locator('.result-row').first().evaluate(el=>el.getBoundingClientRect().height),104);
+    assert.equal(await p.locator('.result-row').first().evaluate(el=>el.getBoundingClientRect().height),ROW_HEIGHT);
     assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     // Escape clears the search and leaves the panel open.
     await p.locator('#query').focus();await p.keyboard.press('Escape');await p.waitForFunction(()=>document.getElementById('query').value==='');

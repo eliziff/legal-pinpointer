@@ -88,4 +88,5 @@ workers, tab pages) and reported everywhere.
 ## Paused 2026-09-24 (panel UI changed)
 - The panel has no #summary/#detail status lines any more: eval-fast.cjs must detect first
   results as rows appearing (#result-rows [data-result]) with #list-viewport aria-busy="false".
-- Rows are 104 px (was 132); the passage preview, Alt+wheel and Back to start are gone.
+- Rows stay 132 px (each carries Open and Copy quote/pinpoint/link); the passage preview,
+  Alt+wheel and Back to start are gone.
