@@ -148,7 +148,7 @@
         query.trim() ? 'Try broader terms or a different scope. Skipped pages are listed in Details.' : 'Type words or quoted phrases. Tab switches paragraph and sentence proximity.');
       if (result.ranked) issue(result);
       resultStatus(); details(); preview();
-      if (result.ranked) rerank(token);
+      if (result.ranked) { rerank(token); fillExcerpts(result); }
     } catch (error) {
       if (token !== sequence || route !== 'tabs') return;
       busy = false; result = null; current = -1; list.setResults([], -1); details(); preview();
@@ -179,13 +179,21 @@
     }
     if (token !== sequence) return { stale: true };
     const indexed = tabs.filter(tab => reads.get(tab.id)?.revision);
-    const reply = await indexCall({ type: 'search', query, tabIds: indexed.map(tab => tab.id), depth: RERANK_DEPTH, window: RERANK_WINDOW });
+    const reply = await indexCall({ type: 'search', query, tabIds: indexed.map(tab => tab.id), depth: RERANK_DEPTH, window: RERANK_WINDOW, eager: RERANK_DEPTH });
     const skipped = tabs.filter(tab => !reads.get(tab.id)?.revision).map(tab => ({ title: String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 200),
       reason: reads.get(tab.id)?.reason || 'Still reading; refresh when ready' }));
     const windows = new Map(tabs.map(tab => [tab.id, tab.windowId]));
     for (const item of reply.results) item.windowId = windows.get(item.tabId) ?? item.windowId;
-    return { ranked: true, results: reply.results, passages: reply.passages, searched: reply.searched, total: tabs.length, skipped, limited: reply.limited,
+    return { ranked: true, results: reply.results, passages: reply.passages, tag: reply.tag, searched: reply.searched, total: tabs.length, skipped, limited: reply.limited,
       sequence: token, note: scope === 'group' && start.groupId < 0 ? 'This tab is not in a tab group. No other ungrouped tabs were searched.' : '' };
+  }
+  // Excerpts of the rows past the first screenfuls arrive just after the list.
+  function fillExcerpts(target) {
+    const items = target.results.slice();
+    indexCall({ type: 'excerpts', tag: target.tag }).then(({ excerpts }) => {
+      for (const { position, ...excerpt } of excerpts) Object.assign(items[position], excerpt);
+      if (result === target && excerpts.length) { list.redraw(); if (current >= RERANK_DEPTH) preview(); }
+    }, () => {});
   }
   // Issued handles for ranked results; jump, preview and copy wait for them.
   function issue(target) {
@@ -267,7 +275,7 @@
         if (entry.revision) indexer.postMessage({ type: 'drop', tabId });
         Object.assign(entry, { revision: '', reason: page.skipped });
       } else {
-        const { text, locators, ...meta } = page;
+        const { text, paras, ...meta } = page;
         await indexCall(page.same ? { type: 'meta', meta } : { type: 'put', page });
         Object.assign(entry, { revision: page.revision, reason: '' }, changed ? { characters: text.length } : {});
       }
