@@ -4,8 +4,10 @@
   if (global.LegalPinpointerSearchPage) return;
   const core = global.LegalPinpointerFindCore;
   const HIT = 'legal-pinpointer-sonar-hits', ACTIVE = 'legal-pinpointer-sonar-active';
-  const MAX_CHARS = 4_000_000, MAX_NODES = 150_000, MAX_RESULTS = 200, MAX_PARAGRAPH = 65_536, MAX_PAINT = 2000, RANK_CANDIDATES = 64;
-  let revision = 0, index = null, indexing = null, expiry = 0, onChange = null;
+  const MAX_CHARS = 4_000_000, MAX_NODES = 150_000, MAX_RESULTS = 200, MAX_PARAGRAPH = 65_536, MAX_PAINT = 2000;
+  // `onChange` is the in-page find UI's callback; `watching` names the side panel
+  // workspace and/or exact-search ticket told (once per read) when the page changes.
+  let revision = 0, index = null, indexing = null, expiry = 0, onChange = null, watching = null, notified = false;
   const caches = new Map(), jobs = new Map(), observers = [], sheets = new Map();
   let returnHost = null, savedScroll = null, painted = null;
   // Prefer scheduler continuations: chained timers are throttled in background tabs.
@@ -23,8 +25,13 @@
   function invalidate(records) {
     if (records?.every(r => ownUI(r.target) || (r.type === 'childList' &&
         [...r.addedNodes, ...r.removedNodes].every(ownUI)))) return;
-    const notify = Boolean(index || caches.size);
-    revision++; index = null; caches.clear(); clearPaint(); if (notify) onChange?.();
+    const had = Boolean(index || caches.size);
+    revision++; index = null; caches.clear(); clearPaint();
+    if (had) onChange?.();
+    if (watching && !notified) {
+      notified = true;
+      void chrome.runtime.sendMessage({ type: 'SONAR_INVALIDATED', ...watching }).catch(() => {});
+    }
   }
   function observe(roots, reset = false) {
     if (reset) observers.splice(0).forEach(o => o.disconnect());
@@ -171,23 +178,7 @@
     };
     clearTimeout(expiry); expiry = setTimeout(releaseAll, 15 * 60_000);
     try {
-      const rankedQuery = core.ranked(query, mode), compiled = rankedQuery ? { mode: 'p' } : core.compile(query, mode);
-      flushMutations();
-      if (refresh) { revision++; index = null; caches.clear(); clearPaint(); }
-      check();
-      if (!index || index.url !== location.href) {
-        if (!indexing || indexing.version !== revision) {
-          const work = { version: revision };
-          work.promise = buildIndex().finally(() => { if (indexing === work) indexing = null; });
-          indexing = work;
-        }
-        const ready = await indexing.promise;
-        check();
-        if (ready.version !== revision) throw new Error('Page changed; refresh the search.');
-        index = ready;
-      }
-      const snapshot = index;
-      if (rankedQuery) return await rankSearch(snapshot, query, ticket, check);
+      const compiled = core.compile(query, mode), snapshot = await ensureIndex(check, refresh);
       const found = [];
       let limited = snapshot.limited, hitCount = 0, sliceEnd = performance.now() + 8;
       outer: for (const paragraph of snapshot.paragraphs) {
@@ -215,19 +206,60 @@
       if (jobs.get(ticket) === job) jobs.delete(ticket);
     }
   }
+  async function ensureIndex(check, refresh = false) {
+    flushMutations();
+    if (refresh) { revision++; index = null; caches.clear(); clearPaint(); }
+    check();
+    if (!index || index.url !== location.href) {
+      if (!indexing || indexing.version !== revision) {
+        const work = { version: revision };
+        work.promise = buildIndex().finally(() => { if (indexing === work) indexing = null; });
+        indexing = work;
+      }
+      const ready = await indexing.promise;
+      check();
+      if (ready.version !== revision) throw new Error('Page changed; refresh the search.');
+      index = ready;
+    }
+    return index;
+  }
+  // Work outside a search (panel reads, ranked handles) keeps DOM reads alive.
+  async function withJob(task, ms = 8000) {
+    const job = { cancelled: false, deadline: Date.now() + ms }, key = Symbol('job');
+    job.abort = () => { job.cancelled = true; };
+    jobs.set(key, job);
+    clearTimeout(expiry); expiry = setTimeout(releaseAll, 15 * 60_000);
+    try { return await task(() => { if (job.cancelled || Date.now() > job.deadline) throw new Error('Search cancelled or timed out.'); }); }
+    finally { jobs.delete(key); }
+  }
+  // The observed paragraph number around a text node, for example `para 12`.
+  function locatorOf(node) {
+    const container = node?.parentElement?.closest('p, li, [role="paragraph"]');
+    const marker = container?.querySelector('a[name^="par"], a[id^="par"], [id^="PARA_"]');
+    const number = /^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '');
+    return number ? `para ${number[1]}` : '';
+  }
+  // Every paragraph's text for the side panel's own ranked index, joined by
+  // newlines (units never contain one). The revision names the exact text, so an
+  // unchanged page answers `same` without sending it. The page then drops its
+  // index: the panel holds the only copy, and a jump or copy re-reads the page.
+  function units({ known = '', workspace, deadline = Date.now() + 8000 }) {
+    // Watch first: a page that changes while it is read says so, and is read again.
+    watching = { ...watching, workspace }; notified = false;
+    return withJob(async check => {
+      const snapshot = await ensureIndex(check), texts = snapshot.paragraphs.map(p => p.text), text = texts.join('\n');
+      const reply = { url: location.href, title: document.title, revision: `${texts.length}:${core.hash(text)}` };
+      if (!caches.size && index === snapshot) index = null;
+      if (known === reply.revision) return { ...reply, same: true };
+      return { ...reply, text, locators: snapshot.paragraphs.map(p => locatorOf(p.parts[0]?.node)), characters: snapshot.characters, limited: snapshot.limited };
+    }, Math.max(1, deadline - Date.now()));
+  }
   // One result: absolute hit ranges in the paragraph, a 460-character preview
   // starting 90 characters before `anchor`, and the observed paragraph number.
   function passageResult(paragraph, unit, hits, anchor = hits[0].start) {
     const first = rangeFor(paragraph, hits[0].start, hits[0].end);
     if (!first) return null;
-    const start = Math.max(unit.start, anchor - 90), end = Math.min(unit.end, start + 460);
-    const container = first.startContainer.parentElement?.closest('p, li, [role="paragraph"]');
-    const marker = container?.querySelector('a[name^="par"], a[id^="par"], [id^="PARA_"]');
-    const number = /^(?:par(?:ag)?|PARA_)(\d+)/i.exec(marker?.getAttribute('name') || marker?.id || '');
-    return { paragraph, unit, hits, preview: paragraph.text.slice(start, end), leading: start > unit.start, trailing: end < unit.end,
-      locator: number ? `para ${number[1]}` : '',
-      marks: hits.map(h => ({ start: h.start - start, end: Math.min(end, h.end) - start }))
-        .filter(h => h.start >= 0 && h.start < end - start).slice(0, 50) };
+    return { paragraph, unit, hits, locator: locatorOf(first.startContainer), ...core.excerpt(paragraph.text, hits, anchor, unit.start, unit.end) };
   }
   function publish(snapshot, ticket, check, found, limited, extra = {}) {
     check();
@@ -238,130 +270,39 @@
       index: i, preview: r.preview, leading: r.leading, trailing: r.trailing, marks: r.marks, locator: r.locator, ...r.stats
     })) };
   }
-  // Term statistics for ranked mode, built once per page revision (the index is
-  // discarded on any page change) and shared by overlapping searches.
-  async function termIndex(snapshot) {
-    if (snapshot.terms) return snapshot.terms;
-    snapshot.termsBuilding ||= (async () => {
-      const paragraphs = snapshot.paragraphs, count = paragraphs.length, forms = new Map(), ids = new Map(), tally = new Map();
-      const lengths = new Uint32Array(count), starts = new Int32Array(count + 1);
-      let pairs = new Int32Array(1 << 16), used = 0, dfs = new Int32Array(4096), total = 0, sliceEnd = performance.now() + 8;
-      const visit = word => {
-        let id = forms.get(word);
-        if (id === undefined) {
-          const term = core.fold(word);
-          id = ids.get(term);
-          if (id === undefined) { id = ids.size; ids.set(term, id); }
-          if (forms.size < 500_000) forms.set(word, id);
-        }
-        tally.set(id, (tally.get(id) || 0) + 1);
-      };
-      for (let p = 0; p < count; p++) {
-        if (performance.now() > sliceEnd) {
-          await pause();
-          if (snapshot.version !== revision || ![...jobs.values()].some(job => !job.cancelled && Date.now() <= job.deadline)) throw new Error('Search cancelled or timed out.');
-          sliceEnd = performance.now() + 8;
-        }
-        tally.clear();
-        core.eachWord(paragraphs[p].text, visit);
-        let length = 0;
-        if (used + tally.size * 2 > pairs.length) { const grown = new Int32Array(Math.max(pairs.length * 2, used + tally.size * 2)); grown.set(pairs); pairs = grown; }
-        if (ids.size > dfs.length) { const grown = new Int32Array(Math.max(dfs.length * 2, ids.size)); grown.set(dfs); dfs = grown; }
-        starts[p] = used;
-        for (const [id, tf] of tally) { pairs[used++] = id; pairs[used++] = tf; dfs[id]++; length += tf; }
-        lengths[p] = length; total += length;
-      }
-      starts[count] = used;
-      // Postings by term, units ascending: offsets[id]..offsets[id + 1].
-      const size = ids.size, offsets = new Int32Array(size + 1);
-      for (let t = 0; t < size; t++) offsets[t + 1] = offsets[t] + dfs[t];
-      const units = new Int32Array(offsets[size]), tfs = new Uint16Array(offsets[size]), fill = offsets.slice(0, size);
-      for (let p = 0; p < count; p++) {
-        for (let at = starts[p]; at < starts[p + 1]; at += 2) {
-          const slot = fill[pairs[at]]++; units[slot] = p; tfs[slot] = Math.min(pairs[at + 1], 65535);
-        }
-      }
-      snapshot.terms = { forms, ids, offsets, units, tfs, lengths, total };
-      return snapshot.terms;
-    })().finally(() => { snapshot.termsBuilding = null; });
-    return snapshot.termsBuilding;
-  }
-  // Page-local BM25 picks candidates; the broker rescores them with statistics
-  // from every searched tab. Each candidate carries its term frequencies/length.
-  async function rankSearch(snapshot, query, ticket, check) {
-    const stats = await termIndex(snapshot);
-    check();
-    const { terms, marked } = core.rankTerms(query), count = snapshot.paragraphs.length;
-    const termIds = terms.map(term => stats.ids.get(term));
-    const dfs = termIds.map(id => id === undefined ? 0 : stats.offsets[id + 1] - stats.offsets[id]);
-    const scores = new Float64Array(count), touched = [], average = stats.total / Math.max(1, count);
-    termIds.forEach((id, i) => {
-      if (id === undefined) return;
-      const one = [0], df = [dfs[i]];
-      for (let at = stats.offsets[id]; at < stats.offsets[id + 1]; at++) {
-        const unit = stats.units[at];
-        if (!scores[unit]) touched.push(unit);
-        one[0] = stats.tfs[at];
-        scores[unit] += core.bm25(one, stats.lengths[unit], df, count, average);
-      }
-    });
-    touched.sort((a, b) => scores[b] - scores[a] || a - b);
-    const wanted = new Set(termIds.filter((id, i) => id !== undefined && marked.has(terms[i]))), any = new Set(termIds.filter(id => id !== undefined));
-    const found = [];
-    for (const p of touched) {
-      if (found.length >= RANK_CANDIDATES) break;
-      const paragraph = snapshot.paragraphs[p], unit = { start: 0, end: paragraph.text.length };
-      let hits = [], loose = [];
-      core.eachWord(paragraph.text, (word, at) => {
-        if (hits.length >= 100) return;
-        const id = stats.forms.get(word) ?? stats.ids.get(core.fold(word));
-        if (wanted.has(id)) hits.push({ start: at, end: at + word.length });
-        else if (!hits.length && loose.length < 100 && any.has(id)) loose.push({ start: at, end: at + word.length });
-      });
-      if (!hits.length) hits = loose;
-      if (!hits.length) continue;
-      // Preview where the most distinct query words fall within 460 characters.
-      let anchor = hits[0].start, best = 0;
-      for (const hit of hits) {
-        const from = hit.start - 90, words = new Set();
-        for (const other of hits) if (other.start >= from && other.end <= from + 460) words.add(paragraph.text.slice(other.start, other.end).toLowerCase());
-        if (words.size > best) { best = words.size; anchor = hit.start; }
-      }
-      const result = passageResult(paragraph, unit, hits, anchor);
-      if (!result) continue;
-      result.stats = { length: stats.lengths[p], tfs: termIds.map(id => id === undefined ? 0 : termFrequency(stats, id, p)) };
-      found.push(result);
-    }
-    return publish(snapshot, ticket, check, found, snapshot.limited, { ranked: { units: count, length: stats.total, dfs } });
-  }
-  function termFrequency(stats, id, unit) {
-    let lo = stats.offsets[id], hi = stats.offsets[id + 1] - 1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >>> 1, value = stats.units[mid];
-      if (value === unit) return stats.tfs[mid];
-      if (value < unit) lo = mid + 1; else hi = mid - 1;
-    }
-    return 0;
-  }
-  // Whole passage text (bounded) of issued results, for on-device reranking.
-  function texts(ticket, positions) {
-    const cache = caches.get(ticket);
-    return positions.map(position => {
-      const result = cache?.version === revision ? cache.results[position] : null;
-      return result ? result.paragraph.text.slice(result.unit.start, result.unit.end).replace(/\s+/g, ' ').trim().slice(0, 3000) : null;
-    });
-  }
-  function selected(ticket, position) {
+  // `key` is an exact search's result position, or a ranked result from the
+  // panel's index: its unit must still hold the exact text that was ranked (same
+  // hash). Its hits are recomputed here, as are those of its siblings in this
+  // tab for the background highlight.
+  async function selected(ticket, key) {
     flushMutations();
-    const cache = caches.get(ticket), result = cache?.results[position];
+    let cache = caches.get(ticket), result;
+    if (typeof key === 'number') result = cache?.results[key];
+    else {
+      if (!cache?.units || cache.version !== revision || cache.url !== location.href) {
+        const snapshot = await withJob(check => ensureIndex(check)), { terms, marked } = core.rankTerms(key.query), words = new Set(terms);
+        cache = { version: revision, url: location.href, units: new Map(), results: [] };
+        for (const { unit, hash } of [key, ...(key.others || [])]) {
+          const paragraph = snapshot.paragraphs[unit];
+          if (!paragraph || core.hash(paragraph.text) !== hash) continue;
+          const hits = core.rankHits(paragraph.text, words, marked), found = hits.length && passageResult(paragraph, { start: 0, end: paragraph.text.length }, hits);
+          if (found) { cache.units.set(unit, found); cache.results.push(found); }
+        }
+        // The resolved passages keep what they need; drop the rest of the page text.
+        if (!caches.size && index === snapshot) index = null;
+        caches.set(ticket, cache);
+        while (caches.size > 3) caches.delete(caches.keys().next().value);
+      }
+      result = cache.units.get(key.unit);
+    }
     if (!result || cache.version !== revision || cache.url !== location.href || !rangesFor(result).length || result.ranges.some((r, i) =>
       !r.startContainer.isConnected || !r.endContainer.isConnected || r.toString() !== result.expected[i])) {
       throw new Error('This passage changed or expired. Refresh the search before opening it.');
     }
     return { cache, result };
   }
-  function preview(ticket, position, scroll = false) {
-    const { cache, result } = selected(ticket, position);
+  async function preview(ticket, position, scroll = false) {
+    const { cache, result } = await selected(ticket, position);
     function ensureSheet(root) {
       if (sheets.has(root)) return;
       const sheet = new CSSStyleSheet();
@@ -401,8 +342,8 @@
     return true;
   }
   // The whole matching paragraph/sentence, trimmed, for copying and linking.
-  function passage(ticket, position) {
-    const { result } = selected(ticket, position), text = result.paragraph.text;
+  async function passage(ticket, position) {
+    const { result } = await selected(ticket, position), text = result.paragraph.text;
     let start = result.unit.start, end = result.unit.end;
     while (start < end && /\s/.test(text[start])) start++;
     while (end > start && /\s/.test(text[end - 1])) end--;
@@ -427,8 +368,8 @@
     for (const { node, x, y } of savedScroll || []) node.scrollTo({ left: x, top: y, behavior: 'instant' });
     savedScroll = null; returnHost?.remove(); returnHost = null; clearPaint();
   }
-  function reveal(ticket, position, origin) {
-    preview(ticket, position, true);
+  async function reveal(ticket, position, origin) {
+    await preview(ticket, position, true);
     returnHost?.remove();
     returnHost = document.createElement('div'); returnHost.setAttribute('data-pinpointer-sonar', '');
     returnHost.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647';
@@ -453,9 +394,10 @@
     if (!keepIndex && !caches.size && ![...jobs.values()].some(job => !job.cancelled)) releaseAll();
   }
   function releaseAll() {
-    revision++; jobs.forEach(job => job.abort()); caches.clear(); index = null; savedScroll = null; clearTimeout(expiry);
+    revision++; jobs.forEach(job => job.abort()); caches.clear(); index = null; savedScroll = null; clearTimeout(expiry); watching = null;
     observers.splice(0).forEach(o => o.disconnect()); clearPaint(); returnHost?.remove(); returnHost = null;
   }
   window.addEventListener('pagehide', releaseAll);
-  global.LegalPinpointerSearchPage = { search, texts, preview, reveal, passage, plainCopy, restore, release, releaseAll, clearPaint, setOnChange(fn) { onChange = fn; } };
+  global.LegalPinpointerSearchPage = { search, units, preview, reveal, passage, plainCopy, restore, release, releaseAll, clearPaint, setOnChange(fn) { onChange = fn; },
+    watch(ticket) { watching = { ...watching, ticket }; notified = false; } };
 })(globalThis);

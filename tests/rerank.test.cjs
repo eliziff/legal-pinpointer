@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('../find-core.js');
 const { createBroker } = require('../find-worker.js');
+const { createIndex } = require('../sonar-index.js');
 const { createTokenizer, looksFrench } = require('../rerank-core.js');
 
 test('plain words rank; quotes, operators, prefixes, parentheses and /s stay exact', () => {
@@ -25,41 +26,82 @@ test('folding lowers case, drops accents and light English/French inflections', 
   assert.deepEqual([...marked], ['duty', 'employer']);
 });
 
-test('the broker ranks every tab with corpus-wide BM25 and hands out passage text for reranking', async () => {
-  const tabs = [1, 2].map(id => ({ id, windowId: 10, groupId: -1, index: id, url: `https://site${id}.test/`, title: `Page ${id}`, incognito: false }));
-  const storage = {};
-  // Terms: [waiver, privilege]. Tab 1 is all about waiver, so waiver is common
-  // corpus-wide and the passage with the rare term, privilege, must rank first.
-  const pages = {
-    1: { ranked: { units: 50, length: 500, dfs: [40, 0] }, results: [{ index: 0, tfs: [2, 0], length: 10 }, { index: 1, tfs: [1, 0], length: 10 }] },
-    2: { ranked: { units: 50, length: 500, dfs: [1, 1] }, results: [{ index: 0, tfs: [0, 1], length: 10 }] }
-  };
+test('words are scanned exactly like the Unicode word pattern', () => {
+  const text = 'L’Employeur a renoncé — s. 7(1)(b) Charter; 中文 é̀x 𝐀bc 😀word \uD800x \uDC00y naïve café_x 12ab\uD835';
+  const words = []; core.eachWord(text, (word, at) => words.push([word, at]));
+  assert.deepEqual(words, [...text.matchAll(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu)].map(m => [m[0], m.index]));
+});
+
+test('the panel index ranks the tabs in scope with corpus-wide BM25, incrementally', async () => {
+  const index = createIndex(core);
+  const page = (tabId, units, locators = units.map(() => '')) => ({ tabId, documentId: `doc${tabId}`, windowId: 10, url: `https://site${tabId}.test/`,
+    title: `Page ${tabId}`, revision: `r${tabId}`, text: units.join('\n'), locators });
+  // Tab 1 is all about waiver, so waiver is common and the passage with the rare
+  // term, privilege, must rank first although it says waiver only once.
+  await index.put(page(1, ['Waiver waiver of rights.', 'A waiver was given.', 'Nothing here.'], ['para 1', '', 'para 3']));
+  await index.put(page(2, ['The privilege and waiver.', 'Costs.']));
+  let found = index.search({ query: 'waiver and privilege', tabIds: [1, 2], depth: 2 });
+  assert.deepEqual(found.results.map(r => [r.tabId, r.unit]), [[2, 0], [1, 0], [1, 1]]);
+  assert.deepEqual([found.searched, found.limited], [2, false]);
+  const top = found.results[0];
+  assert.deepEqual([top.preview, top.hash, top.documentId, top.url], ['The privilege and waiver.', core.hash('The privilege and waiver.'), 'doc2', 'https://site2.test/']);
+  assert.deepEqual(top.marks, [{ start: 4, end: 13 }, { start: 18, end: 24 }], 'marked words only: "and" is not highlighted');
+  assert.equal(found.results[1].locator, 'para 1');
+  assert.deepEqual(found.passages, [{ id: 0, key: top.hash, text: 'The privilege and waiver.' }, { id: 1, key: found.results[1].hash, text: 'Waiver waiver of rights.' }]);
+  // Statistics come from the tabs in scope only.
+  assert.deepEqual(index.search({ query: 'waiver and privilege', tabIds: [1] }).results.map(r => r.unit), [0, 1]);
+  // Equal scores keep tab order, then document order.
+  await index.put(page(3, ['Estoppel applies.'])); await index.put(page(4, ['Estoppel applies.']));
+  assert.deepEqual(index.search({ query: 'estoppel', tabIds: [4, 3] }).results.map(r => r.tabId), [4, 3]);
+  // The reranker reads a window around the densest query words.
+  const long = `${'Background facts about the contract and the parties. '.repeat(40)}Here the insurer argued waiver of privilege by disclosure. ${'Costs follow the event in the ordinary course. '.repeat(40)}`;
+  await index.put(page(5, [long]));
+  const [window] = index.search({ query: 'privilege waiver disclosure', tabIds: [5], depth: 1, window: 300 }).passages;
+  assert.ok(window.text.length <= 300 && window.text.includes('waiver of privilege by disclosure'), window.text);
+  // Replacing or dropping one tab changes only that tab.
+  await index.put(page(2, ['Costs only.'])); index.drop(1);
+  assert.deepEqual(index.search({ query: 'waiver privilege', tabIds: [1, 2] }).results, []);
+  assert.equal(index.meta({ tabId: 2, documentId: 'doc2b', windowId: 11, url: 'https://site2.test/#x', title: 'Moved' }), true);
+  assert.equal(index.search({ query: 'costs', tabIds: [2] }).results[0].windowId, 11);
+});
+
+test('the broker reads tab text for the panel and issues ranked handles only for documents it read', async () => {
+  const tabs = [1, 2, 3].map(id => ({ id, windowId: 10, groupId: -1, index: id, url: id === 3 ? 'chrome://newtab/' : `https://site${id}.test/`, title: `Page ${id}`, incognito: false, status: 'complete' }));
+  const storage = {}, calls = [];
   const api = {
     runtime: { id: 'extension', getURL: p => `chrome-extension://extension/${p}` },
     storage: { session: { async get(key) { return structuredClone(key ? { [key]: storage[key] } : storage); },
       async set(values) { Object.assign(storage, structuredClone(values)); }, async remove(key) { delete storage[key]; } } },
-    tabs: { async get(id) { return { ...tabs.find(t => t.id === id) }; }, async query() { return tabs; } },
+    tabs: { async get(id) { const tab = tabs.find(t => t.id === id); if (!tab) throw new Error('No tab'); return { ...tab }; }, async query() { return tabs; },
+      async update(id) { return { ...tabs.find(t => t.id === id) }; } },
+    windows: { async update() {} },
     scripting: { async executeScript({ target, args, files }) {
-      if (files || !args) return [{ documentId: `doc${target.tabId}`, result: true }];
-      const [method, values] = args, page = pages[target.tabId];
-      const value = method === 'search' ? { url: `https://site${target.tabId}.test/`, title: `Page ${target.tabId}`, ranked: page.ranked,
-        results: page.results.map(r => ({ ...r, preview: `passage ${target.tabId}.${r.index}`, marks: [] })) }
-        : method === 'texts' ? values[1].map(i => `text ${target.tabId}.${i}`) : true;
+      if (files || typeof args?.[0] !== 'string') return [{ documentId: `doc${target.tabId}`, result: true }];
+      const [method, values] = args;
+      calls.push([method, target.tabId, values]);
+      const value = method === 'units' ? { url: `https://site${target.tabId}.test/`, title: `Page ${target.tabId}`, revision: 'r1',
+        ...(values[0].known === 'r1' ? { same: true } : { text: 'Waiver of privilege.\nCosts.', locators: ['para 1', ''] }) } : true;
       return [{ documentId: `doc${target.tabId}`, result: { ok: true, value } }];
     } }
   };
-  const broker = createBroker(api), sender = { id: 'extension', tab: tabs[0], frameId: 0, documentId: 'doc1', url: tabs[0].url };
-  const reply = await broker.handle({ type: 'SONAR_SEARCH', query: 'waiver privilege', mode: 'p', scope: 'all', sequence: 1 }, sender);
-  assert.equal(reply.ranked, true);
-  assert.deepEqual([reply.searched, reply.total], [2, 2], 'ranked tabs count as searched');
-  assert.deepEqual(reply.results.map(r => r.preview), ['passage 2.0', 'passage 1.0', 'passage 1.1']);
-  assert.equal(reply.results[0].tfs, undefined, 'term statistics stay in the broker');
-  const { texts } = await broker.handle({ type: 'SONAR_TEXTS', session: reply.session, ticket: reply.ticket, ids: [2, 0] }, sender);
-  assert.deepEqual(texts, ['text 1.1', 'text 2.0']);
-  await assert.rejects(broker.handle({ type: 'SONAR_TEXTS', session: reply.session, ticket: 'forged', ids: [0] }, sender), /expired/);
-  pages[2].ranked.dfs = [1];
-  await assert.rejects(broker.handle({ type: 'SONAR_SEARCH', query: 'waiver privilege', mode: 'p', scope: 'current', sequence: 2 }, { ...sender, tab: tabs[1], documentId: 'doc2', url: tabs[1].url })
-    .then(r => { if (r.skipped.length) throw new Error(r.skipped[0].reason); }), /invalid term statistics/);
+  const broker = createBroker(api), workspace = '00000000-0000-4000-8000-000000000001';
+  const panel = { id: 'extension', url: 'chrome-extension://extension/sonar.html' }, ask = message => broker.handle({ workspace, incognito: false, ...message }, panel);
+  const { pages } = await ask({ type: 'SONAR_UNITS', tabIds: [1, 2, 3], known: {} });
+  assert.deepEqual(pages.map(p => p.text ?? p.skipped), ['Waiver of privilege.\nCosts.', 'Waiver of privilege.\nCosts.', 'Browser-restricted or unsupported page']);
+  assert.deepEqual(pages[0].locators, ['para 1', '']);
+  assert.equal(calls[0][2][0].workspace, workspace, 'the page reports its changes to this workspace');
+  assert.equal((await ask({ type: 'SONAR_UNITS', tabIds: [1], known: { 1: 'r1' } })).pages[0].same, true, 'an unchanged page sends no text');
+  await assert.rejects(broker.handle({ type: 'SONAR_UNITS', tabIds: [1], known: {} }, { id: 'extension', tab: tabs[0], frameId: 0, documentId: 'doc1', url: tabs[0].url }), /Invalid read request/);
+  const results = [{ tabId: 2, documentId: 'doc2', unit: 0, hash: 7 }, { tabId: 2, documentId: 'doc2', unit: 1, hash: 8 }];
+  await assert.rejects(ask({ type: 'SONAR_ISSUE', sequence: 1, scope: 'all', originTabId: 1, query: 'waiver', results: [{ ...results[0], documentId: 'forged' }] }), /expired/);
+  const issued = await ask({ type: 'SONAR_ISSUE', sequence: 2, scope: 'all', originTabId: 1, query: 'waiver privilege', results });
+  await ask({ type: 'SONAR_GO', session: issued.session, ticket: issued.ticket, id: 1 });
+  assert.deepEqual(calls.at(-1), ['preview', 2, [issued.ticket, { query: 'waiver privilege', unit: 1, hash: 8, others: [{ unit: 0, hash: 7 }] }, true]]);
+  assert.equal((await ask({ type: 'SONAR_ISSUE', sequence: 1, scope: 'all', originTabId: 1, query: 'old', results })).stale, true);
+  // Close releases every document the panel read.
+  await ask({ type: 'SONAR_CLOSE', sequence: 3 });
+  assert.deepEqual(calls.filter(([method]) => method === 'release').map(([, tabId]) => tabId).sort(), [1, 2]);
+  assert.equal(Object.keys(storage).some(key => key.includes('units:')), false);
 });
 
 test('WordPiece splits like BERT uncased and marks the passage segment', () => {
