@@ -87,16 +87,20 @@ test('persistent workspace navigates real ranges across documents with stable la
     const geometry=()=>p.evaluate(()=>['query','list-viewport','notice'].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {id,x:r.x,y:r.y,height:r.height}}));
     const opened=()=>calls.filter(([type,,method])=>type==='inject'&&method==='preview').length;
     const baseGeometry=await geometry();
-    await fill('privileg* waiv*');await rows(2);
-    await p.locator('#query').press('Tab');await rows(1);
-    assert.equal(await p.locator('#mode').textContent(),'/s');
-    await p.locator('#query').press('Shift+Tab');await rows(3);
-    assert.equal(await p.locator('#scope').textContent(),'All tabs');
+    // All tabs by default; the scope buttons narrow it. /s is written into the query.
+    const scope=()=>p.locator('#scope [aria-pressed=true]').textContent();
+    await fill('privileg* /s waiv*');await rows(3);
+    assert.equal(await scope(),'All tabs');
     assert.equal(await p.locator('#issues').isHidden(),true,'A restricted new tab is not reported as skipped');
-    await p.locator('#query').press('Shift+Tab');await rows(2);
-    assert.equal(await p.locator('#scope').textContent(),'Current tab group');
-    await p.locator('#query').press('Shift+Tab');await rows(1);
-    await p.locator('#query').press('Shift+Tab');await rows(3);
+    await p.getByRole('button',{name:'This group',exact:true}).click();await rows(2);
+    await p.getByRole('button',{name:'This tab',exact:true}).click();await rows(1);
+    await p.getByRole('button',{name:'All tabs',exact:true}).click();await rows(3);
+    // Tab goes from the search box to the results and Shift+Tab back; neither changes the scope.
+    await p.locator('#query').press('Tab');
+    await p.waitForFunction(()=>document.activeElement.id==='list-viewport');
+    await p.keyboard.press('Shift+Tab');
+    assert.equal(await p.evaluate(()=>document.activeElement.id),'query');
+    assert.equal(await scope(),'All tabs');
     await p.evaluate(()=>globalThis.__inputBefore=document.getElementById('query'));
     const sourceBefore=await other.locator('body').innerHTML();
     // Enter in the search box focuses the first result; clicking a row selects it. Neither opens anything.
@@ -111,7 +115,7 @@ test('persistent workspace navigates real ranges across documents with stable la
     await other.waitForFunction(()=>CSS.highlights.has('legal-pinpointer-sonar-active'));
     assert.equal(active,2);assert.ok(await other.evaluate(()=>scrollY)>0);
     assert.equal(await other.evaluate(()=>[...CSS.highlights.get('legal-pinpointer-sonar-active')].map(r=>r.toString()).join('|')),'Privilege|waiver');
-    assert.equal(await p.locator('#query').inputValue(),'privileg* waiv*');
+    assert.equal(await p.locator('#query').inputValue(),'privileg* /s waiv*');
     assert.equal(await p.evaluate(()=>__inputBefore===document.getElementById('query')),true);
     assert.deepEqual(await geometry(),baseGeometry,'Search and list geometry never move when results change');
     assert.equal(await other.locator('body').innerHTML(),sourceBefore);
@@ -122,36 +126,38 @@ test('persistent workspace navigates real ranges across documents with stable la
     await until(()=>active===3&&storage['sonar-launch:11']?.handoff,'Open activates the other window\'s tab and hands off the search');
     assert.ok(calls.some(([type,o])=>type==='panel'&&o.windowId===11));
     const second=await newPanel(11);
-    await second.waitForFunction(()=>document.getElementById('query').value==='privileg* waiv*');
+    await second.waitForFunction(()=>document.getElementById('query').value==='privileg* /s waiv*');
     assert.equal(await second.locator('.result-row[aria-selected=true]').getAttribute('data-result'),'2');
-    assert.equal(await second.locator('#scope').textContent(),'All tabs');
+    assert.equal(await second.locator('#scope [aria-pressed=true]').textContent(),'All tabs');
     // Source invalidation is observed, not silently resolved against changed words.
     await other.locator('#destination').evaluate(el=>el.firstChild.textContent='Changed.');
     await p.locator('.result-row[data-result="1"] .result-open').click();
     await p.waitForFunction(()=>document.getElementById('notice').classList.contains('error'));
     assert.equal(active,3,'Stale source must not activate a different passage');
+    const stored=Object.entries(storage).find(([k,v])=>k.startsWith('pinpointer-sonar:')&&v.results?.length);
+    const workspace=stored[0].split('workspace:')[1];
     // Alt+Shift+S command route takes no injection path, even from the restricted new tab.
     const beforeCalls=calls.filter(([type])=>type==='inject').length;
     await launcher.launch(tabs[3],'canlii');
     await p.waitForFunction(()=>document.body.dataset.route==='canlii');
     assert.equal(calls.filter(([type])=>type==='inject').length,beforeCalls);
-    for(const id of ['mode','scope-row','origin','list-viewport'])assert.equal(await p.locator(`#${id}`).isVisible(),false,`${id} is hidden on the CanLII route`);
+    for(const id of ['scope-row','origin','list-viewport'])assert.equal(await p.locator(`#${id}`).isVisible(),false,`${id} is hidden on the CanLII route`);
     const q='"duty of care" /p breach & été';
     await fill(q);assert.equal(lastExternal,null,'Typing cannot submit a remote search');
     await p.locator('#query').press('Enter');
     await until(()=>lastExternal,'Enter submits the CanLII search');
+    await p.waitForFunction(()=>globalThis.__closed===true);
+    await p.evaluate(()=>{delete globalThis.__closed});
     assert.equal(lastExternal.url,`https://www.canlii.org/en/#search/text=${encodeURIComponent(q)}`);
     await p.locator('#tabs-route').click();
-    assert.equal(await p.locator('#query').inputValue(),'privileg* waiv*','CanLII draft must not overwrite the local query');
-    assert.equal(await p.locator('#scope').textContent(),'All tabs');
+    assert.equal(await p.locator('#query').inputValue(),'privileg* /s waiv*','CanLII draft must not overwrite the local query');
+    assert.equal(await scope(),'All tabs');
     assert.deepEqual(await geometry(),baseGeometry);
     // Render stress: 1,000 results, a long excerpt, stable header, bounded live rows.
-    const stored=Object.entries(storage).find(([k,v])=>k.startsWith('pinpointer-sonar:')&&v.results?.length);
-    const workspace=stored[0].split('workspace:')[1];
     const sample={tabId:1,windowId:10,documentId:'doc1',url:tabs[0].url,title:tabs[0].title,preview:'The privilege remains unless waiver is established. '.repeat(8),marks:[{start:4,end:13}],locator:'para 42'};
     const items=Array.from({length:1000},(_,i)=>({...sample,index:i,locator:`para ${i+1}`}));
-    const fake={session:stored[0],ticket:stored[1].ticket,results:items,mode:'s',searched:5,total:5,skipped:[],limited:false};
-    await api.storage.session.set({'sonar-launch:10':{nonce:'render-test',created:Date.now(),route:'tabs',origin:tabs[0],handoff:{workspace,origin:tabs[0],query:'privileg* waiv*',mode:'s',scope:'all',sequence:Date.now(),result:fake,current:999,scrollTop:ROW_HEIGHT*998}}});
+    const fake={session:stored[0],ticket:stored[1].ticket,results:items,searched:5,total:5,skipped:[],limited:false};
+    await api.storage.session.set({'sonar-launch:10':{nonce:'render-test',created:Date.now(),route:'tabs',origin:tabs[0],handoff:{workspace,origin:tabs[0],query:'privileg* /s waiv*',scope:'all',sequence:Date.now(),result:fake,current:999,scrollTop:ROW_HEIGHT*998}}});
     await p.waitForFunction(()=>document.querySelector('.result-row[data-result="999"][aria-selected=true]'));
     const mounted=await p.locator('.result-row').count();
     assert.ok(mounted<=await p.evaluate(h=>Math.ceil(document.getElementById('list-viewport').clientHeight/h)+6,ROW_HEIGHT));
@@ -161,10 +167,8 @@ test('persistent workspace navigates real ranges across documents with stable la
     await p.setViewportSize({width:320,height:560});await p.waitForTimeout(80);
     assert.equal(await p.locator('.result-row').first().evaluate(el=>el.getBoundingClientRect().height),ROW_HEIGHT);
     assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-    // Escape clears the search and leaves the panel open.
-    await p.locator('#query').focus();await p.keyboard.press('Escape');await p.waitForFunction(()=>document.getElementById('query').value==='');
-    assert.equal(await p.locator('.result-row').count(),0);
-    assert.equal(await p.evaluate(()=>globalThis.__closed),undefined);
+    // Escape closes the panel.
+    await p.locator('#query').focus();await p.keyboard.press('Escape');await p.waitForFunction(()=>globalThis.__closed===true);
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({renderer:browser.version(),results:1000,mountedRows:mounted,layoutStable:true}));
   }finally{await browser.close()}

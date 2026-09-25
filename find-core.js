@@ -8,146 +8,195 @@
   const WORD = '[\\p{L}\\p{N}\\p{M}_]';
   const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  // CanLII's document-text grammar. A document is one page; its paragraphs are
+  // the passages shown. AND (or a space), NOT and a leading - apply to the whole
+  // page; /p, /s and /n pair terms in one paragraph, sentence or n-word window.
+  // Operators bind as on CanLII: OR, /n, /s, /p, NOT, then AND. Words and
+  // "phrases" match their variants (the fold ranked mode uses); EXACT(...) and
+  // truncation* match the letters given.
+  const ACCENTS = new Map();
+  for (const c of 'àáâãäåāăąçćĉċčèéêëēĕėęěìíîïĩīĭįñńņňòóôõöøōŏőùúûüũūŭůűųýÿŷœæ') {
+    const base = c.normalize('NFD')[0];
+    ACCENTS.set(base, (ACCENTS.get(base) || base) + c);
+  }
+  const loose = (text) => Array.from(text, c => ACCENTS.has(c) ? `[${ACCENTS.get(c)}]` : escape(c)).join('');
+
   function tokenize(query) {
     if (query.length > 1024) throw new Error('Keep the query under 1,024 characters.');
-    const tokens = [];
-    const pattern = /\s+|"[^"]*"|[()]|[^\s()"]+/gy;
-    let offset = 0;
-    while (offset < query.length) {
+    const tokens = [], pattern = /\s+|"[^"]*"|exact\([^)]*\)|[()]|-(?=["(])|[^\s()"]+/giy;
+    for (let offset = 0; offset < query.length;) {
       pattern.lastIndex = offset;
       const match = pattern.exec(query);
-      if (!match) throw new Error('Close the quotation mark.');
+      if (!match) throw new Error(/^exact\(/i.test(query.slice(offset)) ? 'Close the EXACT( parenthesis.' : 'Close the quotation mark.');
       offset = pattern.lastIndex;
-      const value = match[0];
+      let value = match[0];
       if (!value.trim()) continue;
-      const type = value[0] === '"' ? 'term'
-        : /^(?:AND|OR|NOT)$/i.test(value) ? value.toUpperCase()
-          : /^(?:\/p|\/s)$/i.test(value) ? 'scope'
-            : value === '(' || value === ')' ? value : 'term';
-      tokens.push({ type, value, start: match.index, end: offset });
+      if (value[0] === '-' && value.length > 1 && value !== '-') { tokens.push({ type: 'NEG' }); value = value.slice(1); }
+      const near = /^\/(\d{1,3}|s|p)$/i.exec(value);
+      tokens.push(value === '-' ? { type: 'NEG' } : value[0] === '"' ? { type: 'term', text: value.slice(1, -1), variants: true }
+        : /^exact\(/i.test(value) ? { type: 'term', text: value.slice(6, -1), exact: true }
+          : /^(?:and|or)$/i.test(value) ? { type: value.toUpperCase() } : value === 'NOT' ? { type: 'NOT' }
+            : near ? { type: 'NEAR', op: near[1].toLowerCase() } : value === '(' || value === ')' ? { type: value }
+              : { type: 'term', text: value, variants: true, bare: true });
     }
     if (tokens.length > 64) throw new Error('Use at most 64 query terms and operators.');
     return tokens;
   }
 
-  function compile(query, mode = 'p') {
-    const tokens = tokenize(String(query).replace(/[“”]/g, '"'));
-    const scopes = new Set(tokens.filter((token) => token.type === 'scope').map((token) => token.value.toLowerCase()[1]));
-    if (scopes.size > 1) throw new Error('Use one scope, /p or /s. Tab switches the whole query.');
-    mode = scopes.values().next().value || mode;
-    if (!['p', 's'].includes(mode)) throw new Error('Choose paragraph or sentence mode.');
-    let position = 0;
-    let positiveTerms = 0;
+  function term(token) {
+    const text = token.text.trim();
+    if (!text) throw new Error(token.exact ? 'Add text inside EXACT( ).' : 'Add text inside the quotation marks.');
+    if (token.bare && /^\//.test(text)) throw new Error('Use /p, /s or a number of words such as /5.');
+    const truncated = token.bare && text.endsWith('*'), body = truncated ? text.slice(0, -1) : text;
+    if (token.bare && (!body || body.includes('*'))) throw new Error('Use * only after a word, for example privileg*.');
+    const words = [];
+    const source = body.split(/(\s+)/u).map(piece => /^\s+$/u.test(piece) ? '\\s+' : piece.split(new RegExp(`(${WORD}+)`, 'u')).map((part, i) => {
+      if (!(i % 2)) return escape(part);
+      if (token.exact) return escape(part);
+      if (truncated) return loose(part.toLowerCase());
+      const folded = fold(part);
+      words.push(folded);
+      return `(${loose(folded.slice(0, Math.max(1, folded.length - 2)))}${WORD}*)`;
+    }).join('')).join('');
+    const begin = new RegExp(`^${WORD}`, 'u').test(body) ? `(?<!${WORD})` : '';
+    const end = truncated || new RegExp(`${WORD}$`, 'u').test(body) ? `(?!${WORD})` : '';
+    return { type: 'term', words, pattern: new RegExp(`${begin}${source}${truncated ? `${WORD}*` : ''}${end}`, 'giu') };
+  }
 
-    function primary(negated = false) {
+  function compile(query) {
+    const tokens = tokenize(String(query).replace(/[“”]/g, '"'));
+    let position = 0;
+    const peek = () => tokens[position]?.type;
+    function primary() {
       const token = tokens[position++];
       if (!token) throw new Error('Add a term after the operator.');
-      if (token.type === 'NOT') return { type: 'NOT', child: primary(!negated) };
+      if (token.type === 'NOT' || token.type === 'NEG') return { type: 'NOT', child: primary() };
       if (token.type === '(') {
-        const node = expression(negated);
+        const node = conjunction();
         if (tokens[position++]?.type !== ')') throw new Error('Close the parenthesis.');
         return node;
       }
       if (token.type !== 'term') throw new Error('Expected a word or a quoted phrase.');
-      const quoted = token.value[0] === '"';
-      let term = quoted ? token.value.slice(1, -1).trim() : token.value;
-      if (!term) throw new Error('Add text inside the quotation marks.');
-      if (!quoted && /^\//.test(term)) throw new Error('Only /p and /s proximity operators are supported.');
-      const wildcard = !quoted && term.endsWith('*');
-      if (wildcard) term = term.slice(0, -1);
-      if (!quoted && (!term || term.includes('*'))) throw new Error('Use * only after a word, for example privileg*.');
-      if (!negated) positiveTerms += 1;
-      const begin = /^[\p{L}\p{N}\p{M}_]/u.test(term) ? `(?<!${WORD})` : '';
-      const end = wildcard || /[\p{L}\p{N}\p{M}_]$/u.test(term) ? `(?!${WORD})` : '';
-      const source = term.split(/\s+/u).map(escape).join('\\s+');
-      return { type: 'term', pattern: new RegExp(`${begin}${source}${wildcard ? `${WORD}*` : ''}${end}`, 'giu') };
+      return term(token);
     }
-
-    function conjunction(negated) {
-      let node = primary(negated);
-      while (position < tokens.length && !['OR', ')'].includes(tokens[position].type)) {
-        if (['AND', 'scope'].includes(tokens[position].type)) position += 1;
-        node = { type: 'AND', left: node, right: primary(negated) };
+    const level = (next, accepts, build) => () => {
+      let node = next();
+      while (accepts(tokens[position])) { const token = tokens[position++]; node = build(node, next(), token); }
+      return node;
+    };
+    const or = level(primary, t => t?.type === 'OR', (left, right) => ({ type: 'OR', left, right }));
+    const near = op => (next) => level(next, t => t?.type === 'NEAR' && (op === 'n' ? /^\d/.test(t.op) : t.op === op),
+      (left, right, t) => ({ type: 'NEAR', op: op === 'n' ? Number(t.op) : op, left, right }))();
+    const words = () => near('n')(or), sentence = () => near('s')(words), paragraph = () => near('p')(sentence);
+    const not = level(paragraph, t => t?.type === 'NOT', (left, right) => ({ type: 'AND', left, right: { type: 'NOT', child: right } }));
+    function conjunction() {
+      let node = not();
+      while (position < tokens.length && peek() !== ')') {
+        if (peek() === 'AND') position++;
+        node = { type: 'AND', left: node, right: not() };
       }
       return node;
     }
-
-    function expression(negated = false) {
-      let node = conjunction(negated);
-      while (tokens[position]?.type === 'OR') {
-        position += 1;
-        node = { type: 'OR', left: node, right: conjunction(negated) };
-      }
-      return node;
-    }
-
-    const tree = tokens.length ? expression() : null;
+    const tree = tokens.length ? conjunction() : null;
     if (position !== tokens.length) throw new Error('Unexpected closing parenthesis.');
-    function anchored(node, negated = false) {
-      if (node.type === 'term') return !negated;
-      if (node.type === 'NOT') return anchored(node.child, !negated);
-      const conjunction = (node.type === 'AND') !== negated;
-      return conjunction ? anchored(node.left, negated) || anchored(node.right, negated)
-        : anchored(node.left, negated) && anchored(node.right, negated);
+    if (tree) check(tree);
+    return { tree };
+  }
+  // Every page-level branch needs a positive term; NOT pairs with a positive
+  // term in AND, or with a proximity partner (a /p NOT b: a without b nearby).
+  function check(node, top = true) {
+    if (node.type === 'term') return;
+    if (node.type === 'NOT') { if (top) throw new Error('Each alternative must require a positive search term.'); check(node.child, false); return; }
+    if (node.type === 'OR') {
+      if (node.left.type === 'NOT' || node.right.type === 'NOT') throw new Error('NOT cannot be an OR alternative.');
+      check(node.left, false); check(node.right, false); return;
     }
-    if (tree && (!positiveTerms || !anchored(tree))) throw new Error('Each alternative must require a positive search term.');
-    return { tree, mode };
+    const negative = [node.left, node.right].filter(side => side.type === 'NOT');
+    if (negative.length === 2) throw new Error('Each alternative must require a positive search term.');
+    for (const side of [node.left, node.right]) side.type === 'NOT' ? check(side.child, false) : check(side, node.type === 'AND' && top);
   }
 
-  function switchScope(query, mode) {
-    // Replace only standalone operators, never a literal /p or /s inside quotes.
-    return String(query).replace(/"[^"]*"|“[^”]*”|(^|\s)\/[ps](?=\s|$|[()])/gi,
-      (match, prefix) => prefix === undefined ? match : `${prefix}/${mode}`);
-  }
-
-  function matches(tree, text, rangeLimit = 5000) {
+  // Passages of one page matching `tree`: [{ index, hits: [{ start, end }] }] in
+  // paragraph order, or [] when the page does not match. `sentencesOf(index)`
+  // returns a paragraph's sentence units (only /s asks).
+  function search(tree, paragraphs, { sentencesOf = index => sentences(paragraphs[index]), rangeLimit = 5000 } = {}) {
     if (!tree) return [];
-    // First establish Boolean truth with existence checks. In particular, do not
-    // allocate thousands of ranges for a common word before a later term fails.
-    const truth = new Map();
-    function test(node) {
-      if (truth.has(node)) return truth.get(node);
-      let value;
+    const words = new Map(), sentenceCache = new Map(), memo = new Map();
+    const position = (starts, offset) => { let lo = 0, hi = starts.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >>> 1; if (starts[mid] <= offset) lo = mid; else hi = mid - 1; } return lo; };
+    const wordAt = (index, offset) => {
+      if (!words.has(index)) { const starts = []; eachWordAt(paragraphs[index], start => starts.push(start)); words.set(index, starts); }
+      return position(words.get(index), offset);
+    };
+    const sentenceAt = (index, offset) => {
+      if (!sentenceCache.has(index)) sentenceCache.set(index, sentencesOf(index).map(unit => unit.start));
+      return position(sentenceCache.get(index), offset);
+    };
+    const near = (op, index, a, b) => op === 'p' ? true
+      : op === 's' ? sentenceAt(index, a.start) <= sentenceAt(index, b.end - 1) && sentenceAt(index, b.start) <= sentenceAt(index, a.end - 1)
+        : Math.max(wordAt(index, b.start) - wordAt(index, a.end - 1), wordAt(index, a.start) - wordAt(index, b.end - 1)) <= op;
+    // Each node: Map(paragraph index -> spans { start, end, hits }).
+    function spans(node) {
+      if (memo.has(node)) return memo.get(node);
+      let out = new Map();
       if (node.type === 'term') {
-        node.pattern.lastIndex = 0;
-        value = node.pattern.test(text);
-      } else if (node.type === 'NOT') value = !test(node.child);
-      else value = node.type === 'AND' ? test(node.left) && test(node.right) : test(node.left) || test(node.right);
-      truth.set(node, value);
-      return value;
-    }
-    if (!test(tree)) return [];
-    const patterns = new Set();
-    function collect(node, negated = false) {
-      if (test(node) === negated) return;
-      if (node.type === 'term') { if (!negated) patterns.add(node.pattern.source); return; }
-      if (node.type === 'NOT') collect(node.child, !negated);
-      else { collect(node.left, negated); collect(node.right, negated); }
-    }
-    collect(tree);
-    // A bounded merge of regex iterators keeps the first ranges in source order,
-    // regardless of query order. Allocation is O(terms + rangeLimit), not hits.
-    const cursors = [...patterns].map(source => {
-      const pattern = new RegExp(source, 'giu');
-      return { pattern, hit: pattern.exec(text) };
-    });
-    const merged = [];
-    let limited = false;
-    while (true) {
-      let cursor;
-      for (const candidate of cursors) if (candidate.hit && (!cursor || candidate.hit.index < cursor.hit.index)) cursor = candidate;
-      if (!cursor) break;
-      const range = { start: cursor.hit.index, end: cursor.hit.index + cursor.hit[0].length };
-      const previous = merged[merged.length - 1];
-      if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
-      else {
-        if (merged.length >= rangeLimit) { limited = true; break; }
-        merged.push(range);
+        paragraphs.forEach((text, index) => {
+          const found = [];
+          node.pattern.lastIndex = 0;
+          for (let match; (match = node.pattern.exec(text));) {
+            if (!match[0]) { node.pattern.lastIndex++; continue; }
+            if (node.words.every((word, i) => fold(match[i + 1]) === word)) found.push({ start: match.index, end: match.index + match[0].length, hits: [{ start: match.index, end: match.index + match[0].length }] });
+            else node.pattern.lastIndex = match.index + 1;
+          }
+          if (found.length) out.set(index, found);
+        });
+      } else if (node.type === 'OR') {
+        out = new Map(spans(node.left));
+        for (const [index, list] of spans(node.right)) out.set(index, [...(out.get(index) || []), ...list]);
+      } else if (node.type === 'AND') {
+        const sides = [node.left, node.right];
+        if (sides.every(side => side.type === 'NOT' ? !spans(side.child).size : spans(side).size)) {
+          for (const side of sides) if (side.type !== 'NOT') for (const [index, list] of spans(side)) out.set(index, [...(out.get(index) || []), ...list]);
+        }
+      } else if (node.type === 'NEAR') {
+        const negative = node.right.type === 'NOT' ? node.right : node.left.type === 'NOT' ? node.left : null;
+        const left = spans(negative === node.left ? node.right : node.left), right = spans(negative ? negative.child : node.right);
+        for (const [index, list] of left) {
+          const partners = right.get(index) || [], kept = [];
+          for (const a of list) {
+            if (negative) { if (!partners.some(b => near(node.op, index, a, b))) kept.push(a); continue; }
+            for (const b of partners) {
+              if (kept.length >= 1000) break;
+              if (near(node.op, index, a, b)) kept.push({ start: Math.min(a.start, b.start), end: Math.max(a.end, b.end), hits: [...a.hits, ...b.hits] });
+            }
+          }
+          if (kept.length) out.set(index, kept);
+        }
       }
-      cursor.hit = cursor.pattern.exec(text);
+      memo.set(node, out);
+      return out;
     }
-    merged.limited = limited;
-    return merged;
+    const passages = [];
+    let total = 0, limited = false;
+    for (const [index, list] of [...spans(tree)].sort((a, b) => a[0] - b[0])) {
+      const merged = [];
+      for (const hit of list.flatMap(span => span.hits).sort((a, b) => a.start - b.start || a.end - b.end)) {
+        const previous = merged[merged.length - 1];
+        if (previous && hit.start <= previous.end) previous.end = Math.max(previous.end, hit.end);
+        else merged.push({ ...hit });
+      }
+      if (total + merged.length > rangeLimit) { merged.length = rangeLimit - total; limited = true; }
+      total += merged.length;
+      if (merged.length) passages.push({ index, hits: merged });
+      if (limited) break;
+    }
+    passages.limited = limited;
+    return passages;
+  }
+  // One text as a one-paragraph page: its highlight ranges.
+  function matches(tree, text, rangeLimit = 5000) {
+    const found = search(tree, [text], { rangeLimit }), ranges = found[0]?.hits || [];
+    ranges.limited = found.limited;
+    return ranges;
   }
 
   function* sentenceUnits(text, locale = 'en') {
@@ -176,15 +225,15 @@
 
   function sentences(text, locale = 'en') { return [...sentenceUnits(text, locale)]; }
 
-  // Ranked mode: plain words (no quotes, parentheses, *, /p, /s or upper-case
-  // AND/OR/NOT) in paragraph mode are ranked by BM25 instead of matched exactly.
+  // Ranked mode: plain words (no quotes, parentheses, *, EXACT( ), /n, /s, /p,
+  // -word or upper-case AND/OR/NOT) are ranked by BM25 instead of matched exactly.
   // Words not worth highlighting. They still count in BM25, where IDF weighs them.
   const QUIET = new Set(('a an and are as at be but by for from has have he her his i in is it its of on or she that the their them they this to was were ' +
     'which who will with not no what why how when where whether does do did can le la les un une des du de et ou en au aux ce ces cette est sont pas ' +
     'par pour sur dans que qui ne se sa son ses il elle ils elles l d s qu').split(' '));
-  function ranked(query, mode = 'p') {
-    return mode === 'p' && !/["“”()*]/.test(query) && /[\p{L}\p{N}]/u.test(query) &&
-      !String(query).split(/\s+/).some(word => /^(?:AND|OR|NOT)$/.test(word) || /^\//.test(word));
+  function ranked(query) {
+    return !/["“”()*]/.test(query) && /[\p{L}\p{N}]/u.test(query) &&
+      !String(query).split(/\s+/).some(word => /^(?:AND|OR|NOT)$/.test(word) || /^[/-]/.test(word));
   }
   // Lower case, no accents, light English/French inflection folding (measured:
   // pool A R@30 0.735 -> 0.867 over plain lower case; see FIND.md).
@@ -296,7 +345,7 @@
     return 4294967296 * (2097151 & h2) + (h1 >>> 0);
   }
 
-  const api = { compile, matches, sentences, sentenceUnits, switchScope, ranked, fold, eachWord, eachWordAt, rankTerms, bm25, rankHits, densest, excerpt, hash };
+  const api = { compile, search, matches, sentences, sentenceUnits, ranked, fold, eachWord, eachWordAt, rankTerms, bm25, rankHits, densest, excerpt, hash };
   global.LegalPinpointerFindCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

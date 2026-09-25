@@ -40,7 +40,7 @@ test('the extension permission and host surface is frozen to the minimum contrac
 });
 
 test('runtime scripts contain no remote-code or network primitives', () => {
-  const ordinaryRuntime = ['canlii-courts.js', 'canlii-legislation.js', 'core.js', 'text-fragments.js', 'providers.js', 'content.js', 'popup.js', 'find-core.js', 'find-page.js', 'find.js', 'find-worker.js', 'popup-find.js', 'sonar-launcher.js', 'sonar-results.js', 'sonar.js']
+  const ordinaryRuntime = ['canlii-courts.js', 'canlii-legislation.js', 'core.js', 'text-fragments.js', 'providers.js', 'content.js', 'popup.js', 'find-core.js', 'find-page.js', 'find-worker.js', 'popup-find.js', 'sonar-launcher.js', 'sonar-results.js', 'sonar.js']
     .map((filename) => fs.readFileSync(path.join(root, filename), 'utf8'))
     .join('\n');
   assert.doesNotMatch(ordinaryRuntime, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|importScripts|eval|Function|sendBeacon)\s*\(/);

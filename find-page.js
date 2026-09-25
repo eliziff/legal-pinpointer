@@ -168,7 +168,7 @@
     }
     return result.ranges;
   }
-  async function search({ query, mode, ticket, deadline = Date.now() + 5000, refresh = false }) {
+  async function search({ query, ticket, deadline = Date.now() + 5000, refresh = false }) {
     const job = { cancelled: false, deadline };
     jobs.get(ticket)?.abort?.();
     job.abort = () => { job.cancelled = true; };
@@ -178,28 +178,20 @@
     };
     clearTimeout(expiry); expiry = setTimeout(releaseAll, 15 * 60_000);
     try {
-      const compiled = core.compile(query, mode), snapshot = await ensureIndex(check, refresh);
+      const { tree } = core.compile(query), snapshot = await ensureIndex(check, refresh), paragraphs = snapshot.paragraphs;
+      const lang = document.documentElement.lang || 'en';
+      const passages = core.search(tree, paragraphs.map(p => p.text), { rangeLimit: MAX_PAINT + 1,
+        sentencesOf: index => (paragraphs[index].sentences ||= core.sentences(paragraphs[index].text, lang)) });
+      check();
       const found = [];
-      let limited = snapshot.limited, hitCount = 0, sliceEnd = performance.now() + 8;
-      outer: for (const paragraph of snapshot.paragraphs) {
-        check();
-        if (performance.now() > sliceEnd) { await pause(); check(); sliceEnd = performance.now() + 8; }
-        const sentenceCache = compiled.mode === 's' && !paragraph.sentences ? [] : null;
-        const units = compiled.mode === 'p' ? [{ start: 0, end: paragraph.text.length }]
-          : (paragraph.sentences || core.sentenceUnits(paragraph.text, document.documentElement.lang || 'en'));
-        for (const unit of units) {
-          if (sentenceCache) sentenceCache.push(unit);
-          if (performance.now() > sliceEnd) { await pause(); check(); sliceEnd = performance.now() + 8; }
-          const hits = core.matches(compiled.tree, paragraph.text.slice(unit.start, unit.end), 100);
-          if (!hits.length) continue;
-          limited ||= hits.limited;
-          if (found.length === MAX_RESULTS) { limited = true; break outer; }
-          const result = passageResult(paragraph, unit, hits.map(h => ({ start: unit.start + h.start, end: unit.start + h.end })));
-          if (!result) continue;
-          hitCount += hits.length;
-          found.push(result);
-        }
-        if (sentenceCache) paragraph.sentences = sentenceCache;
+      let limited = snapshot.limited || passages.limited, hitCount = 0;
+      for (const { index, hits } of passages) {
+        if (found.length === MAX_RESULTS) { limited = true; break; }
+        const paragraph = paragraphs[index], shown = hits.slice(0, 100);
+        const result = passageResult(paragraph, { start: 0, end: paragraph.text.length }, shown, core.densest(paragraph.text, shown));
+        if (!result) continue;
+        hitCount += hits.length;
+        found.push(result);
       }
       return publish(snapshot, ticket, check, found, limited || hitCount > MAX_PAINT, { title: await pageTitle() });
     } finally {

@@ -412,12 +412,12 @@
       };
       select(law7, 0, law72, law72.childNodes.length);
       const provisionQuote = await copy('quote');
-      assert(provisionQuote.plain === '7 Parent provision text.\n\t(2) Nested provision text.\n\t\tContinuation within subsection: <unsafe> & safe.', `Provision hierarchy, literal markers, or continuation indentation was lost: ${provisionQuote.plain}`);
+      assert(provisionQuote.plain === '7 Parent provision text.\n\t(2) Nested provision text. Continuation within subsection: <unsafe> & safe.', `Provision hierarchy or literal markers were lost, or a line break was inserted inside a provision: ${provisionQuote.plain}`);
       assert(provisionQuote.html.includes('#sec7') && provisionQuote.html.includes('#sec7-2'), 'Every quoted provision level must carry its own link.');
       assert(provisionQuote.html.includes('margin:0 0 0 4em;text-indent:-2em'), `The subsection did not receive a real hanging paragraph indent: ${provisionQuote.html}`);
       assert(provisionQuote.html.includes('display:inline-block;width:2em;text-indent:0'), `The provision marker did not receive a fixed hanging column: ${provisionQuote.html}`);
       assert(provisionQuote.html.includes('</a>&nbsp;</span>'), 'The rich provision marker lost its non-linked textual separator.');
-      assert(provisionQuote.html.includes('<br>Continuation within subsection: &lt;unsafe&gt; &amp; safe.') && !provisionQuote.html.includes('<br>&emsp;'), `Explicit and soft continuation lines must share the paragraph indent: ${provisionQuote.html}`);
+      assert(provisionQuote.html.includes('Nested provision text. Continuation within subsection: &lt;unsafe&gt; &amp; safe.'), `A line break was inserted inside a provision: ${provisionQuote.html}`);
       assert(!provisionQuote.html.includes('<unsafe>'), 'Selected provider text entered rich clipboard HTML without escaping.');
       assert(!provisionQuote.plain.includes('Copy controls') && !provisionQuote.html.includes('Copy controls'), 'Hidden provider controls leaked into the copied quote.');
       assert(!provisionQuote.plain.includes('\t7(2)') && !provisionQuote.plain.includes('(2) Nested provision text.\n\t(2)'), 'A canonical or nested provision marker was duplicated.');
@@ -458,9 +458,9 @@
       ];
       select(law1t, 0, law1ui, law1ui.childNodes.length);
       const letterProvisionQuote = await copy('quote');
-      assert(letterProvisionQuote.plain === '(t) "health information" means information about an identifiable individual;\n(u) "interested person" means\n\tand includes\n\t(i) the Public Guardian.', `Lettered provision markers or continuation indentation regressed: ${letterProvisionQuote.plain}`);
+      assert(letterProvisionQuote.plain === '(t) "health information" means information about an identifiable individual;\n(u) "interested person" means and includes\n\t(i) the Public Guardian.', `Lettered provision markers regressed or a line break was inserted inside a provision: ${letterProvisionQuote.plain}`);
       assert(!/1\((?:t|u)\)/.test(letterProvisionQuote.plain), `Canonical provision paths leaked into displayed quote text: ${letterProvisionQuote.plain}`);
-      assert(letterProvisionQuote.html.includes('<br>and includes') && letterProvisionQuote.html.includes('margin:0 0 0 4em;text-indent:-2em') && letterProvisionQuote.html.includes('>(i)</a>'), `Rich-text provision indentation or local marker linking regressed: ${letterProvisionQuote.html}`);
+      assert(letterProvisionQuote.html.includes('means and includes') && letterProvisionQuote.html.includes('margin:0 0 0 4em;text-indent:-2em') && letterProvisionQuote.html.includes('>(i)</a>'), `Rich-text provision indentation or local marker linking regressed: ${letterProvisionQuote.html}`);
 
       window.__model.structure.nodes = [
         { kind: 'section', locator: '1(u)', element: law1u, anchor: 'sec1subsecu', markerText: '(u)', source: 'provider-native' },
