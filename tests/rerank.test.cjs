@@ -8,12 +8,12 @@ const { createBroker } = require('../find-worker.js');
 const { createIndex } = require('../sonar-index.js');
 const { createTokenizer, looksFrench } = require('../rerank-core.js');
 
-test('plain words rank; quotes, operators, prefixes, parentheses and /s stay exact', () => {
+test('plain words rank; quotes, operators, prefixes, parentheses /n, /s, /p and -word stay exact', () => {
   for (const query of ['duty of care', 'privilege or waiver', 'not guilty', 'employer’s duty to accommodate']) assert.equal(core.ranked(query), true, query);
   for (const query of ['"duty of care"', 'privileg*', 'privilege AND waiver', 'privilege OR waiver', 'NOT implied waiver', '(privilege)', 'privilege /p waiver', '']) {
     assert.equal(core.ranked(query), false, query);
   }
-  assert.equal(core.ranked('duty of care', 's'), false);
+  assert.equal(core.ranked('custody -child'), false);
 });
 
 test('folding lowers case, drops accents and light English/French inflections', () => {

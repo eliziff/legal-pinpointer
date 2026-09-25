@@ -84,8 +84,8 @@ extension and previously injected source pages, then check:
 - Ctrl+T followed by Alt+Shift+S opens/focuses CanLII document-text search while
   the new tab remains open. Enter submits a Unicode/operator query in a new
   CanLII results tab. Repeat from about:blank and a normal webpage.
-- Ctrl+Shift+S opens the same native workspace. Tab switches /p and /s;
-  Shift+Tab cycles Current/All/Group. Open real passages in two tabs, then a
+- Ctrl+Shift+S opens the same native workspace. Choose All tabs, This group
+  or This tab. Open real passages in two tabs, then a
   different window. Query and results remain visible, with exact source text
   highlighted and no tabs moved.
 - Change source content or reload it before opening a saved result: require

@@ -450,7 +450,9 @@
       if (node.nodeType === Node.ELEMENT_NODE && (
         node.matches('script, style, noscript, template, [hidden], [aria-hidden="true"]')
       )) return { plain: '', html: '' };
-      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') return { plain: '\n', html: '<br>' };
+      // A unit's quote is one run of text: line breaks and nested blocks inside it
+      // (converted PDFs, wrapper divs) separate words, never lines, when pasted.
+      if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') return { plain: ' ', html: ' ' };
       const children = Array.from(node.childNodes).map(render);
       let plain = children.map((child) => child.plain).join('');
       let html = children.map((child) => child.html).join('');
@@ -458,18 +460,16 @@
       const tag = QUOTE_INLINE.get(node.tagName);
       if (tag) html = `<${tag}>${html}</${tag}>`;
       if (QUOTE_BLOCK.has(node.tagName) && (plain || html)) {
-        plain = `\n${plain}\n`;
-        html = `<br>${html}<br>`;
+        plain = ` ${plain} `;
+        html = ` ${html} `;
       }
       return { plain, html };
     }
 
     const rendered = render(fragment);
     return {
-      plain: normalizeQuoteText(rendered.plain),
-      html: rendered.html
-        .replace(/^(?:\s|<br>)+|(?:\s|<br>)+$/g, '')
-        .replace(/(?:<br>){2,}/g, '<br>')
+      plain: normalizeQuoteText(rendered.plain).replace(/\n/g, ' '),
+      html: rendered.html.replace(/\s+/g, ' ').trim()
     };
   }
 
@@ -513,9 +513,8 @@
       const content = quoteContent(unitRange, markerState.strip);
       const marker = quoteMarker(model.structure.kind, node);
       const depth = provision ? core.provisionDepth(node.locator) - baseDepth : 0;
-      const continuationPlain = '\t'.repeat(depth + 1);
       const lead = leading ? ' \u2026' : '';
-      const bodyPlain = content.plain ? ` ${content.plain.replace(/\n/g, `\n${continuationPlain}`)}` : '';
+      const bodyPlain = content.plain ? ` ${content.plain}` : '';
       const bodyHtml = content.html ? ` ${content.html}` : '';
       const markerHtml = anchorHtml(marker, targetForNode(model, sourceInfo, node));
       const markerColumn = Math.max(2, Math.ceil((Array.from(marker).length + 1) * 5) / 10);
@@ -526,14 +525,9 @@
         provisionHtml
       };
     }).filter(Boolean);
-    const paragraphBlocks = ['paragraph', 'pilcrow', 'silcrow'].includes(model.structure.kind);
     const quote = {
       plain: pieces.map((piece) => piece.plain).join('\n'),
-      html: provision
-        ? pieces.map((piece) => piece.provisionHtml).join('<br>')
-        : paragraphBlocks
-        ? pieces.map((piece) => piece.html).join('<br>')
-        : pieces.map((piece) => piece.html).join('<br>')
+      html: pieces.map((piece) => provision ? piece.provisionHtml : piece.html).join('<br>')
     };
     return quote;
   }
@@ -808,7 +802,7 @@
       const quote=quoteMarkup(model,sourceInfo,range,[node]);
       if(mode==='quote')payload=quote;
       else{const citation=core.outputCitationLink(model.citation,model.canliiUrl||model.cleanUrl);
-        payload={plain:`${citation.plain} ${pin.plain}\n${quote.plain}`,html:`<p>${citation.html} ${pin.html}</p>${quote.html}`};}
+        payload={plain:`${citation.plain} ${pin.plain}\n${quote.plain}`,html:`${citation.html} ${pin.html}<br>${quote.html}`};}
     }else throw new Error('Invalid copy action.');
     assertCurrentModel(model); return payload;
   }

@@ -9,9 +9,10 @@ citation-copying shortcuts and output formats are unchanged.
 | Control | Action |
 | --- | --- |
 | Ctrl+Shift+S | Open/focus Open tabs search. macOS uses Control, not Command. |
-| Tab | Cycle /p (same paragraph) and /s (same sentence). |
-| Shift+Tab | Cycle Current tab, All tabs, Current tab group. |
-| Enter in the query | Put keyboard focus on the first result. Nothing opens. |
+| All tabs / This group / This tab | Choose which tabs are searched. All tabs is the default. |
+| ? | Hover to see CanLII's search operators; click to keep them open. |
+| Enter or Tab in the query | Put keyboard focus on the results. Nothing opens. |
+| Tab / Shift+Tab | Move forward / back: query, results, then the other controls. |
 | Arrows, PageUp/PageDown, Home, End | Move among results. ArrowUp from the first result returns to the query. |
 | Click a result | Select it. Nothing opens. |
 | Open, or Enter on a result | Jump to the exact matching passage in its source tab. |
@@ -19,9 +20,9 @@ citation-copying shortcuts and output formats are unchanged.
 | Copy pinpoint / Ctrl+X | Copy the pinpoint (for example `at para 12`) linked to the paragraph. |
 | Copy link | Copy a text-fragment link that opens the page scrolled to and highlighting the passage. |
 | Alt+X | Copy the document's citation (the result's title). |
-| Use active tab | Explicitly change the origin of Current tab/group search. |
-| Escape | In the list, return to the query; in the query, clear it (in Open tabs, also release its shared search session). The panel stays open. |
-| F6 / Shift+F6 | Move among controls because Tab and Shift+Tab control proximity/scope. |
+| Use active tab | Explicitly change the origin of This tab/This group search. |
+| Escape | Close the panel (an open ? table or skipped-tabs list closes first) and release its shared search session. |
+| Enter on the CanLII route | Search CanLII in a new tab and close the panel. |
 | Alt+Shift+S | Open CanLII document-text search from any browser tab, including blank/new tabs. |
 
 Each result has its Copy quote, Copy pinpoint and Copy link buttons on one line
@@ -30,10 +31,9 @@ exactly as they would on that paragraph in its own tab; in the query box Ctrl+X
 still cuts. Selecting a
 result never scrolls or activates its source: only Open (or Enter on a result) does.
 
-Escape does not close the panel. Chrome animates the side panel every time it
-opens and extensions cannot turn that off (Chrome skips it only when Windows'
-Animation effects setting is off), so the panel stays open and the shortcuts
-just focus its search box; close it with the panel's X. The popup provides both
+Chrome animates the side panel every time it opens and extensions cannot turn
+that off (Chrome skips it only when Windows' Animation effects setting is off).
+The popup provides both
 search buttons and reports unassigned shortcut bindings. Chrome or another
 extension may claim a shortcut: assign it at `chrome://extensions/shortcuts`.
 Chrome itself uses Alt+Shift+C (add a new tab to a group), which is why CanLII
@@ -71,7 +71,7 @@ nodes, never injected as source HTML. Dark and forced-color modes are supported.
 
 Copying runs in the source tab with Pinpointer's own formatting code and the
 pinpoint wording option from the popup. The copied passage is the whole matching
-paragraph (or sentence in /s mode), rechecked against the page before copying.
+paragraph, rechecked against the page before copying.
 
 Every result carries its source's title (on legal pages Pinpointer supports, the
 citation Alt+X copies, such as `Alpha v Beta, 2024 SCC 1`; elsewhere the page
@@ -81,7 +81,7 @@ Chrome document ID, URL and current group/window checks, then revalidates the
 source ranges. Changed or unavailable passages refuse to open (search again)
 rather than jump approximately. Existing renderer indexes and highlight reuse remain intact.
 
-Current tab and Current tab group stay pinned to the originating tab while
+This tab and This group stay pinned to the originating tab while
 visiting results. All tabs includes other windows without mixing normal and
 incognito contexts. A source in another window opens that window's native panel
 **within the original click/key gesture** and hands off the query, result list,
@@ -90,8 +90,8 @@ shared search has been changed or cleared elsewhere says so.
 
 ## Query language
 
-**Plain words rank by relevance.** In /p, a query of plain words (no quotes,
-parentheses, `*`, `/p`, `/s` or upper-case AND/OR/NOT) finds paragraphs across
+**Plain words rank by relevance.** A query of plain words (no quotes,
+parentheses, `*`, EXACT( ), `/n`, `/s`, `/p`, `-word` or upper-case AND/OR/NOT) finds paragraphs across
 the searched tabs that share its words and lists them best first, not in page
 order: `whether an employer must accommodate to the point of undue hardship`.
 Lower-case and/or/not are ordinary words here. There are no scores or badges.
@@ -145,22 +145,32 @@ half a second. Both new paths rank below L6: on the GPU by one query in 38, on
 CPU-only machines by a real margin, traded for speed. The index answers a query
 in 5.7 ms (p50; p95 11.9 ms) at 1x.
 
-**Exact search** keeps document order and Boolean matching.
-`privileg* waiv*` requires both prefixes in one unit, in either order.
-`"duty of care" breach` combines a whitespace-normalized phrase and whole word.
-Matching is Unicode-aware and case-insensitive; accents are significant.
-Write AND or `/p` between plain words (`privilege AND waiver`,
-`privilege /p waiver`) to get the exact same-paragraph match instead of
-ranking; /s is always exact.
+**Exact search** uses CanLII's document-text grammar and keeps document order.
+A document is one tab's page; its paragraphs are the listed passages.
 
-`privilege /p waiver` and `privilege /s waiver` explicitly set proximity; Tab
-updates those operators but not quoted literals. AND and spaces between
-operators combine terms; parentheses and OR allow alternatives; NOT excludes a
-matching unit, not a whole document. For example
-`(privileg* OR confidential*) waiv* NOT implied`. In exact queries and/or/not
-are operators in any case. Each alternative must require a positive term.
-Unsupported syntax is rejected. Exact mode is not a replica of a provider's
-tokenizer.
+| Operator | Example | Finds |
+| --- | --- | --- |
+| AND (or a space) | `permit AND hunting` | Pages with both terms |
+| OR | `city OR municipality` | Either term |
+| NOT or `-` | `custody NOT child`, `custody -child` | Pages without the term that follows |
+| `" "` | `"R. v. Douglas"` | The phrase or its variants |
+| EXACT( ) | `EXACT(reviewable transaction)` | Exactly this phrase |
+| `*` | `constru*` | Words beginning with these letters |
+| `/n` | `letter /5 credit` | Both terms within n words, in one paragraph |
+| `/s` | `tax /s income` | Both terms in one sentence |
+| `/p` | `levy /p probate` | Both terms in one paragraph |
+| `( )` | `(contract /s sale) OR seller` | Groups terms |
+
+Operators bind as on CanLII: OR first, then `/n`, `/s`, `/p`, NOT and AND, so
+`contract /s sale OR seller` is `contract /s (sale OR seller)`. AND, OR and
+EXACT work in any case; NOT only in capitals. Words and quoted phrases match
+their variants with the fold ranked search uses (`policy` finds `policies`,
+`arret` finds `arrêt`); EXACT( ) and `*` match the letters given. A page-level
+match lists every paragraph holding a matching term; a proximity match lists the
+paragraphs where it holds. NOT beside a proximity operator applies to that window:
+`waiver /p NOT implied` is a paragraph with waiver and no implied. Each
+alternative must require a positive term, and unsupported syntax is rejected.
+Variants use Pinpointer's own folding, not CanLII's stemmer.
 
 ## Access, resource budgets and cleanup
 

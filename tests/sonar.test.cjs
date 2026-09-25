@@ -159,7 +159,7 @@ test('close during late injection cannot start a page search afterward', async (
   const f = fixture(), execute = f.api.scripting.executeScript;
   let resolveProbe;
   f.api.scripting.executeScript = async options => {
-    if (typeof options.args?.[0] === 'boolean') await new Promise(resolve => { resolveProbe = resolve; });
+    if (!options.files && !options.args) await new Promise(resolve => { resolveProbe = resolve; }); // the install probe
     return execute(options);
   };
   const pending = f.broker.handle(request('current'), f.sender);
