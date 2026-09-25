@@ -13,6 +13,7 @@
       <form id="search-form" role="search">
         <label class="sr-only" for="query">Search open tabs</label>
         <div class="input-row"><input id="query" type="text" placeholder="Search open tabs" autocomplete="off" spellcheck="false" maxlength="1024"><button id="help" type="button" aria-label="Search operators" aria-controls="operators">?</button></div>
+        <div id="canlii-fields"><label class="sr-only" for="canlii-title">Case name, citation or title</label><input id="canlii-title" data-field="id" type="text" placeholder="Case name, citation or title" autocomplete="off" spellcheck="false" maxlength="4096"><label class="sr-only" for="canlii-noteup">Noteup / discussion</label><input id="canlii-noteup" data-field="noteup" type="text" placeholder="Noteup / discussion" autocomplete="off" spellcheck="false" maxlength="4096"></div>
         <div id="scope-row"><div id="scope" role="group" aria-label="Search in"><button type="button" data-scope="all" aria-pressed="true">All tabs</button><button type="button" data-scope="group" aria-pressed="false">This group</button><button type="button" data-scope="current" aria-pressed="false">This tab</button></div><button id="issues" type="button" class="quiet" hidden>Skipped tabs</button><button id="use-active" type="button" class="quiet">Use active tab</button></div>
         <p id="origin"></p>
       </form>

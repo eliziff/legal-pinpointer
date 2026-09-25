@@ -355,12 +355,14 @@
       if (token === sequence) tell(reason.message || 'Could not copy.', true);
     }
   }
+  // CanLII's three boxes: document text, case name or title, noteup. Enter searches the focused one.
   async function externalSearch() {
     if (opening) return;
     canliiQuery = $('query').value;
-    if (!canliiQuery.trim()) { $('query').focus(); return; }
+    const box = document.activeElement?.dataset.field ? document.activeElement : $('query');
+    if (!box.value.trim()) { box.focus(); return; }
     opening = true;
-    try { await send('SONAR_CANLII_SEARCH', { query: canliiQuery, windowId }); close(); }
+    try { await send('SONAR_CANLII_SEARCH', { query: box.value, field: box.dataset.field || 'text', windowId }); close(); }
     catch (error) { tell(error.message, true); }
     finally { opening = false; }
   }
@@ -433,13 +435,17 @@
   $('issues').onclick = () => $('issue-popover').showPopover();
   document.addEventListener('keydown', event => {
     if (event.isComposing) return;
-    if (event.key === 'Escape') {
+    if (event.key === 'Enter' && route === 'canlii' && document.activeElement?.closest('#canlii-fields')) {
+      event.preventDefault(); externalSearch();
+    } else if (event.key === 'Escape') {
       if (document.querySelector(':popover-open')) return; // Escape closes the popover first.
       event.preventDefault(); close();
     } else if ((event.key === 'Tab' || event.key === 'F6') && !event.altKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       // In the results, Tab steps to the next result and Shift+Tab to the previous one.
       const step = event.shiftKey ? -1 : 1;
+      const boxes = [$('query'), $('canlii-title'), $('canlii-noteup')], box = boxes.indexOf(document.activeElement);
+      if (event.key === 'Tab' && route === 'canlii' && box >= 0) { boxes[(box + step + 3) % 3].focus(); return; }
       if (event.key === 'Tab' && inList() && current >= 0 && current + step >= 0 && current + step < result.results.length) {
         choose(current + step); return;
       }
