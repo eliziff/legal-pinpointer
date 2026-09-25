@@ -1,6 +1,6 @@
 'use strict';
 
-importScripts('canlii-legislation.js', 'find-core.js', 'find-worker.js', 'sonar-launcher.js');
+importScripts('canlii-courts.js', 'core.js', 'canlii-legislation.js', 'find-core.js', 'find-worker.js', 'sonar-launcher.js');
 
 const canliiLegislation = globalThis.LegalPinpointerCanliiLegislation;
 
