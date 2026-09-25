@@ -12,8 +12,8 @@
       <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button></nav>
       <form id="search-form" role="search">
         <label class="sr-only" for="query">Search open tabs</label>
-        <div class="input-row"><input id="query" type="text" placeholder="Search open tabs" autocomplete="off" spellcheck="false" maxlength="1024"><button id="mode" type="button">/p</button></div>
-        <div id="scope-row"><button id="scope" type="button">Current tab</button><button id="issues" type="button" class="quiet" hidden>Skipped tabs</button><button id="use-active" type="button" class="quiet">Use active tab</button></div>
+        <div class="input-row"><input id="query" type="text" placeholder="Search open tabs" autocomplete="off" spellcheck="false" maxlength="1024"><button id="help" type="button" aria-label="Search operators" aria-controls="operators">?</button></div>
+        <div id="scope-row"><div id="scope" role="group" aria-label="Search in"><button type="button" data-scope="all" aria-pressed="true">All tabs</button><button type="button" data-scope="group" aria-pressed="false">This group</button><button type="button" data-scope="current" aria-pressed="false">This tab</button></div><button id="issues" type="button" class="quiet" hidden>Skipped tabs</button><button id="use-active" type="button" class="quiet">Use active tab</button></div>
         <p id="origin"></p>
       </form>
     </header>
@@ -23,6 +23,7 @@
     </div>
     <p id="notice" role="status" aria-live="polite"></p>
   </main>
+  <section id="operators" popover aria-label="Search operators"><table><tr><th scope="row">AND</th><td><code>permit AND hunting</code></td><td>Both terms</td></tr><tr><th scope="row">OR</th><td><code>city OR municipality</code></td><td>Either term</td></tr><tr><th scope="row">NOT or -</th><td><code>custody NOT child<br>custody -child</code></td><td>Not the term that follows</td></tr><tr><th scope="row">&quot; &quot;</th><td><code>&quot;R. v. Douglas&quot;</code></td><td>The phrase or its variants</td></tr><tr><th scope="row">EXACT( )</th><td><code>EXACT(reviewable transaction)</code></td><td>Exactly this phrase</td></tr><tr><th scope="row">*</th><td><code>constru*</code></td><td>Words beginning with these letters</td></tr><tr><th scope="row">/n</th><td><code>letter /5 credit</code></td><td>Within n words of each other</td></tr><tr><th scope="row">/s</th><td><code>tax /s income</code></td><td>In the same sentence</td></tr><tr><th scope="row">/p</th><td><code>levy /p probate</code></td><td>In the same paragraph</td></tr><tr><th scope="row">( )</th><td><code>(contract /s sale) OR seller</code></td><td>Groups terms</td></tr></table></section>
   <section id="issue-popover" popover aria-label="Skipped tabs"><p id="limit-detail"></p><ul id="issue-list"></ul></section>
   <script src="find-core.js"></script>
   <script src="rerank-core.js"></script>

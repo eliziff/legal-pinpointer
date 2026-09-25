@@ -2,10 +2,9 @@
 
 (async function startWorkspace() {
   const $ = id => document.getElementById(id), core = LegalPinpointerFindCore;
-  const scopeNames = ['Current tab', 'All tabs', 'Current tab group'], scopes = ['current', 'all', 'group'];
   const window = await chrome.windows.getCurrent(), windowId = window.id, incognito = Boolean(window.incognito);
   const launchKey = `sonar-launch:${windowId}`;
-  let workspace = crypto.randomUUID(), origin = null, route = 'tabs', mode = 'p', scope = 'current';
+  let workspace = crypto.randomUUID(), origin = null, route = 'tabs', scope = 'all';
   let query = '', canliiQuery = '', result = null, current = -1, sequence = Date.now();
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', noticeTimer = 0, focusOnResults = false;
   // Ranked mode: BM25 order from the panel's own index shows at once; the
@@ -18,7 +17,7 @@
   // idle time after the panel opens and again only when that tab changes. Jump
   // and copy still go to the page through issued, revalidated handles.
   const MAX_INDEX_CHARS = 32_000_000, reads = new Map(), readQueue = [], indexWaiting = new Map();
-  let indexer = null, indexReady = false, indexCalls = 0, reading = 0, contact = 0, rewatch = false;
+  let indexer = null, indexReady = false, indexCalls = 0, reading = 0, contact = 0;
   const favicon = url => url ? `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=16` : '';
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'),
     { choose: (index, action) => choose(index, action), icon: favicon, leave: () => $('query').focus() });
@@ -40,8 +39,7 @@
   function labels() {
     document.body.dataset.route = route;
     $('tabs-route').setAttribute('aria-pressed', route === 'tabs'); $('canlii-route').setAttribute('aria-pressed', route === 'canlii');
-    $('mode').textContent = `/${mode}`; $('mode').title = mode === 'p' ? 'Same paragraph' : 'Same sentence';
-    $('scope').textContent = scopeNames[scopes.indexOf(scope)];
+    for (const button of $('scope').children) button.setAttribute('aria-pressed', button.dataset.scope === scope);
     $('query').placeholder = route === 'tabs' ? 'Search open tabs' : 'Search CanLII';
     $('query').maxLength = route === 'tabs' ? 1024 : 4096;
     document.querySelector('label[for=query]').textContent = $('query').placeholder;
@@ -73,22 +71,20 @@
   function schedule(delay = 140, refresh = false) {
     const token = cancel(); busy = true; $('list-viewport').setAttribute('aria-busy', true); tell('');
     // Ranked queries run in the panel's own index: no debounce is needed.
-    if (!refresh && route === 'tabs' && indexer && core.ranked(query, mode)) delay = 0;
+    if (!refresh && route === 'tabs' && indexer && core.ranked(query)) delay = 0;
     timer = setTimeout(() => search(token, refresh), delay);
   }
   async function search(token, refresh) {
     try {
       if (!origin) await useActive(false);
       if (token !== sequence || route !== 'tabs') return;
-      const ranked = core.ranked(query, mode);
-      if (!ranked) mode = core.compile(query, mode).mode;
-      labels();
+      const ranked = core.ranked(query);
       $('query').removeAttribute('aria-invalid');
       let response;
       if (ranked) response = await rankSearch(token, refresh);
       else {
         flight = token;
-        response = await send('SONAR_SEARCH', { query, mode, scope, sequence: token, originTabId: origin.id, refresh });
+        response = await send('SONAR_SEARCH', { query, scope, sequence: token, originTabId: origin.id, refresh });
       }
       if (token !== sequence || route !== 'tabs') return;
       if (response.stale) throw new Error('This workspace was updated in another window. Search again.');
@@ -123,7 +119,7 @@
     // Wait only for tabs never read yet; changed tabs are re-read in the background.
     const waiting = tabs.map(tab => want(tab.id, true, refresh)).filter((done, i) => refresh || !reads.get(tabs[i].id)?.revision);
     // Pages stop watching for changes after Close or 15 idle minutes; re-read (cheaply, by revision) first.
-    if (rewatch || (contact && Date.now() - contact > 10 * 60_000)) { rewatch = false; for (const tab of tabs) if (reads.get(tab.id)?.state === 'ready') want(tab.id, false, true); }
+    if (contact && Date.now() - contact > 10 * 60_000) { for (const tab of tabs) if (reads.get(tab.id)?.state === 'ready') want(tab.id, false, true); }
     if (waiting.length) await Promise.all(waiting);
     if (token !== sequence) return { stale: true };
     const indexed = tabs.filter(tab => reads.get(tab.id)?.revision);
@@ -324,7 +320,7 @@
   $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; applyOrder(); });
   function snapshot() {
     const { issued, passages, ...transfer } = result;
-    return { workspace, origin, query, canliiQuery, mode, scope, sequence, result: transfer, current, scrollTop: list.viewport.scrollTop };
+    return { workspace, origin, query, canliiQuery, scope, sequence, result: transfer, current, scrollTop: list.viewport.scrollTop };
   }
   async function visit() {
     if (busy || opening || result?.stale || route !== 'tabs' || current < 0 || !result) return;
@@ -364,19 +360,16 @@
     canliiQuery = $('query').value;
     if (!canliiQuery.trim()) { $('query').focus(); return; }
     opening = true;
-    try { await send('SONAR_CANLII_SEARCH', { query: canliiQuery, windowId }); }
+    try { await send('SONAR_CANLII_SEARCH', { query: canliiQuery, windowId }); close(); }
     catch (error) { tell(error.message, true); }
     finally { opening = false; }
   }
-  async function clear() {
-    const seq = cancel();
-    focusOnResults = false;
-    if (route === 'canlii') { canliiQuery = ''; $('query').value = ''; tell(''); $('query').focus(); return; }
-    busy = false; query = ''; $('query').value = ''; result = null; current = -1;
-    $('list-viewport').setAttribute('aria-busy', false); show([]); details(); tell('');
-    try { await send('SONAR_CLOSE', { sequence: seq }); } catch (_) { /* Page caches also have a bounded lifetime. */ }
-    rewatch = true; // Close released the pages' watchers; the next search re-reads them.
-    $('query').focus();
+  // Escape and a CanLII search close the panel; page caches are released first
+  // (they also have a bounded lifetime).
+  function close() {
+    void send('SONAR_CLOSE', { sequence: cancel() }).catch(() => {});
+    // sidePanel.close is Chrome 141+; earlier, a side panel page may close itself.
+    Promise.resolve().then(() => chrome.sidePanel.close({ windowId })).catch(() => globalThis.close());
   }
   async function consumeLaunch(launch) {
     if (!launch || launch.nonce === nonce || Date.now() - launch.created > 60_000) return;
@@ -384,7 +377,7 @@
     const transfer = launch.handoff;
     if (transfer && launch.origin?.incognito === incognito && transfer.result?.results?.length <= 1000) {
       cancel(); workspace = transfer.workspace; origin = transfer.origin; query = transfer.query; canliiQuery = transfer.canliiQuery || '';
-      mode = transfer.mode; scope = transfer.scope; sequence = Math.max(sequence, transfer.sequence + 2); result = transfer.result;
+      scope = transfer.scope; sequence = Math.max(sequence, transfer.sequence + 2); result = transfer.result;
       current = transfer.current; route = 'tabs'; busy = false; $('query').value = query;
       labels(); list.setResults(result.results, current, transfer.scrollTop); $('empty').hidden = true; details();
     } else {
@@ -404,27 +397,53 @@
   });
   $('query').addEventListener('compositionend', () => { if (route === 'tabs') { query = $('query').value; schedule(); } });
   $('search-form').addEventListener('submit', event => { event.preventDefault(); if (route === 'canlii') externalSearch(); else focusFirst(); });
-  function modeCycle() { mode = mode === 'p' ? 's' : 'p'; query = core.switchScope(query, mode); $('query').value = query; labels(); schedule(0); $('query').focus(); }
-  function scopeCycle() { scope = scopes[(scopes.indexOf(scope) + 1) % scopes.length]; labels(); schedule(0); $('query').focus(); }
-  $('mode').onclick = modeCycle;
-  $('scope').onclick = scopeCycle;
+  $('scope').onclick = event => {
+    const next = event.target.closest('[data-scope]')?.dataset.scope;
+    if (next && next !== scope) { scope = next; labels(); schedule(0); }
+  };
+  // The operator table shows while the pointer is on ?, and stays once ? is clicked.
+  let hovering = false;
+  const operators = $('operators'), help = $('help');
+  help.addEventListener('pointerenter', () => { if (!operators.matches(':popover-open')) { hovering = true; operators.showPopover({ source: help }); } });
+  for (const element of [help, operators]) element.addEventListener('pointerleave', () => setTimeout(() => {
+    if (hovering && !help.matches(':hover') && !operators.matches(':hover')) { hovering = false; operators.hidePopover(); }
+  }));
+  // Pressing ? may light-dismiss the table before the click, so the click acts
+  // on what was showing at pointerdown: a pinned table closes, anything else pins.
+  let pinnedAtPress = false;
+  help.addEventListener('pointerdown', () => { pinnedAtPress = operators.matches(':popover-open') && !hovering; });
+  help.onclick = event => {
+    const pinned = event.detail ? pinnedAtPress : operators.matches(':popover-open') && !hovering;
+    hovering = false;
+    if (pinned) operators.hidePopover(); else if (!operators.matches(':popover-open')) operators.showPopover({ source: help });
+  };
+  // Tab order: search box, then the results, then the other controls; Shift+Tab reverses it.
+  function focusOrder() {
+    const elements = [...document.querySelectorAll('input,button,[tabindex="0"]')].filter(el => el.tabIndex >= 0 && !el.disabled &&
+      !el.closest('[hidden],[popover]') && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+    const listAt = elements.indexOf($('list-viewport'));
+    if (listAt >= 0) {
+      elements.splice(listAt, 1);
+      if (result?.results.length) elements.splice(elements.indexOf($('query')) + 1, 0, $('list-viewport'));
+    }
+    return elements;
+  }
   $('tabs-route').onclick = () => switchRoute('tabs'); $('canlii-route').onclick = () => switchRoute('canlii');
   $('use-active').onclick = () => useActive().catch(error => tell(error.message, true));
   $('issues').onclick = () => $('issue-popover').showPopover();
   document.addEventListener('keydown', event => {
     if (event.isComposing) return;
     if (event.key === 'Escape') {
-      // The panel stays open: reopening it would replay Chrome's slide-in.
-      if ($('issue-popover').matches(':popover-open')) return;
-      event.preventDefault(); if (inList()) $('query').focus(); else clear();
-    } else if (event.key === 'Tab' && route === 'tabs' && !event.altKey && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault(); event.shiftKey ? scopeCycle() : modeCycle();
+      if (document.querySelector(':popover-open')) return; // Escape closes the popover first.
+      event.preventDefault(); close();
+    } else if ((event.key === 'Tab' || event.key === 'F6') && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      const elements = focusOrder(), at = elements.indexOf(document.activeElement);
+      const next = elements[(at + (event.shiftKey ? -1 : 1) + elements.length) % elements.length];
+      if (next === $('list-viewport')) { if (current < 0) focusFirst(); else next.focus({ preventScroll: true }); } else next?.focus();
     } else if (route === 'tabs' && inList() && event.code === 'KeyX' && !event.metaKey && (event.ctrlKey !== event.altKey)) {
       // Pinpointer's shortcuts on the focused passage: Ctrl+X pinpoint, Ctrl+Shift+X quote, Alt+X citation.
       event.preventDefault(); copyPassage(event.altKey ? 'citation' : event.shiftKey ? 'quote' : 'pinpoint');
-    } else if (event.key === 'F6') {
-      event.preventDefault(); const elements = Array.from(document.querySelectorAll('input,button,[tabindex="0"]')).filter(el => !el.disabled && !el.hidden && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-      const at = elements.indexOf(document.activeElement); elements[(at + (event.shiftKey ? -1 : 1) + elements.length) % elements.length]?.focus();
     }
   });
   chrome.storage.onChanged.addListener((changes, area) => {

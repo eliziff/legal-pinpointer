@@ -41,15 +41,13 @@
       if (!entry?.result?.ok) throw new Error(entry?.result?.message || 'The document is no longer available.');
       return entry.result.value;
     }
-    async function install(tabId, ui = false) {
+    async function install(tabId) {
       // Warm tabs keep their module instances and sentence/index caches. A probe
       // also obtains the current document ID, so same-URL reloads are not trusted.
       const [probe] = await api.scripting.executeScript({ target: { tabId },
-        func: needsUI => Boolean(globalThis.LegalPinpointerSearchPage && (!needsUI || globalThis.LegalPinpointerFind)), args: [ui] });
+        func: () => Boolean(globalThis.LegalPinpointerSearchPage) });
       if (probe?.documentId && probe.result === true) return { tabId, documentId: probe.documentId };
-      const files = ['find-core.js', 'find-page.js'];
-      if (ui) files.push('find.js');
-      const [entry] = await api.scripting.executeScript({ target: { tabId }, files });
+      const [entry] = await api.scripting.executeScript({ target: { tabId }, files: ['find-core.js', 'find-page.js'] });
       if (!entry?.documentId) throw new Error('Cannot read this page.');
       return { tabId, documentId: entry.documentId };
     }
@@ -95,12 +93,12 @@
       });
     }
     async function search(message, sender) {
-      if (typeof message.query !== 'string' || message.query.length > 1024 || !['p', 's'].includes(message.mode) ||
+      if (typeof message.query !== 'string' || message.query.length > 1024 ||
           !['current', 'all', 'group'].includes(message.scope) || (message.refresh !== undefined && typeof message.refresh !== 'boolean')) {
         throw new Error('Invalid search request.');
       }
       // Ranked (plain-word) queries run in the side panel's own index; see SONAR_ISSUE.
-      const compiled = global.LegalPinpointerFindCore.compile(message.query, message.mode), key = sessionKey(sender);
+      const compiled = global.LegalPinpointerFindCore.compile(message.query), key = sessionKey(sender);
       if (!claim(key, message.sequence)) return { stale: true };
       const run = { cancelled: false, state: null };
       running.set(key, run);
@@ -162,7 +160,7 @@
           const pages = await Promise.all(ready.map(async ({ tab, target }) => {
             const end = Math.min(deadline, Date.now() + 5000);
             try {
-              const value = await timeout(invoke(target, 'search', [{ query: message.query, mode: compiled.mode,
+              const value = await timeout(invoke(target, 'search', [{ query: message.query,
                 ticket: state.ticket, deadline: end, refresh: Boolean(message.refresh), notify: Boolean(state.panel) }]), Math.max(1, end - Date.now()));
               if (!alive()) return [];
               const normalized = pageResults(value, tab, target);
@@ -188,7 +186,7 @@
         state.updated = Date.now();
         await exclusive(key, async () => { if (alive()) await save(key, state); });
         if (!alive()) return { stale: true };
-        return { session: key, ticket: state.ticket, results, mode: compiled.mode,
+        return { session: key, ticket: state.ticket, results,
           searched, total: candidates.length, skipped, limited, origin: state.origin,
           note: message.scope === 'group' && origin.groupId < 0 ? 'This tab is not in a tab group. No other ungrouped tabs were searched.' : '' };
       } finally {
@@ -332,7 +330,6 @@
       const state = await load(message.session);
       if (!state || Date.now() - state.updated > TTL || !state.targets.some(t => t.tabId === sender.tab.id && t.documentId === sender.documentId)) throw new Error('Search is no longer open.');
       // Target the exact original document; never navigate the tab to an old URL.
-      await api.scripting.executeScript({ target: keyFor(state.origin), func: () => globalThis.LegalPinpointerFind?.focus() });
       await invoke({ tabId: sender.tab.id, documentId: sender.documentId }, 'restore', []);
       const tab = await api.tabs.update(state.origin.tabId, { active: true });
       await api.windows.update(tab.windowId, { focused: true });
@@ -401,14 +398,6 @@
       if (message.type === 'SONAR_COPY') return copyResult(message, sender);
       return returnToSearch(message, sender);
     }
-    async function open(tab) {
-      if (!Number.isInteger(tab?.id)) throw new Error('No active tab is available.');
-      const target = await install(tab.id, true);
-      await api.scripting.executeScript({ target: keyFor(target), func: () => globalThis.LegalPinpointerFind.open() });
-      await api.action.setBadgeText({ tabId: tab.id, text: '' });
-      await api.action.setTitle({ tabId: tab.id, title: 'Legal Pinpointer' });
-      await prune();
-    }
     async function prune() {
       const stored = await api.storage.session.get(null);
       for (const [key, value] of Object.entries(stored)) if (key.startsWith(prefix) && Date.now() - value.updated > TTL) {
@@ -420,7 +409,7 @@
       for (const [key, value] of Object.entries(stored)) if (key.startsWith('sonar-launch:') && Date.now() - value.created > 60_000) await api.storage.session.remove(key);
       for (const [key, value] of pending) if (!running.has(key) && Date.now() - value.updated > TTL) pending.delete(key);
     }
-    return { handle, open, prune };
+    return { handle, prune };
   }
   if (typeof module !== 'undefined' && module.exports) { module.exports = { createBroker }; return; }
   global.LegalPinpointerSonarBroker = { createBroker };
