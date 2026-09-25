@@ -219,7 +219,7 @@
       return Boolean(piece && normalizeQuoteText(piece.toString()));
     });
     if (!preserveProvisionAncestors && ['section', 'rule', 'article', 'silcrow'].includes(model.structure.kind)) {
-      nodes = core.removeRedundantProvisionAncestors(nodes);
+      nodes = core.removeRedundantProvisionAncestors(core.collapseCompleteProvisions(nodes, model.structure.nodes));
     }
     return nodes;
   }

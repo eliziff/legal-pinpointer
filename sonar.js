@@ -438,6 +438,12 @@
       event.preventDefault(); close();
     } else if ((event.key === 'Tab' || event.key === 'F6') && !event.altKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
+      // In the results, Tab steps to the next result and Shift+Tab to the previous one.
+      const step = event.shiftKey ? -1 : 1;
+      if (event.key === 'Tab' && inList() && current >= 0 && current + step >= 0 && current + step < result.results.length) {
+        choose(current + step); return;
+      }
+      if (event.key === 'Tab' && inList() && step < 0) { $('query').focus(); return; }
       const elements = focusOrder(), at = elements.indexOf(document.activeElement);
       const next = elements[(at + (event.shiftKey ? -1 : 1) + elements.length) % elements.length];
       if (next === $('list-viewport')) { if (current < 0) focusFirst(); else next.focus({ preventScroll: true }); } else next?.focus();

@@ -456,6 +456,33 @@
     return input.filter(node => !ancestors.has(normalizeSpace(node.locator)));
   }
 
+  // A selection that reaches every leaf under a provision cites the provision:
+  // 8(1)(a) and 8(1)(b), when (b) ends 8(1), is s 8(1), not ss 8(1)(a)-(b).
+  function collapseCompleteProvisions(selected, all) {
+    const locators = new Set(all.map(node => normalizeSpace(node.locator)));
+    const parents = new Set(), leaves = new Map();
+    for (const node of all) for (const ancestor of provisionAncestors(node.locator)) parents.add(ancestor);
+    for (const node of all) {
+      const locator = normalizeSpace(node.locator);
+      if (parents.has(locator)) continue;
+      for (const ancestor of provisionAncestors(locator)) {
+        if (!leaves.has(ancestor)) leaves.set(ancestor, []);
+        leaves.get(ancestor).push(locator);
+      }
+    }
+    const chosen = new Set(selected.map(node => normalizeSpace(node.locator)));
+    const complete = new Set();
+    for (const [parent, under] of leaves) {
+      if (locators.has(parent) && under.some(leaf => chosen.has(leaf)) && under.every(leaf => chosen.has(leaf))) complete.add(parent);
+    }
+    if (!complete.size) return selected;
+    const covered = locator => provisionAncestors(locator).some(ancestor => complete.has(ancestor));
+    return all.filter(node => {
+      const locator = normalizeSpace(node.locator);
+      return complete.has(locator) ? !covered(locator) : chosen.has(locator) && !covered(locator);
+    });
+  }
+
   function makeTextFragment(value) {
     return `#:~:text=${encodeURIComponent(normalizeSpace(value))}`;
   }
@@ -599,6 +626,7 @@
     provisionAncestors,
     provisionDepth,
     removeRedundantProvisionAncestors,
+    collapseCompleteProvisions,
     reporterCandidates,
     splitCaseHeading,
     withFragment
