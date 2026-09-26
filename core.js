@@ -514,7 +514,8 @@
   function canliiCourtRoute(rawCode, language) {
     const code = String(rawCode || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
     const englishToFrench = { SCC: 'CSC', FCA: 'CAF', FC: 'CF', TCC: 'CCI', CMAC: 'CACM' };
-    const wantsFrench = String(language || '').toLowerCase().startsWith('fr') || Boolean(canliiCourts.frenchRoutes[code]);
+    const wantsFrench = String(language || '').toLowerCase().startsWith('fr') ||
+      Boolean(canliiCourts.frenchRoutes[code]) || canliiCourts.routes[code]?.startsWith('qc/');
     const routeCode = wantsFrench && englishToFrench[code] ? englishToFrench[code] : code;
     const route = canliiCourts.frenchRoutes[routeCode] || canliiCourts.routes[routeCode];
     return route ? { path: route, code: routeCode, language: wantsFrench ? 'fr' : 'en' } : null;
