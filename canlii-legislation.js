@@ -2,37 +2,6 @@
 
 (function exposeCanliiLegislation(global) {
   const PATHS = new Set(['stat', 'regu', 'astat', 'hstat', 'const']);
-  const SERIES = new Set([
-    'rsc', 'sc', 'rso', 'so', 'rsbc', 'sbc', 'rsa', 'sa', 'rss', 'ss',
-    'rsm', 'sm', 'rsnb', 'snb', 'rsns', 'sns', 'rsnl', 'snl', 'rspei',
-    'spei', 'rsnwt', 'snwt', 'rsy', 'sy', 'cqlr', 'rlrq', 'ccsm', 'cplm',
-    'lrc', 'lc', 'lro', 'lo', 'lrm', 'lm', 'rsq', 'lq'
-  ]);
-  const REGULATION_PREFIXES = new Map([
-    ['bc', 'bc'], ['britishcolumbia', 'bc'],
-    ['alta', 'alta'], ['alberta', 'alta'],
-    ['o', 'o'], ['ont', 'o'], ['ontario', 'o'],
-    ['man', 'man'], ['manitoba', 'man'],
-    ['nb', 'nb'], ['newbrunswick', 'nb'],
-    ['ns', 'ns'], ['novascotia', 'ns'],
-    ['nl', 'nl'], ['newfoundlandandlabrador', 'nl'],
-    ['pei', 'pei'], ['princeedwardisland', 'pei'],
-    ['nwt', 'nwt'], ['northwestterritories', 'nwt'],
-    ['nu', 'nu'], ['nunavut', 'nu'],
-    ['sask', 'sask'], ['saskatchewan', 'sask']
-  ]);
-  const SERIES_JURISDICTIONS = new Map([
-    ['rsc', 'ca'], ['sc', 'ca'], ['lrc', 'ca'], ['lc', 'ca'],
-    ['rsa', 'ab'], ['sa', 'ab'], ['rsbc', 'bc'], ['sbc', 'bc'],
-    ['rso', 'on'], ['so', 'on'], ['lro', 'on'], ['lo', 'on'],
-    ['rss', 'sk'], ['ss', 'sk'], ['rsm', 'mb'], ['sm', 'mb'],
-    ['ccsm', 'mb'], ['cplm', 'mb'], ['rsnb', 'nb'], ['snb', 'nb'],
-    ['rsns', 'ns'], ['sns', 'ns'], ['rsnl', 'nl'], ['snl', 'nl'],
-    ['rspei', 'pe'], ['spei', 'pe'], ['rsnwt', 'nt'], ['snwt', 'nt'],
-    ['rsy', 'yk'], ['sy', 'yk'], ['cqlr', 'qc'], ['rlrq', 'qc'],
-    ['rsq', 'qc'], ['lq', 'qc']
-  ]);
-
   function normalizeTitle(value) {
     return String(value || '')
       .normalize('NFKC')
@@ -43,50 +12,23 @@
       .trim();
   }
 
-  function seriesKey(value) {
-    return String(value || '').replace(/[^A-Za-z]/g, '').toLowerCase();
+  let nodeEngine;
+  function legislationLookup(value) {
+    const text = String(value || '');
+    if (!text) return { candidates: [], jurisdiction: '' };
+    if (typeof module === 'undefined' || !module.exports) {
+      throw new Error('Legislation lookup requires the initialized shared engine.');
+    }
+    nodeEngine ||= require('./legal-structure.mjs').initSync({
+      module: require('node:fs').readFileSync(require('node:path').join(__dirname, 'legal-structure.wasm'))
+    });
+    return require('./engine-abi.js')(nodeEngine, 'legal_citations_call', {
+      method: 'legislationLookup', request: { text }
+    }).result;
   }
 
   function legislationIdCandidates(value) {
-    const citation = String(value || '').normalize('NFKC').replace(/[\u2010-\u2015]/g, '-');
-    const output = [];
-    const add = (value) => {
-      const candidate = String(value || '').toLowerCase();
-      if (candidate && !output.includes(candidate)) output.push(candidate);
-    };
-
-    for (const match of citation.matchAll(/\b([A-Z.]{1,10})\s+(\d{4}(?:-\d{2,4}){0,2})\s*,?\s*c(?:h)?\.?\s*([A-Z0-9][A-Z0-9.-]*)/gi)) {
-      const series = seriesKey(match[1]);
-      if (!SERIES.has(series)) continue;
-      const chapter = match[3].toLowerCase();
-      add(`${series}-${match[2]}-c-${chapter}`);
-      add(`${series}-${match[2]}-c-${chapter.replace(/\./g, '-')}`);
-      add(`${series}-${match[2]}-c-${chapter.replace(/[.-]/g, '')}`);
-    }
-
-    const regulation = citation.match(/\b([A-Za-z. ]{1,28}?)\s+Reg\.?\s+(\d+)\s*\/\s*(\d{2,4})\b/i);
-    if (regulation) {
-      const prefix = REGULATION_PREFIXES.get(seriesKey(regulation[1]));
-      if (prefix) add(`${prefix}-reg-${regulation[2]}-${regulation[3]}`);
-    }
-
-    const instrument = citation.match(/\b(SOR|DORS|SI|TR)[/-](\d{2}|\d{4})-(\d+)\b/i);
-    if (instrument) add(`${instrument[1]}-${instrument[2]}-${instrument[3]}`);
-    const crc = citation.match(/\bC\.?R\.?C\.?,?\s+c\.?\s*(\d+)\b/i);
-    if (crc) add(`crc-c-${crc[1]}`);
-    return output;
-  }
-
-  function jurisdictionFromCitation(value) {
-    const citation = String(value || '');
-    const statute = citation.match(/\b([A-Z.]{1,10})\s+\d{4}(?:-\d{2,4}){0,2}\s*,?\s*c/i);
-    if (statute) return SERIES_JURISDICTIONS.get(seriesKey(statute[1])) || '';
-    const regulation = citation.match(/\b([A-Za-z. ]{1,28}?)\s+Reg\.?\s+\d+\s*\/\s*\d{2,4}\b/i);
-    if (regulation) {
-      const prefix = REGULATION_PREFIXES.get(seriesKey(regulation[1])) || '';
-      return prefix === 'alta' ? 'ab' : prefix === 'o' ? 'on' : prefix === 'man' ? 'mb' : prefix === 'sask' ? 'sk' : prefix;
-    }
-    return /\b(?:SOR|DORS|SI|TR)[/-]\d/i.test(citation) || /\bC\.?R\.?C\.?\b/i.test(citation) ? 'ca' : '';
+    return legislationLookup(value).candidates;
   }
 
   function parseIndex(text) {
@@ -113,10 +55,11 @@
     return `https://www.canlii.org/${lang}/${jurisdiction}/laws/${row.path}/${row.id}/latest/${row.id}.html`;
   }
 
-  function resolve(index, title, citation, language) {
+  function resolve(index, title, citation, language, lookup) {
     const titleKey = normalizeTitle(title);
     if (!index || !titleKey) return '';
-    const candidates = legislationIdCandidates(citation);
+    lookup ||= legislationLookup(citation);
+    const candidates = lookup.candidates;
     for (const id of candidates) {
       const row = (index.byId.get(id) || []).find((candidate) => candidate.title === titleKey);
       if (row) return rowUrl(row, language);
@@ -133,7 +76,7 @@
       const candidateSet = new Set(candidates);
       const exact = rows.filter((row) => candidateSet.has(row.id));
       if (exact.length === 1) return rowUrl(exact[0], language);
-      const jurisdiction = jurisdictionFromCitation(citation);
+      const jurisdiction = lookup.jurisdiction;
       if (jurisdiction) rows = rows.filter((row) => row.databaseId.startsWith(jurisdiction));
       if (rows.length === 1) return rowUrl(rows[0], language);
     }

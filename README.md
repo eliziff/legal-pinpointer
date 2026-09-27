@@ -112,13 +112,12 @@ Refresh the exact parser after changing `legal-structure`:
 .\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
 ```
 
-The refresh script builds a disposable offline WASM project from the checked-in ABI and the supplied parser source, then replaces only `legal-structure.wasm`.
+The refresh script builds a disposable offline WASM project from the checked-in ABI and the supplied parser source, then replaces `legal-structure.wasm` and its generated classic-worker (`legal-structure.js`) and module (`legal-structure.mjs`) loaders. It requires `wasm-bindgen-cli` at the version resolved in the engine dependency lock; the script checks that version before generating bindings.
 
-Refresh the exact CanLII court-route table:
-
-```powershell
-.\tools\sync-canlii-courts.ps1 -SourcePath 'C:\path\to\Beaver\backend\src\lib\canliiUrls.ts'
-```
+Citation parsing, formatting, reporter preferences and CanLII court routes come from
+`common-law-cite` through the parser's shared citation dependency. Rebuild the
+WASM above after updating that dependency. `canlii-courts.js` remains solely as
+input to existing validation tools; production scripts do not load it.
 
 Refresh the packaged CanLII legislation metadata from the existing local snapshot:
 
@@ -126,7 +125,7 @@ Refresh the packaged CanLII legislation metadata from the existing local snapsho
 python .\tools\build-canlii-legislation-index.py 'C:\path\to\canlii.db'
 ```
 
-Refresh the packaged reporter-alias to CanLII case index from local A2AJ and CanLII metadata:
+Refresh the packaged reporter-alias to CanLII case index from local A2AJ and CanLII metadata, using the same `legal-citations` Python package revision as the packaged WASM:
 
 ```powershell
 python .\tools\build-canlii-case-aliases.py 'C:\path\to\a2aj_reporter_aliases.json' 'C:\path\to\a2aj.sqlite' 'C:\path\to\canlii.db'

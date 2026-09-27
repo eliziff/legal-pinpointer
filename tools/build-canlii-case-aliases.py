@@ -1,4 +1,4 @@
-"""Build canlii-case-aliases.tsv: reporter/alias citation key -> CanLII case target.
+"""Build canlii-case-aliases.tsv: reporter/alias citation version-3 identity key -> CanLII case target.
 
 Sources (local, read-only):
   A2AJ reporter aliases  (ALR-Quote-Verifier data/a2aj_reporter_aliases.json): alias -> canonical citation
@@ -17,18 +17,28 @@ import re
 import sqlite3
 import sys
 import unicodedata
+
+from legal_citations import extract, key_for_text, registry
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 aliases_path, a2aj_path, canlii_path = sys.argv[1:4]
 
-routes = dict(re.findall(r"'([A-Z0-9-]+)': '([a-z]{2}/[a-z0-9-]+)'", (ROOT / "canlii-courts.js").read_text(encoding="utf8")))
-
-
-def key(citation):
-    """Must match core.citationKey."""
-    text = unicodedata.normalize("NFKD", citation).encode("ascii", "ignore").decode().lower()
-    return re.sub(r"[^a-z0-9]", "", text)
+# Reuse the engine's court routes; duplicate surfaces with conflicting routes
+# cannot authorize a derived CanLII target.
+routes = {}
+route_conflicts = set()
+for court in registry("courts"):
+    for index, code in enumerate(court.get("neutral", [])):
+        route = (court.get("canlii_fr") if index % 2 else None) or court.get("canlii")
+        if not route or code in route_conflicts:
+            continue
+        value = f"{route['jurisdiction']}/{route['database']}"
+        if code in routes and routes[code] != value:
+            route_conflicts.add(code)
+            routes.pop(code)
+        else:
+            routes[code] = value
 
 
 def name_key(name):
@@ -38,7 +48,10 @@ def name_key(name):
     return re.sub(r"[^a-z0-9]", "", text)
 
 
-NEUTRAL = re.compile(r"^(\d{4}) ([A-Z][A-Z0-9-]+) (\d+)$")
+def neutral(citation):
+    readings = extract(citation, resolve=False, parallel=False)
+    return (readings[0] if len(readings) == 1 and readings[0].get("format") == "neutral"
+            and readings[0].get("key") else None)
 
 # CanLII cases indexed by (database, year, normalized name).
 canlii = {}
@@ -63,9 +76,8 @@ for dataset, citation, name, date in a2aj.execute(
 
 
 def canlii_target(canonical):
-    if NEUTRAL.match(canonical):
-        code = NEUTRAL.match(canonical).group(2)
-        return canonical if code in routes else ""
+    if reading := neutral_citations.get(canonical):
+        return canonical if reading["fields"].get("series") in routes else ""
     record = pre_neutral.get(canonical)
     if not record or record[0] not in routes:
         return ""
@@ -83,12 +95,20 @@ def canlii_target(canonical):
 rows = {}
 conflicts = set()
 aliases = json.loads(Path(aliases_path).read_text(encoding="utf8"))["aliases"]
-canonicals = {alias["canonical_citation"] for alias in aliases.values()} | set(pre_neutral)
+# Use the shared engine's reviewed identity and canonical target together.
+# The original evidence file remains the list of requested source spellings.
+resolved_aliases = []
+for alias in aliases.values():
+    readings = [item for item in extract(alias["alias"], resolve=False, parallel=False)
+                if item["form"] == "full"]
+    if len(readings) == 1 and (target := readings[0].get("alias")):
+        resolved_aliases.append((target["key"], target["citation"]))
+canonicals = {canonical for _, canonical in resolved_aliases} | set(pre_neutral)
+neutral_citations = {canonical: reading for canonical in canonicals if (reading := neutral(canonical))}
 targets = {canonical: canlii_target(canonical) for canonical in canonicals}
 
 
-def add(citation, target):
-    k = key(citation)
+def add(k, target):
     if not k or not target or k in conflicts:
         return
     if k in rows and rows[k] != target:
@@ -99,13 +119,13 @@ def add(citation, target):
 
 
 for canonical, target in targets.items():
-    if not NEUTRAL.match(canonical):
-        add(canonical, target)
-for alias in aliases.values():
-    add(alias["alias"], targets.get(alias["canonical_citation"], ""))
+    if canonical not in neutral_citations:
+        add(key_for_text(canonical, resolve=False, parallel=False), target)
+for identity, canonical in resolved_aliases:
+    add(identity, targets.get(canonical, ""))
 
 body = "".join(f"{k}\t{rows[k]}\n" for k in sorted(rows))
 digest = hashlib.sha256(body.encode()).hexdigest()
-(ROOT / "canlii-case-aliases.tsv").write_text(f"# legal-pinpointer-canlii-case-aliases-v1\tsha256={digest}\n{body}", encoding="utf8", newline="\n")
-resolved_pre = sum(1 for c, t in targets.items() if not NEUTRAL.match(c) and t)
+(ROOT / "canlii-case-aliases.tsv").write_text(f"# legal-pinpointer-canlii-case-aliases-v3\tsha256={digest}\n{body}", encoding="utf8", newline="\n")
+resolved_pre = sum(1 for c, t in targets.items() if c not in neutral_citations and t)
 print(f"aliases={len(aliases)} keys={len(rows)} conflicts={len(conflicts)} pre-neutral resolved={resolved_pre}/{len(pre_neutral)}")

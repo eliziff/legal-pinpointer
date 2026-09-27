@@ -300,7 +300,7 @@
       const { state, result } = await issued(message, sender);
       const [probe] = await api.scripting.executeScript({ target: keyFor(result),
         func: () => Boolean(globalThis.LegalPinpointerSonarCopy || globalThis.LegalPinpointerTextFragments) });
-      if (!probe?.result) await api.scripting.executeScript({ target: keyFor(result), files: ['canlii-courts.js', 'core.js', 'text-fragments.js'] });
+      if (!probe?.result) await api.scripting.executeScript({ target: keyFor(result), files: ['core.js', 'text-fragments.js'] });
       const [entry] = await api.scripting.executeScript({ target: keyFor(result), args: [state.ticket, pageKey(state, result), message.mode],
         func: async (ticket, key, mode) => {
           try {

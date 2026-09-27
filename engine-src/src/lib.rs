@@ -1,7 +1,7 @@
 use legal_structure::{
     provider_text_document_structure, DocumentStructure, ProviderTextInput, ENGINE_SOURCE_SHA256,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, slice};
 
 thread_local! {
@@ -53,6 +53,25 @@ fn encode(input: &[u8]) -> Vec<u8> {
         })
         .expect("browser error serialization is infallible"),
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CitationCall {
+    method: String,
+    request: serde_json::Value,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn legal_citations_call(pointer: *const u8, length: usize) {
+    let input = if pointer.is_null() { &[] } else { slice::from_raw_parts(pointer, length) };
+    let result = serde_json::from_slice::<CitationCall>(input).map_err(|error| error.to_string())
+        .and_then(|call| legal_structure::citations::api::call_value(&call.method, call.request).map_err(|error| error.to_string()));
+    let response = match result {
+        Ok(result) => serde_json::json!({ "ok": true, "result": result }),
+        Err(error) => serde_json::json!({ "ok": false, "error": error }),
+    };
+    OUTPUT.with(|output| *output.borrow_mut() = serde_json::to_vec(&response).expect("citation response serializes"));
 }
 
 #[no_mangle]
