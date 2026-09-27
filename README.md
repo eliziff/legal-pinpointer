@@ -112,13 +112,12 @@ Refresh the exact parser after changing `legal-structure`:
 .\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
 ```
 
-The refresh script builds a disposable offline WASM project from the checked-in ABI and the supplied parser source, then replaces only `legal-structure.wasm`.
+The refresh script builds a disposable offline WASM project from the checked-in ABI and the supplied parser source, then replaces `legal-structure.wasm` and its generated classic-worker (`legal-structure.js`) and module (`legal-structure.mjs`) loaders. It requires `wasm-bindgen-cli` at the version resolved in the engine dependency lock; the script checks that version before generating bindings.
 
-Refresh the exact CanLII court-route table:
-
-```powershell
-.\tools\sync-canlii-courts.ps1 -SourcePath 'C:\path\to\Beaver\backend\src\lib\canliiUrls.ts'
-```
+Citation parsing, formatting, reporter preferences and CanLII court routes come from
+`common-law-cite` through the parser's shared citation dependency. Rebuild the
+WASM above after updating that dependency. `canlii-courts.js` remains solely as
+input to existing validation tools; production scripts do not load it.
 
 Run focused tests:
 

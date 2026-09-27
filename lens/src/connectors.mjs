@@ -72,7 +72,7 @@ export class TabsConnector {
       cancelled(signal);if(tab.discarded||tab.frozen){errors.push({path:tab.title,error:'Activate this sleeping tab and search again.'});continue;}
       try {
         const installed=await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>Boolean(globalThis.LegalPinpointerLensBridge)});
-        if(!installed[0]?.result)await chrome.scripting.executeScript({target:{tabId:tab.id},files:['canlii-courts.js','core.js','text-fragments.js','providers.js','content.js']});
+        if(!installed[0]?.result)await chrome.scripting.executeScript({target:{tabId:tab.id},files:['core.js','text-fragments.js','providers.js','content.js']});
         let native;
         try{native=await execute(tab.id,null,'collect',[]);}catch{native=null;}
         if(native?.value.units.length){

@@ -320,12 +320,12 @@
     return `<a href="${core.escapeHtml(target.href)}">${core.escapeHtml(label)}</a>`;
   }
 
-  function pinpointMarkup(model, sourceInfo, inputNodes, style, linkFullTextFragmentPinpoint) {
+  async function pinpointMarkup(model, sourceInfo, inputNodes, style, linkFullTextFragmentPinpoint) {
     const nodes = uniqueLocatorNodes(inputNodes);
-    const plain = core.formatPinpoint(model.structure.kind, nodes.map((node) => node.locator), style);
+    const [{ plain, prefix, locators, groups }] = await core.pinpointLayouts(
+      model.structure.kind, [nodes.map((node) => node.locator)], style);
+    assertCurrentModel(model);
     if (sourceInfo.kind === 'text-fragment') {
-      const prefix = core.pinpointPrefix(model.structure.kind, nodes.length, style);
-      const locators = core.collapseLocatorRanges(nodes.map((node) => node.locator));
       return {
         plain,
         html: linkFullTextFragmentPinpoint
@@ -333,14 +333,12 @@
           : `${core.escapeHtml(prefix)}${anchorHtml(locators, sourceInfo.url)}`
       };
     }
-    const groups = core.locatorGroups(nodes.map((node) => node.locator));
     const pieces = groups.map((group) => {
       const first = anchorHtml(group.firstDisplay, targetForNode(model, sourceInfo, nodes[group.start]));
       if (group.end === group.start) return first;
       const last = anchorHtml(group.lastDisplay, targetForNode(model, sourceInfo, nodes[group.end]));
       return `${first}-${last}`;
     });
-    const prefix = core.pinpointPrefix(model.structure.kind, nodes.length, style);
     return {
       plain,
       html: `${core.escapeHtml(prefix)}${pieces.join(', ')}`
@@ -659,7 +657,7 @@
       if (!nodes.length) throw new Error('No page, paragraph, or provision overlaps that range.');
       const settings = await storageGet({ pinpointStyle: 'full', linkFullTextFragmentPinpoint: false });
       assertCurrentModel(model);
-      const pinpoint = pinpointMarkup(
+      const pinpoint = await pinpointMarkup(
         model,
         sourceInfo,
         nodes,
@@ -704,7 +702,7 @@
       structureSource: model.structure ? model.structure.source : metadataOnly ? 'not-inspected' : 'none',
       structureCount: model.structure ? model.structure.nodes.length : metadataOnly ? null : 0,
       selectedPinpoint: model.structure
-        ? core.formatPinpoint(model.structure.kind, selected.map((node) => node.locator), settings.pinpointStyle)
+        ? await core.formatPinpoint(model.structure.kind, selected.map((node) => node.locator), settings.pinpointStyle)
         : ''
     };
   }
@@ -728,9 +726,10 @@
       if (!range) continue;
       const text = normalizeQuoteText(range.toString());
       if (text) units.push({index,locator:node.locator,
-        pinpoint:core.formatPinpoint(model.structure.kind,[node.locator],settings.pinpointStyle),
         kind:model.structure.kind,text,target:targetForNode(model,{kind:'lens'},node)});
     }
+    const layouts = await core.pinpointLayouts(model.structure.kind, units.map(unit => [unit.locator]), settings.pinpointStyle);
+    units.forEach((unit, index) => { unit.pinpoint = layouts[index].plain; });
     assertCurrentModel(model);
     return {revision:documentRevision,url:location.href,title:document.title,citation:model.citation.plain,
       documentType:model.documentType,provider:model.provider,structureKind:model.structure.kind,units};
@@ -793,7 +792,7 @@
     const useFragment=options.link==='text';
     const target=useFragment?lensFragment(range,model):targetForNode(model,{kind:'lens'},node);
     const sourceInfo=useFragment?{kind:'text-fragment',range,url:target}:{kind:'lens',range};
-    const pin=pinpointMarkup(model,sourceInfo,[node],options.wording||settings.pinpointStyle,settings.linkFullTextFragmentPinpoint);
+    const pin=await pinpointMarkup(model,sourceInfo,[node],options.wording||settings.pinpointStyle,settings.linkFullTextFragmentPinpoint);
     let payload;
     if(mode==='link')payload={plain:target,html:anchorHtml(target,target)};
     else if(mode==='citation')payload=core.outputCitationLink(model.citation,model.canliiUrl||model.cleanUrl);

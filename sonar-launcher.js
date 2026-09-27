@@ -4,12 +4,12 @@
   const keyFor = windowId => `sonar-launch:${windowId}`;
   // CanLII's boxes: document text (text=), case name or title (id=), and noteup,
   // which names the cited document by its CanLII path (origin1=) and keeps the typed text (nquery1=).
-  function canliiURL(query, field = 'text') {
+  async function canliiURL(query, field = 'text') {
     if (typeof query !== 'string' || !query.trim() || query.length > 4096) throw new Error('Enter up to 4,096 characters to search CanLII.');
     const value = query.trim(), search = 'https://www.canlii.org/en/#search/';
     if (field === 'id') return `${search}id=${encodeURIComponent(value)}`;
     if (field !== 'noteup') return `${search}text=${encodeURIComponent(value)}`;
-    const cited = global.LegalPinpointerCore?.canliiUrlForCitation(value, 'en');
+    const cited = await global.LegalPinpointerCore?.canliiUrlForCitation(value, 'en');
     if (!cited) throw new Error('Noteup needs a citation CanLII can resolve, such as 2016 SCC 27.');
     return `${search}origin1=${encodeURIComponent(new URL(cited).pathname)}&nquery1=${encodeURIComponent(value)}`;
   }
@@ -50,7 +50,7 @@
         task = launch(null, message.type === 'LEGAL_PINPOINTER_OPEN_CANLII_SEARCH' ? 'canlii' : 'tabs');
       } else if (panel && message?.type === 'SONAR_CANLII_SEARCH') {
         task = Promise.resolve().then(async () => {
-          const url = canliiURL(message.query, message.field);
+          const url = await canliiURL(message.query, message.field);
           if (!Number.isInteger(message.windowId)) throw new Error('Invalid destination window.');
           const window = await api.windows.get(message.windowId);
           if (Boolean(window.incognito) !== Boolean(message.incognito)) throw new Error('Cannot mix private and normal windows.');

@@ -1,6 +1,8 @@
 'use strict';
 
-importScripts('canlii-courts.js', 'core.js', 'canlii-legislation.js', 'find-core.js', 'find-worker.js', 'sonar-launcher.js');
+globalThis.LegalPinpointerCitationCall = citationCall;
+
+importScripts('legal-structure.js', 'engine-abi.js', 'core.js', 'canlii-legislation.js', 'find-core.js', 'find-worker.js', 'sonar-launcher.js');
 
 const canliiLegislation = globalThis.LegalPinpointerCanliiLegislation;
 
@@ -23,9 +25,8 @@ async function loadEngine() {
       .then(async (response) => {
         if (!response.ok) throw new Error(`Legal structure engine failed to load (${response.status}).`);
         const bytes = await response.arrayBuffer();
-        return WebAssembly.instantiate(bytes);
+        return legalStructureInit({ module_or_path: bytes });
       })
-      .then(({ instance }) => instance.exports)
       .catch((error) => {
         enginePromise = undefined;
         throw error;
@@ -104,24 +105,20 @@ function validInput(input) {
 
 async function derive(input) {
   if (!validInput(input)) throw new Error('The legal structure request is invalid or too large.');
-  const engine = await loadEngine();
-  const encoded = new TextEncoder().encode(JSON.stringify(input));
-  const pointer = engine.legal_structure_alloc(encoded.length);
-  if (!pointer && encoded.length) throw new Error('The legal structure engine could not allocate input memory.');
+  return invokeEngine('legal_structure_analyze', input);
+}
 
-  try {
-    new Uint8Array(engine.memory.buffer, pointer, encoded.length).set(encoded);
-    engine.legal_structure_analyze(pointer, encoded.length);
-  } finally {
-    engine.legal_structure_dealloc(pointer, encoded.length);
+async function citationCall(method, request) {
+  if (typeof method !== 'string' || method.length > 80 || !request || typeof request !== 'object'
+      || JSON.stringify(request).length > MAX_TEXT_LENGTH) {
+    throw new Error('The citation request is invalid or too large.');
   }
+  const response = await invokeEngine('legal_citations_call', { method, request });
+  return response.result;
+}
 
-  const outputPointer = engine.legal_structure_output_pointer();
-  const outputLength = engine.legal_structure_output_length();
-  const output = new Uint8Array(engine.memory.buffer, outputPointer, outputLength);
-  const result = JSON.parse(new TextDecoder().decode(output));
-  if (!result || result.ok !== true) throw new Error(result && result.error ? result.error : 'Legal structure derivation failed.');
-  return result;
+async function invokeEngine(operation, input) {
+  return globalThis.LegalPinpointerEngineCall(await loadEngine(), operation, input);
 }
 
 async function resolveLegislation(input) {
@@ -130,17 +127,20 @@ async function resolveLegislation(input) {
       || (input.language && (typeof input.language !== 'string' || input.language.length > 20))) {
     throw new Error('The CanLII legislation request is invalid or too large.');
   }
-  const index = await loadLegislationIndex();
-  return canliiLegislation.resolve(index, input.title, input.citation, input.language);
+  const [index, lookup] = await Promise.all([loadLegislationIndex(),
+    citationCall('legislationLookup', { text: input.citation })]);
+  return canliiLegislation.resolve(index, input.title, input.citation, input.language, lookup);
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || !['LEGAL_PINPOINTER_DERIVE_STRUCTURE', 'LEGAL_PINPOINTER_RESOLVE_LEGISLATION', 'LEGAL_PINPOINTER_RESOLVE_CASE'].includes(message.type)) return false;
+  if (!message || !['LEGAL_PINPOINTER_DERIVE_STRUCTURE', 'LEGAL_PINPOINTER_RESOLVE_LEGISLATION', 'LEGAL_PINPOINTER_RESOLVE_CASE', 'LEGAL_PINPOINTER_CITATION_CALL'].includes(message.type)) return false;
   if (!validSender(sender)) {
     sendResponse({ ok: false, message: 'Legal Pinpointer requests are limited to supported document pages.' });
     return false;
   }
-  const task = message.type === 'LEGAL_PINPOINTER_DERIVE_STRUCTURE'
+  const task = message.type === 'LEGAL_PINPOINTER_CITATION_CALL'
+    ? citationCall(message.method, message.request).then(result => ({ ok: true, result }))
+    : message.type === 'LEGAL_PINPOINTER_DERIVE_STRUCTURE'
     ? derive(message.input)
     : message.type === 'LEGAL_PINPOINTER_RESOLVE_CASE'
       ? resolveCase(message.input).then((targets) => ({ ok: true, targets }))

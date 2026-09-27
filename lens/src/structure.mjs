@@ -1,11 +1,12 @@
 import {paragraphSpans} from './core.mjs';
+import initStructure from '../../legal-structure.mjs';
 
 // The same packaged parser used by native Pinpointer. Its ranges are UTF-16,
 // exactly the unit used by String.slice and browser text nodes.
 export async function structureEngine(url) {
   const response = await fetch(url);
   if (!response.ok) throw new Error('Cannot load the packaged legal structure parser.');
-  const {instance:{exports:e}} = await WebAssembly.instantiate(await response.arrayBuffer());
+  const e = await initStructure({ module_or_path: await response.arrayBuffer() });
   return (text,meta={}) => {
     const bytes = new TextEncoder().encode(JSON.stringify({source_kind:meta.documentType==='legislation'?'laws':'cases',text,citation:meta.citation||'',name:meta.title||''}));
     const pointer=e.legal_structure_alloc(bytes.length);
