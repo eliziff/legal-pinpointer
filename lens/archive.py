@@ -1,7 +1,7 @@
 """Build the installable package with streaming native-zlib compression."""
 import sys,zipfile,pathlib
 repo=pathlib.Path(sys.argv[1]);target=pathlib.Path(sys.argv[2]);target.parent.mkdir(exist_ok=True,parents=True)
-names=[p for p in repo.iterdir() if p.is_file() and (p.suffix in {'.js','.mjs','.html','.css','.json','.wasm','.tsv','.txt'} or p.name in {'LICENSE','THIRD_PARTY_NOTICES.md'}) and p.name not in {'package.json','package-lock.json','runtime-validation.json','canlii-courts.js'}]
+names=[p for p in repo.iterdir() if p.is_file() and (p.suffix in {'.js','.mjs','.html','.css','.json','.wasm','.tsv','.txt'} or p.name in {'LICENSE','THIRD_PARTY_NOTICES.md'}) and p.name not in {'package.json','package-lock.json','runtime-validation.json'}]
 names+=[p for p in (repo/'lens-dist').rglob('*') if 'test' not in p.relative_to(repo/'lens-dist').parts]
 with zipfile.ZipFile(str(target)+'.tmp','w',zipfile.ZIP_DEFLATED,compresslevel=1,allowZip64=True) as z:
  for p in sorted(names):

@@ -113,7 +113,7 @@ async function main() {
   await cdp.send('Runtime.enable');
   await delay(500);
 
-  for (const filename of ['canlii-courts.js', 'core.js', 'text-fragments.js', 'providers.js']) {
+  for (const filename of ['core.js', 'text-fragments.js', 'providers.js']) {
     const expression = fs.readFileSync(path.join(projectRoot, filename), 'utf8');
     const loaded = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true });
     if (loaded.exceptionDetails) throw new Error(`${filename} did not load in the capture.`);

@@ -168,7 +168,7 @@ async function main() {
   });
   const evaluate = async (expression) => (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result.result.value;
   await send('Page.enable');
-  const scripts = ['canlii-courts.js', 'core.js', 'text-fragments.js'].map((name) => fs.readFileSync(path.join(projectRoot, name), 'utf8'));
+  const scripts = ['core.js', 'text-fragments.js'].map((name) => fs.readFileSync(path.join(projectRoot, name), 'utf8'));
   const failures = [];
   try {
     for (const [at, [name, , directive]] of CASES.entries()) {

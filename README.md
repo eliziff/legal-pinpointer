@@ -116,8 +116,7 @@ The refresh script builds a disposable offline WASM project from the checked-in 
 
 Citation parsing, formatting, reporter preferences and CanLII court routes come from
 `common-law-cite` through the parser's shared citation dependency. Rebuild the
-WASM above after updating that dependency. `canlii-courts.js` remains solely as
-input to existing validation tools; production scripts do not load it.
+WASM above after updating that dependency.
 
 Refresh the packaged CanLII legislation metadata from the existing local snapshot:
 
