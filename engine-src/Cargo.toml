@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-legal-structure = { git = "https://github.com/eliziff/legal-structure-parser.git", rev = "2db3f7c0a3d87dcd4b7ec74c52775100f42505b0", features = ["provider-text", "citator"] }
+legal-structure = { git = "https://github.com/eliziff/legal-structure-parser.git", rev = "2adddcff2da9268fa2bc84915587a46038460c7c", features = ["provider-text", "citator"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
