@@ -563,13 +563,12 @@ ${base.headerText || ''}`,
   // a year with the document's own citations, and an SCC target needs the document to be an SCC decision.
   function plausibleCaseTarget(base, target, cases) {
     const header = `${base.citation.citation} | ${base.headerText || ''}`;
-    const years = new Set(Array.from(header.matchAll(/\[((?:18|19|20)\d{2})\]|\b((?:18|19|20)\d{2})\s+(?:Carswell[A-Za-z]+|CanLII|[A-Z]{2,}[A-Z]*)\s+\d/g),
-      (match) => match[1] || match[2]));
+    const years = new Set(cases.map(citation => citation.fields.year).filter(Boolean));
     // Report volumes can be dated the year after the decision.
     if (!target || ![0, 1, -1].some((delta) => years.has(String(Number(target.year) + delta)))) return false;
     return target.courtId !== 'scc'
       || cases.some(citation => citation.court && citation.court.id === 'scc')
-      || /Supreme Court of Canada|Cour supr[eê]me du Canada|\b(?:S\.?C\.?R|R\.?C\.?S|SCC|CSC)\b/.test(header);
+      || /Supreme Court of Canada|Cour supr[eê]me du Canada/.test(header);
   }
 
   async function pickCaseTarget(base, targets, cases = [], language = 'en') {
