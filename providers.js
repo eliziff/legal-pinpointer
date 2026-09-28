@@ -543,45 +543,51 @@
   }
 
   // Pre-neutral and reporter-only cases resolve through the packaged A2AJ alias x CanLII index.
-  async function caseAliasKeys(base) {
+  async function caseAliasEvidence(base) {
     const result = await core.citationCall('extract', {
       text: `${base.citation.citation}
 ${base.headerText || ''}`,
       options: { resolve: false, parallel: false }
     });
     const cases = result.citations.filter(citation => citation.form === 'full' && citation.authority === 'case');
-    if (cases.some(citation => !citation.key)) return [];
+    if (cases.some(citation => !citation.key)) return { cases: [], keys: [] };
     const keys = Array.from(new Set(cases.map(citation => citation.key)));
-    return keys.length <= 50 ? keys : [];
+    return { cases, keys: keys.length <= 50 ? keys : [] };
+  }
+
+  async function caseAliasKeys(base) {
+    return (await caseAliasEvidence(base)).keys;
   }
 
   // Alias evidence can attach a same-named case from another court or year, so a target must share
   // a year with the document's own citations, and an SCC target needs the document to be an SCC decision.
-  function plausibleCaseTarget(base, target) {
+  function plausibleCaseTarget(base, target, cases) {
     const header = `${base.citation.citation} | ${base.headerText || ''}`;
     const years = new Set(Array.from(header.matchAll(/\[((?:18|19|20)\d{2})\]|\b((?:18|19|20)\d{2})\s+(?:Carswell[A-Za-z]+|CanLII|[A-Z]{2,}[A-Z]*)\s+\d/g),
       (match) => match[1] || match[2]));
-    const year = (String(target).match(/^(?:[a-z]{2}\/[a-z0-9-]+\/)?((?:18|19|20)\d{2})/) || [])[1];
     // Report volumes can be dated the year after the decision.
-    if (!year || ![0, 1, -1].some((delta) => years.has(String(Number(year) + delta)))) return false;
-    const supreme = /^ca\/(?:scc|csc)\/|^\d{4}\s+(?:SCC|CSC)\s/i.test(target);
-    return !supreme || /Supreme Court of Canada|Cour supr[eê]me du Canada|\b(?:S\.?C\.?R|R\.?C\.?S|SCC|CSC)\b/.test(header);
+    if (!target || ![0, 1, -1].some((delta) => years.has(String(Number(target.year) + delta)))) return false;
+    return target.courtId !== 'scc'
+      || cases.some(citation => citation.court && citation.court.id === 'scc')
+      || /Supreme Court of Canada|Cour supr[eê]me du Canada|\b(?:S\.?C\.?R|R\.?C\.?S|SCC|CSC)\b/.test(header);
   }
 
-  function pickCaseTarget(base, targets) {
-    const candidates = Array.from(new Set((targets || []).filter(target => plausibleCaseTarget(base, target))));
-    return candidates.length === 1 ? candidates[0] : '';
+  async function pickCaseTarget(base, targets, cases = [], language = 'en') {
+    const distinct = Array.from(new Set(targets || []));
+    const parsed = await Promise.all(distinct.map(target => core.citationCall('canliiAliasTargetInfo', { target, language })));
+    const candidates = parsed.filter(target => target && target.url && plausibleCaseTarget(base, target, cases));
+    return candidates.length === 1 ? candidates[0].url : '';
   }
 
   async function requestCaseUrl(base, language) {
-    const keys = await caseAliasKeys(base);
+    const { keys, cases } = await caseAliasEvidence(base);
     if (!keys.length) return '';
-    return new Promise((resolve) => {
+    const response = await new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_RESOLVE_CASE', input: { keys } }, (response) => {
-        const target = !chrome.runtime.lastError && response && response.ok === true ? pickCaseTarget(base, response.targets) : '';
-        resolve(target ? core.canliiUrlForAliasTarget(target, language) : '');
+        resolve(chrome.runtime.lastError ? null : response);
       });
     });
+    return response && response.ok === true ? pickCaseTarget(base, response.targets, cases, language) : '';
   }
 
   function engineInput(base, plane) {
