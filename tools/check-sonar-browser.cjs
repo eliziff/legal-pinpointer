@@ -19,7 +19,7 @@ test('installed extension recovers stale sources and searches across tabs/window
   const server = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(`<!doctype html><html lang="en"><body>${bodies.get(req.url) || '<title>Empty</title>'}</body></html>`); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`, debug = 9400 + Math.floor(Math.random() * 500);
-  let context, panel;
+  let context, panel, passed = false;
   const connections = [];
   const errors = [], checks = [];
   const record = label => { checks.push(label); console.log(`PASS ${label}`); };
@@ -121,7 +121,14 @@ test('installed extension recovers stale sources and searches across tabs/window
     await panel.focus('#query'); await panel2.focus('#query');
     await b.evaluate(() => { document.querySelector('p').textContent = 'Privilege broadcast reaches two independent panels.'; });
     await Promise.all([matching(panel, 'two independent panels'), matching(panel2, 'two independent panels')]);
-    await panel2.focus('#query'); await Promise.all([panel2.waitForEvent('close'), panel2.keyboard.press('Escape')]);
+    record('independent native panels both receive source changes');
+    await panel2.focus('#query');
+    const closed = panel2.waitForEvent('close');
+    await panel2.keyboard.press('Escape').catch(error => {
+      // Closing on keydown can destroy the target before Playwright sends keyup.
+      if (!/Target page, context or browser has been closed/.test(error.message)) throw error;
+    });
+    await closed; assert.equal(panel2.isClosed(), true);
     await panel.focus('#query'); await b.evaluate(() => { document.querySelector('p').textContent = 'Privilege watcher survives the other panel closing.'; });
     await matching(panel, 'other panel closing');
     record('independent panels receive invalidations and one Close preserves the other watcher');
@@ -132,9 +139,9 @@ test('installed extension recovers stale sources and searches across tabs/window
     await other.waitForFunction(() => CSS.highlights.has('legal-pinpointer-sonar-active'));
     assert.ok((await worker.evaluate(() => chrome.tabs.query({ active: true }))).some(tab => tab.url.endsWith('/other')));
     record('cross-window Open targets and highlights the original passage');
-    assert.deepEqual(errors, []);
+    assert.deepEqual(errors, []); passed = true;
   } finally {
-    const report = { checks, errors, browser: context?.browser()?.version(), nativeExtension: true };
+    const report = { passed, checks, errors, browser: context?.browser()?.version(), nativeExtension: true };
     fs.mkdirSync(path.join(root, 'test-results'), { recursive: true });
     fs.writeFileSync(path.join(root, 'test-results/sonar-browser.json'), JSON.stringify(report, null, 2));
     if (panel && !panel.isClosed()) await panel.screenshot({ path: path.join(root, 'test-results/sonar-panel.png') }).catch(() => {});

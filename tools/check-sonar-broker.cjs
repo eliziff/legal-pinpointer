@@ -128,6 +128,44 @@ test('A reopened read waits for old page cleanup and survives a still-pending Cl
   assert.equal(f.store[issued.session].results[0].tabId, 2);
 });
 
+test('Prune finishes expired page cleanup before a fresh read installs its watcher', async () => {
+  const f = fixture(), cleaning = deferred(), clean = deferred();
+  let watching = false;
+  f.hooks.units = () => { watching = true; };
+  await f.read();
+  f.store[unitKey(WORKSPACE)].updated = Date.now() - 16 * 60_000;
+  f.hooks.release = async () => { cleaning.resolve(); await clean.promise; watching = false; };
+  const pruning = f.broker.prune();
+  await cleaning.promise;
+  const count = f.calls.filter(call => call.method === 'units').length;
+  const reading = f.read();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls.filter(call => call.method === 'units').length, count,
+    'the new page watch waits for expired registry cleanup');
+  clean.resolve();
+  await Promise.all([pruning, reading]);
+  assert.equal(watching, true);
+  assert.equal(f.store[unitKey(WORKSPACE)].workspace, WORKSPACE);
+});
+
+test('Prune leaves an expired registry alone while a fresh units read is renewing it', async () => {
+  const f = fixture(), started = deferred(), finish = deferred();
+  await f.read();
+  f.store[unitKey(WORKSPACE)].updated = Date.now() - 16 * 60_000;
+  let watching = false;
+  f.hooks.units = async () => { watching = true; started.resolve(); await finish.promise; };
+  f.hooks.release = () => { watching = false; };
+  const reading = f.read();
+  await started.promise;
+  await f.broker.prune();
+  assert.equal(f.calls.some(call => call.method === 'release'), false);
+  assert.ok(f.store[unitKey(WORKSPACE)]);
+  finish.resolve();
+  await reading;
+  assert.equal(watching, true);
+  assert.ok(Date.now() - f.store[unitKey(WORKSPACE)].updated < 1000);
+});
+
 test('Cancel without an issued search preserves an in-flight ranked read', async () => {
   const f = fixture(), started = deferred(), release = deferred();
   f.hooks.units = async () => { started.resolve(); await release.promise; };
