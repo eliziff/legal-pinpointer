@@ -19,7 +19,8 @@ test('installed extension recovers stale sources and searches across tabs/window
   const server = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.end(`<!doctype html><html lang="en"><body>${bodies.get(req.url) || '<title>Empty</title>'}</body></html>`); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`, debug = 9400 + Math.floor(Math.random() * 500);
-  let context, cdp, panel;
+  let context, panel;
+  const connections = [];
   const errors = [], checks = [];
   const record = label => { checks.push(label); console.log(`PASS ${label}`); };
   try {
@@ -53,7 +54,10 @@ test('installed extension recovers stale sources and searches across tabs/window
         chrome.tabs.move(tabId, { windowId, index: -1 }), { tabId: popupTab.id, windowId });
       await opener.evaluate(windowId => document.addEventListener('click', () => chrome.sidePanel.open({ windowId }), { capture: true, once: true }), windowId);
       await source.bringToFront(); await opener.mouse.click(2, 2); await opener.close(); await source.bringToFront();
-      cdp ||= await chromium.connectOverCDP(`http://127.0.0.1:${debug}`);
+      // Native side-panel targets are enumerated when a CDP connection opens;
+      // keep earlier connections alive so their existing panel handles survive.
+      const cdp = await chromium.connectOverCDP(`http://127.0.0.1:${debug}`);
+      connections.push(cdp);
       for (let i = 0; i < 100; i++) {
         for (const page of cdp.contexts().flatMap(context => context.pages()).filter(page => page.url().endsWith('/sonar.html') && !page.isClosed())) {
           if ((await page.evaluate(() => chrome.windows.getCurrent())).id === windowId) {
@@ -63,7 +67,7 @@ test('installed extension recovers stale sources and searches across tabs/window
         }
         await sleep(50);
       }
-      throw Error('Native side panel did not open');
+      throw Error(`Native side panel did not open in window ${windowId}: ${JSON.stringify(await worker.evaluate(() => chrome.runtime.getContexts({ contextTypes: ['SIDE_PANEL'] })))}`);
     }
     panel = await openPanel(firstWindow, a);
     const rows = page => page.evaluate(() => [...document.querySelectorAll('#result-rows [data-result]')].map(row => ({
@@ -134,7 +138,8 @@ test('installed extension recovers stale sources and searches across tabs/window
     fs.mkdirSync(path.join(root, 'test-results'), { recursive: true });
     fs.writeFileSync(path.join(root, 'test-results/sonar-browser.json'), JSON.stringify(report, null, 2));
     if (panel && !panel.isClosed()) await panel.screenshot({ path: path.join(root, 'test-results/sonar-panel.png') }).catch(() => {});
-    await cdp?.close().catch(() => {}); await context?.close().catch(() => {});
+    for (const connection of connections) await connection.close().catch(() => {});
+    await context?.close().catch(() => {});
     await new Promise(resolve => server.close(resolve));
   }
 });
