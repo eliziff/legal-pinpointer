@@ -5,8 +5,9 @@
   const window = await chrome.windows.getCurrent(), windowId = window.id, incognito = Boolean(window.incognito);
   const launchKey = `sonar-launch:${windowId}`;
   let workspace = crypto.randomUUID(), origin = null, route = 'tabs', scope = 'all';
-  let query = '', canliiQuery = '', result = null, current = -1, sequence = Date.now();
+  let query = '', canliiQuery = '', result = null, current = -1, sequence = Date.now(), observedSequence = sequence;
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', noticeTimer = 0, focusOnResults = false;
+  let refreshPending = false, originRequest = 0;
   // Ranked mode: BM25 order from the panel's own index shows at once; the
   // cross-encoder then reorders the top results once, but never while the
   // pointer is on the list or after the user has moved the selection, so
@@ -17,12 +18,13 @@
   // idle time after the panel opens and again only when that tab changes. Jump
   // and copy still go to the page through issued, revalidated handles.
   const MAX_INDEX_CHARS = 32_000_000, reads = new Map(), readQueue = [], indexWaiting = new Map();
-  let indexer = null, indexReady = false, indexCalls = 0, reading = 0, contact = 0;
+  const RECHECK_AFTER = 10 * 60_000, RETRY_AFTER = 1000;
+  let indexer = null, indexReady = false, indexCalls = 0, reading = 0;
   const favicon = url => url ? `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=16` : '';
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'),
     { choose: (index, action) => choose(index, action), icon: favicon, leave: () => $('query').focus() });
   const inList = () => $('list-viewport').contains(document.activeElement);
-  function nextSequence() { sequence = Math.max(sequence + 2, Date.now()); return sequence; }
+  function nextSequence() { sequence = Math.max(sequence + 2, observedSequence + 2, Date.now()); return sequence; }
   function tell(text, error = false) {
     clearTimeout(noticeTimer);
     $('notice').textContent = text; $('notice').title = text; $('notice').classList.toggle('error', error);
@@ -69,14 +71,21 @@
   }
   // Earlier results stay in place until the new ones replace them.
   function schedule(delay = 140, refresh = false) {
+    refreshPending = false;
     const token = cancel(); busy = true; $('list-viewport').setAttribute('aria-busy', true); tell('');
     // Ranked queries run in the panel's own index: no debounce is needed.
-    if (!refresh && route === 'tabs' && indexer && core.ranked(query)) delay = 0;
+    if (delay === 140 && !refresh && route === 'tabs' && indexer && core.ranked(query)) delay = 0;
     timer = setTimeout(() => search(token, refresh), delay);
   }
   async function search(token, refresh) {
     try {
       if (!origin) await useActive(false);
+      else {
+        const expected = origin;
+        const tab = await chrome.tabs.get(expected.id).catch(() => null);
+        if (token !== sequence) return;
+        if (origin === expected) { if (tab) setOrigin(tab); else await useActive(false); }
+      }
       if (token !== sequence || route !== 'tabs') return;
       const ranked = core.ranked(query);
       $('query').removeAttribute('aria-invalid');
@@ -89,6 +98,7 @@
       if (token !== sequence || route !== 'tabs') return;
       if (response.stale) throw new Error('This workspace was updated in another window. Search again.');
       result = response; busy = false; current = -1;
+      if (refreshPending) result.stale = true;
       result.results.forEach((item, id) => { item.id = id; });
       document.body.dataset.order = result.ranked ? 'ranked' : 'document';
       show(result.results); details();
@@ -102,6 +112,7 @@
     } finally {
       if (flight === token) flight = 0;
       if (token === sequence) $('list-viewport').setAttribute('aria-busy', busy);
+      refreshWhenIdle();
     }
   }
   // Tabs a search covers, in the broker's order: origin, then window and position.
@@ -116,15 +127,17 @@
   async function rankSearch(token, refresh) {
     if (!indexer) throw new Error('Ranked search is unavailable. Reload the extension.');
     const { start, tabs } = await scopeTabs();
-    // Wait only for tabs never read yet; changed tabs are re-read in the background.
-    const waiting = tabs.map(tab => want(tab.id, true, refresh)).filter((done, i) => refresh || !reads.get(tabs[i].id)?.revision);
-    // Pages stop watching for changes after Close or 15 idle minutes; re-read (cheaply, by revision) first.
-    if (contact && Date.now() - contact > 10 * 60_000) { for (const tab of tabs) if (reads.get(tab.id)?.state === 'ready') want(tab.id, false, true); }
-    if (waiting.length) await Promise.all(waiting);
+    // Warm clean entries resolve immediately. Wait for dirty/expired sources too:
+    // another tab's activity must not hide this document's expired page watcher.
+    await Promise.all(tabs.map(tab => {
+      const entry = reads.get(tab.id), age = Date.now() - (entry?.checkedAt || 0);
+      const retry = entry?.state === 'skipped' && !/^Browser-restricted/.test(entry.reason) && age >= RETRY_AFTER;
+      return want(tab.id, true, refresh || retry || (entry?.revision && age >= RECHECK_AFTER));
+    }));
     if (token !== sequence) return { stale: true };
-    const indexed = tabs.filter(tab => reads.get(tab.id)?.revision);
+    const indexed = tabs.filter(tab => reads.get(tab.id)?.revision && !reads.get(tab.id).dirty);
     const reply = await indexCall({ type: 'search', query, tabIds: indexed.map(tab => tab.id), depth: RERANK_DEPTH, window: RERANK_WINDOW, eager: RERANK_DEPTH });
-    const skipped = tabs.filter(tab => !reads.get(tab.id)?.revision).map(tab => ({ title: String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 200),
+    const skipped = tabs.filter(tab => !indexed.includes(tab)).map(tab => ({ title: String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 200),
       reason: reads.get(tab.id)?.reason || 'Still reading; search again when ready' }));
     const windows = new Map(tabs.map(tab => [tab.id, tab.windowId]));
     for (const item of reply.results) item.windowId = windows.get(item.tabId) ?? item.windowId;
@@ -149,6 +162,7 @@
     target.issued.catch(() => {});
   }
   function indexCall(values) {
+    if (!indexer) return Promise.reject(new Error('Ranked search is unavailable. Reload the extension.'));
     const id = ++indexCalls;
     return new Promise((resolve, reject) => { indexWaiting.set(id, { resolve, reject }); indexer.postMessage({ ...values, id }); });
   }
@@ -162,7 +176,8 @@
     indexer.onmessage = ({ data }) => {
       if (data.type === 'ready') {
         indexReady = true;
-        (globalThis.requestIdleCallback || setTimeout)(() => readAll().catch(() => {}), { timeout: 300 });
+        const read = () => readAll().catch(() => {});
+        if (globalThis.requestIdleCallback) requestIdleCallback(read, { timeout: 300 }); else setTimeout(read, 0);
         return;
       }
       const waiting = indexWaiting.get(data.id);
@@ -202,18 +217,18 @@
       const tabId = readQueue.shift(), entry = reads.get(tabId);
       if (entry?.state !== 'queued') continue;
       entry.state = 'reading'; entry.dirty = false; reading++;
-      readTab(tabId, entry).finally(() => { reading--; entry.settle(); pump(); });
+      const settle = entry.settle;
+      readTab(tabId, entry).finally(() => { reading--; settle(); pump(); });
     }
   }
   async function readTab(tabId, entry) {
     let page;
     try { [page] = (await send('SONAR_UNITS', { tabIds: [tabId], known: entry.revision ? { [tabId]: entry.revision } : {} })).pages; }
     catch (error) { page = { tabId, skipped: `Unavailable: ${error.message}` }; }
-    contact = Date.now();
     if (reads.get(tabId) !== entry || !indexer) return;
+    entry.checkedAt = Date.now();
     const used = [...reads.values()].reduce((sum, other) => sum + (other !== entry && other.revision ? other.characters : 0), 0);
     if (!page.skipped && !page.same && used + page.text.length > MAX_INDEX_CHARS) page = { tabId, skipped: 'Text budget; narrow the scope' };
-    const changed = !page.skipped && !page.same;
     try {
       if (page.skipped) {
         if (entry.revision) indexer.postMessage({ type: 'drop', tabId });
@@ -221,16 +236,15 @@
       } else {
         const { text, paras, ...meta } = page;
         await indexCall(page.same ? { type: 'meta', meta } : { type: 'put', page });
-        Object.assign(entry, { revision: page.revision, reason: '', title: page.title }, changed ? { characters: text.length } : {});
+        if (reads.get(tabId) !== entry) return;
+        Object.assign(entry, { revision: page.revision, reason: '', title: page.title }, !page.same ? { characters: text.length } : {});
         if (origin?.id === tabId) labels();
       }
     } catch (error) { Object.assign(entry, { revision: '', reason: `Unavailable: ${error.message}` }); }
     entry.state = entry.revision ? 'ready' : 'skipped';
-    // A ranked list that shows passages from the changed current tab searches it
-    // again, unless the user is in the list; stale passages refuse to open.
-    if (changed && entry.seen && result?.ranked && !busy && result.results.some(item => item.tabId === tabId) && scope === 'current' && route === 'tabs' && !inList()) schedule(0);
-    entry.seen = true;
-    if (entry.dirty) setTimeout(() => want(tabId), 1000); // Changed again while reading.
+    if (entry.dirty) setTimeout(() => {
+      if (reads.get(tabId) === entry) want(tabId).then(() => sourceChanged(tabId));
+    }, 250); // Changed again while reading; never publish it as a clean source.
   }
   function forget(tabId) {
     const entry = reads.get(tabId);
@@ -238,20 +252,55 @@
     if (entry) indexer?.postMessage({ type: 'drop', tabId });
     entry?.settle?.();
   }
-  // A tab that navigates is dropped at once; one that finishes loading or
-  // changes its text is read again.
-  chrome.tabs.onUpdated?.addListener((tabId, change) => {
-    if (!indexReady) return;
-    if (change.status === 'loading') { forget(tabId); return; }
-    if (change.status === 'complete' || change.url !== undefined || change.discarded === false || change.frozen === false) want(tabId, false, true);
+  // Keep a pinned origin while opening results, but not a dead tab ID. Refresh
+  // changed scopes even when the changed source previously had zero matches.
+  function sourceChanged(tabId) {
+    if (scope === 'current' && origin && origin.id !== tabId) return;
+    refreshPending = true;
+    if (result) result.stale = true;
+    refreshWhenIdle();
+  }
+  function refreshWhenIdle() {
+    if (!refreshPending || route !== 'tabs' || !query.trim() || busy || opening) return;
+    if (inList() || pointerInList) { tell('Tabs changed. Press Enter in the search box to refresh.'); return; }
+    schedule(180);
+  }
+  chrome.tabs.onUpdated?.addListener((tabId, change, tab) => {
+    const relevant = change.status || change.url !== undefined || change.discarded !== undefined || change.frozen !== undefined || change.groupId !== undefined;
+    if (!relevant || (tab && Boolean(tab.incognito) !== incognito)) return;
+    if (origin?.id === tabId && tab) setOrigin(tab);
+    if (change.status === 'loading' || change.discarded || change.frozen) forget(tabId);
+    else if (indexReady && (change.status === 'complete' || change.url !== undefined || change.discarded === false || change.frozen === false)) want(tabId, false, true);
+    if (tab && !/^(https?|file):/.test(tab.url || '') && origin?.id !== tabId) return;
+    sourceChanged(tabId);
   });
-  chrome.tabs.onRemoved?.addListener(tabId => forget(tabId));
-  chrome.tabs.onReplaced?.addListener((added, removed) => { forget(removed); if (indexReady) want(added); });
-  async function useActive(run = true) {
-    const [tab] = await chrome.tabs.query({ active: true, windowId });
-    if (!tab) throw new Error('No active tab is available.');
+  chrome.tabs.onRemoved?.addListener(tabId => {
+    forget(tabId);
+    if (origin?.id === tabId) { origin = null; originRequest++; labels(); }
+    sourceChanged(tabId);
+  });
+  chrome.tabs.onReplaced?.addListener((added, removed) => {
+    forget(removed);
+    if (origin?.id === removed) { origin = { ...origin, id: added }; originRequest++; }
+    if (indexReady) want(added);
+    sourceChanged(added);
+  });
+  chrome.tabs.onAttached?.addListener(tabId => {
+    if (indexReady) want(tabId, false, true);
+    sourceChanged(tabId);
+  });
+  chrome.tabs.onDetached?.addListener(tabId => sourceChanged(tabId));
+  function setOrigin(tab) {
     origin = { id: tab.id, windowId: tab.windowId, title: tab.title || 'Current browser tab', url: tab.url || '', incognito: Boolean(tab.incognito) };
-    labels(); if (run) schedule(0, true);
+    labels();
+  }
+  async function useActive(run = true) {
+    if (run) { cancel(); busy = false; if (result) result.stale = true; $('list-viewport').setAttribute('aria-busy', false); }
+    const request = ++originRequest;
+    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    if (request !== originRequest) return;
+    if (!tab) throw new Error('No active tab is available.');
+    setOrigin(tab); if (run) schedule(0, true);
   }
   function switchRoute(next) {
     if (route === next) { $('query').focus(); return; }
@@ -259,6 +308,7 @@
     if (route === 'tabs') query = $('query').value; else canliiQuery = $('query').value;
     route = next; $('query').value = route === 'tabs' ? query : canliiQuery;
     $('query').removeAttribute('aria-invalid'); tell(''); labels(); details(); show(result?.results || []);
+    if (route === 'tabs' && (refreshPending || result?.stale) && query.trim()) schedule(0, true);
     $('query').focus({ preventScroll: true }); $('query').select();
   }
   // Selecting never moves the browser; only Open (or Enter on a result) does.
@@ -317,7 +367,8 @@
     document.body.dataset.order = 'reranked';
   }
   $('list-viewport').addEventListener('pointerenter', () => { pointerInList = true; });
-  $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; applyOrder(); });
+  $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; applyOrder(); refreshWhenIdle(); });
+  $('list-viewport').addEventListener('focusout', () => setTimeout(refreshWhenIdle));
   function snapshot() {
     const { issued, passages, ...transfer } = result;
     return { workspace, origin, query, canliiQuery, scope, sequence, result: transfer, current, scrollTop: list.viewport.scrollTop };
@@ -332,19 +383,21 @@
     try {
       await panelOpen;
       await target.issued;
+      if (token !== sequence || result !== target || target.stale) return;
       if (destination !== windowId) await chrome.storage.session.set({ [`sonar-launch:${destination}`]: {
         nonce: crypto.randomUUID(), created: Date.now(), route: 'tabs', origin, handoff: snapshot()
       } });
+      if (token !== sequence || result !== target || target.stale) return;
       await send('SONAR_GO', { session: target.session, ticket: target.ticket, id });
     } catch (error) { if (token === sequence) tell(error.message, true); }
-    finally { opening = false; }
+    finally { opening = false; refreshWhenIdle(); }
   }
   // The clipboard write starts inside the click/key gesture; its contents resolve
   // once the source tab has built them with Pinpointer's formatting.
   async function copyPassage(mode) {
     if (busy || result?.stale || route !== 'tabs' || current < 0 || !result) return;
-    const token = sequence, target = result, id = result.results[current].id;
-    const request = Promise.resolve(target.issued).then(() => send('SONAR_COPY', { session: target.session, ticket: target.ticket, id, mode }));
+    const token = sequence, target = result, id = result.results[current].id, sourceWorkspace = workspace;
+    const request = Promise.resolve(target.issued).then(() => send('SONAR_COPY', { workspace: sourceWorkspace, session: target.session, ticket: target.ticket, id, mode }));
     const blob = type => request.then(reply => new Blob([type === 'text/html' ? reply.html : reply.plain], { type }));
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob('text/plain'), 'text/html': blob('text/html') })]);
@@ -378,15 +431,23 @@
     nonce = launch.nonce;
     const transfer = launch.handoff;
     if (transfer && launch.origin?.incognito === incognito && transfer.result?.results?.length <= 1000) {
+      // Cached documents and in-flight reads belong to the old workspace's
+      // broker registry. Re-read/re-register after adopting a cross-window search.
+      if (workspace !== transfer.workspace) for (const tabId of reads.keys()) forget(tabId);
       cancel(); workspace = transfer.workspace; origin = transfer.origin; query = transfer.query; canliiQuery = transfer.canliiQuery || '';
+      originRequest++; refreshPending = false;
       scope = transfer.scope; sequence = Math.max(sequence, transfer.sequence + 2); result = transfer.result;
       current = transfer.current; route = 'tabs'; busy = false; $('query').value = query;
       labels(); list.setResults(result.results, current, transfer.scrollTop); $('empty').hidden = true; details();
+      if (indexReady) readAll().catch(() => {});
     } else {
-      const changed = origin?.id !== launch.origin?.id;
-      if (!origin || (launch.route === 'tabs' && changed)) origin = launch.origin;
+      // Both shortcut routes reopen against the launching tab. Even a same-tab
+      // launch may follow a reload, so the next local search must revalidate it.
+      originRequest++;
+      if (launch.origin) setOrigin(launch.origin);
+      refreshPending = true; if (result) result.stale = true;
       switchRoute(launch.route === 'canlii' ? 'canlii' : 'tabs'); labels();
-      if (route === 'tabs' && changed && query.trim()) schedule(0);
+      if (route === 'tabs' && query.trim()) schedule(0, true);
     }
     $('query').focus({ preventScroll: true }); $('query').select();
     const latest = (await chrome.storage.session.get(launchKey))[launchKey];
@@ -398,7 +459,8 @@
     query = $('query').value; if (!event.isComposing) schedule();
   });
   $('query').addEventListener('compositionend', () => { if (route === 'tabs') { query = $('query').value; schedule(); } });
-  $('search-form').addEventListener('submit', event => { event.preventDefault(); if (route === 'canlii') externalSearch(); else focusFirst(); });
+  $('search-form').addEventListener('submit', event => { event.preventDefault(); if (route === 'canlii') externalSearch();
+    else if (refreshPending || result?.stale || !result) schedule(0, true); else focusFirst(); });
   $('scope').onclick = event => {
     const next = event.target.closest('[data-scope]')?.dataset.scope;
     if (next && next !== scope) { scope = next; labels(); schedule(0); }
@@ -462,6 +524,7 @@
     if (area !== 'session') return;
     if (changes[launchKey]?.newValue) consumeLaunch(changes[launchKey].newValue).catch(error => tell(error.message, true));
     const state = changes[`pinpointer-sonar:workspace:${workspace}`];
+    if (Number.isSafeInteger(state?.newValue?.sequence)) observedSequence = Math.max(observedSequence, state.newValue.sequence);
     // This panel's own ranked handles arrive after its list is shown.
     if (state && result && !busy && !(result.ranked && state.newValue?.sequence === result.sequence) &&
         (!state.newValue || state.newValue.ticket !== result.ticket || state.newValue.sequence > sequence)) {
@@ -470,9 +533,12 @@
   });
   chrome.runtime.onMessage.addListener((change, sender) => {
     if (sender.id !== chrome.runtime.id || change?.type !== 'SONAR_INVALIDATED') return;
-    if (change.workspace === workspace && Number.isInteger(sender.tab?.id) && indexReady) setTimeout(() => want(sender.tab.id, false, true), 250);
-    if (change.ticket !== result?.ticket || result?.ranked) return;
-    if (scope === 'current' && route === 'tabs' && !inList()) schedule(220);
+    if (!Number.isInteger(sender.tab?.id)) return;
+    if (change.workspace === workspace && indexReady) {
+      // Mark dirty immediately; a query arriving during the debounce must wait.
+      want(sender.tab.id, false, true);
+      sourceChanged(sender.tab.id);
+    } else if (change.ticket && change.ticket === result?.ticket && !result.ranked) sourceChanged(sender.tab.id);
   });
   labels();
   const launch = (await chrome.storage.session.get(launchKey))[launchKey];
