@@ -262,7 +262,7 @@
   }
   function refreshWhenIdle() {
     if (!refreshPending || route !== 'tabs' || !query.trim() || busy || opening) return;
-    if (inList() || pointerInList) { tell('Tabs changed. Press Enter in the search box to refresh.'); return; }
+    if (inList() || pointerInList) { tell('Tabs changed. Press Enter in the search box to refresh.', true); return; }
     schedule(180);
   }
   chrome.tabs.onUpdated?.addListener((tabId, change, tab) => {

@@ -431,7 +431,12 @@
       for (const [key, value] of Object.entries(stored)) if (key.startsWith(prefix) && Date.now() - value.updated > TTL) {
         await exclusive(key, async () => {
           const latest = await load(key);
-          if (latest && Date.now() - latest.updated > TTL) { await api.storage.session.remove(key); void dispose(latest); }
+          // An active read is renewing this workspace's watches and registry.
+          // Otherwise finish old page cleanup before a new read crosses the gate.
+          if (!unitReads.has(key) && latest && Date.now() - latest.updated > TTL) {
+            await api.storage.session.remove(key);
+            await dispose(latest);
+          }
         });
       }
       for (const [key, value] of Object.entries(stored)) if (key.startsWith('sonar-launch:') && Date.now() - value.created > 60_000) await api.storage.session.remove(key);
