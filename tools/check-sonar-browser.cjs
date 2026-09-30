@@ -44,16 +44,13 @@ test('installed extension recovers stale sources and searches across tabs/window
     async function openPanel(windowId, source) {
       // A real click supplies sidePanel.open's required user gesture. The popup
       // is a temporary extension-page tab, not a mocked native API.
-      const popupTab = await worker.evaluate(async ({ windowId, url }) => chrome.tabs.create({ windowId, url, active: false }),
-        { windowId, url: `chrome-extension://${id}/popup.html` });
-      let opener;
-      for (let i = 0; i < 100 && !opener; i++) {
-        for (const page of context.pages().filter(page => page.url().endsWith('/popup.html'))) {
-          if ((await tabFor(page.url()))?.id === popupTab.id) { opener = page; break; }
-        }
-        if (!opener) await sleep(50);
-      }
-      assert.ok(opener, 'extension popup opened'); await opener.waitForLoadState();
+      const opener = await context.newPage();
+      await opener.goto(`chrome-extension://${id}/popup.html`);
+      // tabs.query does not expose every extension-page URL without the tabs
+      // permission. Ask the extension tab for its own ID instead.
+      const popupTab = await opener.evaluate(() => chrome.tabs.getCurrent());
+      if (popupTab.windowId !== windowId) await worker.evaluate(async ({ tabId, windowId }) =>
+        chrome.tabs.move(tabId, { windowId, index: -1 }), { tabId: popupTab.id, windowId });
       await opener.evaluate(windowId => document.addEventListener('click', () => chrome.sidePanel.open({ windowId }), { capture: true, once: true }), windowId);
       await source.bringToFront(); await opener.mouse.click(2, 2); await opener.close(); await source.bringToFront();
       cdp ||= await chromium.connectOverCDP(`http://127.0.0.1:${debug}`);
