@@ -35,9 +35,9 @@ console.log(`opened ${info.docs} docs / ${info.passages} passages: worker ${info
 const runs = [];
 for (let pass = 1; pass <= passes; pass++) {
   for (const q of queries) {
-    const r = await page.evaluate(arg => window.a2aj.raw(arg), {query: q.query, opts: {show: 20, maxPerDoc: 2, ...ranking}, withDocIds: true});
+    const r = await page.evaluate(arg => window.a2aj.raw(arg), {query: q.query, opts: {show: 20, maxPerDoc: 2, ...ranking}});
     runs.push({pass, id: q.id, type: q.type, set: q.set, searchMs: r.searchMs, totalMs: r.totalMs, reads: r.reads, bytes: r.bytes, decoded: r.decoded,
-      candidates: r.candidates, evaluated: r.evaluated, pids: r.pids, shownPids: r.shownPids, docIds: r.docIds, n: r.pids.length});
+      candidates: r.candidates, evaluated: r.evaluated, pids: r.pids, shownPids: r.shownPids, docIds: r.results.map(m => m.src + ":" + m.citation), n: r.pids.length});
   }
   console.log(`pass ${pass} done`);
 }

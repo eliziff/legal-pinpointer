@@ -1,6 +1,6 @@
 // Quality metrics shared by bench.mjs (browser) and quality.mjs (Node).
-// run: {id, docIds: ['c:123', ...] (ranked documents), pids (raw passage ranking), shownPids (passages as displayed)}
-// evalMap (from the build's --eval-out): case id -> [[pid, start, end], ...]; a case target absent from it is out of scope.
+// run: {id, docIds: ['c:2024 SCC 1', ...] (ranked documents), pids (raw passage ranking), shownPids (passages as displayed)}
+// evalMap (from the build's --eval-out): case citation -> [[pid, start, end], ...]; a case target absent from it is out of scope.
 export function quality(queries, runs, evalMap) {
   const byQ = new Map(queries.map(q => [q.id, q])), qual = {};
   for (const r of runs) {
