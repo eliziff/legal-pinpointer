@@ -1,4 +1,4 @@
-// Builds the static A2AJ passage index from the local A2AJ full-text SQLite files (read-only).
+// Builds the static A2AJ passage index from the canonical local A2AJ SQLite database (read-only).
 //
 //   node --max-old-space-size=3500 build/build-index.mjs --out <dir> [--config build/datasets.json]
 //        [--sample N] [--eval-docs bench/queries.json --eval-out eval-passages.json] [--fts5 <dir>] [--shard-limit bytes (test)]
@@ -32,15 +32,18 @@ const TMP = path.join(OUT, '_tmp'); fs.mkdirSync(TMP, {recursive: true});
 const t0 = Date.now(), lap = label => console.log(`[${((Date.now() - t0) / 1000).toFixed(0)}s] ${label}`);
 
 // ---------- 0. document list, ordered by dataset then date so a court filter is a passage-id range ----------
-const sources = Object.entries(config.sources).map(([name, file]) => ({name, db: new DatabaseSync(expand(file), {readOnly: true})}));
+const db = new DatabaseSync(expand(config.source), {readOnly: true});
+const sources = ['cases', 'laws'].map(name => ({name, db}));
 const includeRx = new RegExp('^(' + config.include.map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*$/, '.*')).join('|') + ')$');
 const excludes = (config.exclude || []).map(r => ({...r, rx: new RegExp(r.headRegex, 'i'), n: 0}));
-// --eval-docs bench/queries.json: every case target ("c:<id>") is kept in samples and gets its passage spans recorded
-const evalDocs = new Set(EVAL_DOCS ? JSON.parse(fs.readFileSync(EVAL_DOCS, 'utf8')).flatMap(q => q.docs || []).filter(k => k.startsWith('c:')).map(k => +k.slice(2)) : []);
+// --eval-docs bench/queries.json: every case citation target ("c:<citation>") is kept in samples and gets its passage spans recorded
+const evalCitations = new Set(EVAL_DOCS ? JSON.parse(fs.readFileSync(EVAL_DOCS, 'utf8')).flatMap(q => q.docs || []).filter(k => k.startsWith('c:')).map(k => k.slice(2)) : []), evalDocs = new Set();
 let docs = [];
 for (const [si, s] of sources.entries())
-  for (const r of s.db.prepare('SELECT id, dataset, document_date_en AS date FROM document').all())
+  for (const r of s.db.prepare('SELECT id, dataset, citation_en, document_date_en AS date FROM document WHERE doc_type = ?').all(s.name)) {
     if (includeRx.test(r.dataset)) docs.push({si, id: r.id, ds: r.dataset, date: r.date || ''});
+    if (s.name === 'cases' && evalCitations.has(r.citation_en)) evalDocs.add(r.id);
+  }
 const dsOrder = [...new Set(docs.map(d => d.ds))].sort((a, b) => (a.includes('-') - b.includes('-')) || a.localeCompare(b));
 const dsIndex = new Map(dsOrder.map((d, i) => [d, i]));
 docs.sort((a, b) => dsIndex.get(a.ds) - dsIndex.get(b.ds) || a.date.localeCompare(b.date) || a.si - b.si || a.id - b.id);
@@ -52,7 +55,7 @@ lap(`${docs.length} candidate documents in ${dsOrder.length} datasets`);
 // normalization. Patterns follow core.js (neutralCitations, reporterCandidates) plus statute chapters.
 const citeKey = new Map(); // key -> source * 1e8 + id; -1 when the key names more than one document
 for (const [si, s] of sources.entries())
-  for (const r of s.db.prepare('SELECT citation_key k, document_id d FROM citation_lookup').all()) {
+  for (const r of s.db.prepare('SELECT l.citation_key k, l.document_id d FROM citation_lookup l JOIN document d ON d.id = l.document_id WHERE d.doc_type = ?').all(s.name)) {
     const v = si * 1e8 + r.d, old = citeKey.get(r.k); citeKey.set(r.k, old === undefined || old === v ? v : -1);
   }
 const CITE = /\b(?:18|19|20)\d{2}\s+[A-Z][A-Z0-9-]{1,15}\s+\d+\b|\[(?:18|19|20)\d{2}\]\s+\d+\s+(?:S\.?\s?C\.?\s?R|R\.?\s?C\.?\s?S)\.?\s+\d+|\b(?:R\.?\s?)?S\.?\s?(?:[A-Z]\.?\s?){1,3}\s*(?:18|19|20)\d{2},?\s+c\.?\s*[A-Z]{0,2}-?\d+(?:\.\d+)?/g;
@@ -190,7 +193,7 @@ for (const [k, d] of docs.entries()) {
   docKey.push(self);
   st.docs++; D++;
   const spans = segment(body);
-  if (d.si === 0 && evalDocs.has(d.id)) evalMap[d.id] = spans.map(([a, b], i) => [P + i, a, b]);
+  if (d.si === 0 && evalDocs.has(d.id)) evalMap[r.c] = spans.map(([a, b], i) => [P + i, a, b]);
   for (const [a, b] of spans) {
     const ptext = body.slice(a, b).replace(/\0/g, ' ');
     // terms and term frequencies

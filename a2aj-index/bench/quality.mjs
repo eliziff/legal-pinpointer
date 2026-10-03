@@ -11,7 +11,7 @@ for (const arm of arms) {
   const ranking = {...RANKING, ...arm}, runs = [], t = performance.now();
   for (const q of queries) {
     const r = await eng.search(q.query, ranking), docIds = [];
-    for (const d of r.docs.slice(0, 20)) { const m = await eng.doc(d.doc); docIds.push(m.src + ':' + m.id); }
+    for (const d of r.docs.slice(0, 20)) { const m = await eng.doc(d.doc); docIds.push(m.src + ':' + m.citation); }
     runs.push({id: q.id, docIds, pids: r.hits.map(h => h.pid), shownPids: r.docs.slice(0, 20).flatMap(d => d.hits.slice(0, 2).map(h => h.pid))});
   }
   const qual = quality(queries, runs, evalMap);
