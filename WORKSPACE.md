@@ -1,5 +1,52 @@
 # Native search workspace / CanLII launcher — 0.1.30
 
+## Tab lifecycle repair (2026-09-30)
+
+Current-tab and group scopes remain pinned while visiting search results.
+`Use active tab` or a new launcher invocation deliberately retargets them;
+closing the origin recovers the active tab, and browser tab replacement follows
+the replacement ID. Reopening through CanLII also updates the next Open-tabs
+search origin. A same-tab launch revalidates cached text.
+
+Each tab has its own read freshness timestamp. Transient failures are retried
+on a subsequent query after a one-second cooldown; relevant reads older than
+ten minutes are revalidated before searching. Source changes refresh all scopes,
+including previously zero-hit tabs. Refresh waits while the pointer or keyboard
+focus is in the results; Enter in the search box explicitly refreshes. Issued
+document IDs, URLs, text hashes and navigation/copy checks remain in force.
+
+Page watchers are owned by each workspace or exact-search ticket (bounded to
+64 subscriptions and 15 minutes). Closing one workspace leaves the others'
+watchers intact. Broker lifecycle guards prevent late reads and overlapping
+Close/reopen operations from resurrecting or erasing the wrong registry.
+Cross-window handoff re-registers documents under the adopted workspace.
+
+Focused dependency-free regressions, without restoring the deleted suite:
+
+```sh
+node --test tools/check-sonar-broker.cjs tools/check-sonar-lifecycle.cjs
+```
+
+These execute the real panel, index, page scanner and broker with browser/DOM
+doubles. They do not certify native Chrome behavior. The separate installed-
+extension check uses actual Chromium tabs, side panels, injection, DOM ranges
+and rich/plain clipboard operations:
+
+```sh
+npm install --no-save --package-lock=false --ignore-scripts playwright@1.55.1
+npx playwright install chromium
+node --test tools/check-sonar-browser.cjs
+```
+
+The `Tab search lifecycle` Actions workflow runs both checks and saves browser
+evidence. Optional reranker/model assets are not required for these lifecycle
+checks. They do not certify semantic relevance, OS shortcut dispatch, arbitrary
+live legal sites, or Chrome's idle-worker suspension. The older validation
+record below is historical; commit `5e18a64` removed the old test suite/scripts,
+and the legacy `CI` workflow still references them.
+
+## Historical workspace baseline
+
 Baseline: PR #2 head `95c62ac6de0da74ff56b8e1dfd6eaa56ccd37135`.
 The new command path uses sonar.html as a global Chrome side panel. Source-page
 matching stays in the existing find-page.js agent; neither that file nor
