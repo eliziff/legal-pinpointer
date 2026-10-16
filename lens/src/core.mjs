@@ -53,15 +53,31 @@ export function compileQuery(input) {
 }
 
 export function passageWindows(text, maxChars=1800) {
+  if(!Number.isInteger(maxChars) || maxChars<1)throw new RangeError('Passage size must be a positive integer.');
   const result=[];
   const segmenter=new Intl.Segmenter('en',{granularity:'sentence'});
+  // A physical wrap is not a sentence boundary. Keep detection offsets aligned
+  // with the unchanged source, retaining blank lines and paragraph separators.
+  const lineBreak=String.raw`(?:\r\n|\r(?!\n)|[\n\u2028\u2029])`;
+  const detectionText=text.replace(new RegExp(`${lineBreak}([^\\S\\r\\n\\u2028\\u2029]*${lineBreak})*`,'g'),
+    (breaks,repeated)=>repeated || breaks.includes('\u2029')?breaks:' '.repeat(breaks.length));
   let start=0, end=0;
-  for(const segment of segmenter.segment(text)) {
+  for(const segment of segmenter.segment(detectionText)) {
     const s=segment.index, e=s+segment.segment.length;
     if(end>start && e-start>maxChars) { result.push({start,end,text:text.slice(start,end)}); start=s; }
     if(e-s>maxChars) {
       if(s>start) result.push({start,end:s,text:text.slice(start,s)});
-      for(let p=s;p<e;p+=maxChars) result.push({start:p,end:Math.min(e,p+maxChars),text:text.slice(p,Math.min(e,p+maxChars)),split:true});
+      for(let p=s;p<e;) {
+        let limit=Math.min(e,p+maxChars);
+        const before=text.charCodeAt(limit-1), after=text.charCodeAt(limit);
+        // Keep the UTF-16 budget, moving a cut before a complete surrogate pair.
+        // A one-unit budget still emits a two-unit scalar intact and advances.
+        if(before>=0xD800 && before<=0xDBFF && after>=0xDC00 && after<=0xDFFF) {
+          limit+=limit-p===1?1:-1;
+        }
+        result.push({start:p,end:limit,text:text.slice(p,limit),split:true});
+        p=limit;
+      }
       start=e;
     }
     end=e;
@@ -71,10 +87,29 @@ export function passageWindows(text, maxChars=1800) {
 }
 
 export function* paragraphSpans(text) {
+  const numberedStarts=new Set(), dottedPrevious=new Map();
+  // A wrapped decimal can be a measurement. Consecutive siblings supply
+  // evidence for dotted section labels without changing the source text.
+  const markers=/^[^\S\r\n\u2028\u2029]*(?:\[\d+\]|\d+[.)](?=\s|$)|(\d+(?:\.\d+)+)[.)]?(?=\s|$))/gm;
+  for(const match of text.matchAll(markers)) {
+    if(!match[1]) { numberedStarts.add(match.index); continue; }
+    const dot=match[1].lastIndexOf('.'), parent=match[1].slice(0,dot);
+    const value=Number(match[1].slice(dot+1)), previous=dottedPrevious.get(parent);
+    if(Number.isSafeInteger(value) && previous?.value+1===value) {
+      numberedStarts.add(previous.start);
+      numberedStarts.add(match.index);
+    }
+    dottedPrevious.set(parent,{value,start:match.index});
+  }
+  // Guard the CR alternative so one CRLF cannot backtrack into two breaks.
+  const lineBreak=String.raw`(?:\r\n|\r(?!\n)|[\n\u2028\u2029])`;
+  const separators=new RegExp(`${lineBreak}([^\\S\\r\\n\\u2028\\u2029]*${lineBreak})*`,'g');
   let start=0;
-  for(const match of text.matchAll(/\n\s*\n|\r?\n(?=\s*(?:\[\d+\]|\d+[.)]))/g)) {
+  for(const match of text.matchAll(separators)) {
+    const end=match.index+match[0].length;
+    if(!match[1] && !match[0].includes('\u2029') && !numberedStarts.has(end))continue;
     if(match.index>start)yield {start,end:match.index,text:text.slice(start,match.index)};
-    start=match.index+match[0].length;
+    start=end;
   }
   if(start<text.length)yield {start,end:text.length,text:text.slice(start)};
 }
