@@ -181,7 +181,7 @@ async function main() {
   };
   const wasm = fs.readFileSync(path.join(projectRoot, 'legal-structure.wasm')).toString('base64');
   await evaluate(shim(originalUrl, wasm));
-  for (const name of ['canlii-courts.js', 'core.js', 'text-fragments.js', 'providers.js']) {
+  for (const name of ['core.js', 'text-fragments.js', 'providers.js']) {
     await evaluate(fs.readFileSync(path.join(projectRoot, name), 'utf8'));
   }
   await evaluate(helpers);

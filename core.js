@@ -220,8 +220,7 @@
   }
 
   async function canliiUrlForCitation(value, language) {
-    const result = await citationCall('url', { text: String(value || ''), language: language || 'en' });
-    return result.urls.find(item => item.url?.startsWith('https://www.canlii.org/'))?.url || '';
+    return await citationCall('canliiCitationUrl', { text: String(value || ''), language: language || 'en' }) || '';
   }
 
   // Alias-index targets are a neutral citation or "jurisdiction/database/caseId".

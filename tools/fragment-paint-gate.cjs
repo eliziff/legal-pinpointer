@@ -224,7 +224,7 @@ async function openTab(port, browser) {
   return tab;
 }
 
-const extensionScripts = ['canlii-courts.js', 'core.js', 'text-fragments.js']
+const extensionScripts = ['core.js', 'text-fragments.js']
   .map((name) => fs.readFileSync(path.join(projectRoot, name), 'utf8'));
 
 // In-page: choose passages inside the document root (the root selectors mirror providers.js) and
