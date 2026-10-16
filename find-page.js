@@ -5,9 +5,10 @@
   const core = global.LegalPinpointerFindCore;
   const HIT = 'legal-pinpointer-sonar-hits', ACTIVE = 'legal-pinpointer-sonar-active';
   const MAX_CHARS = 4_000_000, MAX_NODES = 150_000, MAX_RESULTS = 200, MAX_PARAGRAPH = 65_536, MAX_PAINT = 2000;
-  // `onChange` is the in-page find UI's callback; `watching` names the side panel
-  // workspace and/or exact-search ticket told (once per read) when the page changes.
-  let revision = 0, index = null, indexing = null, expiry = 0, onChange = null, watching = null, notified = false;
+  // Independent panels may read the same document. Notify each owner once per
+  // read, and let Close release only that owner's subscription.
+  let revision = 0, index = null, indexing = null, expiry = 0, onChange = null;
+  const watchers = new Map(), WATCH_TTL = 15 * 60_000;
   const caches = new Map(), jobs = new Map(), observers = [], sheets = new Map();
   let returnHost = null, savedScroll = null, painted = null;
   // Prefer scheduler continuations: chained timers are throttled in background tabs.
@@ -15,6 +16,16 @@
     : global.scheduler?.postTask ? global.scheduler.postTask(() => {})
       : new Promise(resolve => setTimeout(resolve, 0));
   const ownUI = node => node.nodeType === 1 && node.hasAttribute('data-pinpointer-sonar');
+
+  function watch(kind, id) {
+    if (!id) return;
+    for (const [key, value] of watchers) if (Date.now() - value.updated > WATCH_TTL) watchers.delete(key);
+    const key = `${kind}:${id}`;
+    watchers.delete(key);
+    watchers.set(key, { [kind]: id, updated: Date.now(), notified: false });
+    // Abandoned panels cannot grow a page's subscriptions without a bound.
+    while (watchers.size > 64) watchers.delete(watchers.keys().next().value);
+  }
 
   function clearPaint() {
     painted = null;
@@ -28,9 +39,12 @@
     const had = Boolean(index || caches.size);
     revision++; index = null; caches.clear(); clearPaint();
     if (had) onChange?.();
-    if (watching && !notified) {
-      notified = true;
-      void chrome.runtime.sendMessage({ type: 'SONAR_INVALIDATED', ...watching }).catch(() => {});
+    for (const [key, watcher] of watchers) {
+      if (Date.now() - watcher.updated > WATCH_TTL) { watchers.delete(key); continue; }
+      if (watcher.notified) continue;
+      watcher.notified = true;
+      const { workspace, ticket } = watcher;
+      void chrome.runtime.sendMessage({ type: 'SONAR_INVALIDATED', workspace, ticket }).catch(() => {});
     }
   }
   function observe(roots, reset = false) {
@@ -244,7 +258,7 @@
   // index: the panel holds the only copy, and a jump or copy re-reads the page.
   function units({ known = '', workspace, deadline = Date.now() + 8000 }) {
     // Watch first: a page that changes while it is read says so, and is read again.
-    watching = { ...watching, workspace }; notified = false;
+    watch('workspace', workspace);
     return withJob(async check => {
       const snapshot = await ensureIndex(check), texts = snapshot.paragraphs.map(p => p.text), text = texts.join('\n');
       const reply = { url: location.href, title: await pageTitle(), revision: `${texts.length}:${core.hash(text)}` };
@@ -383,20 +397,22 @@
     shadow.append(button); document.documentElement.append(returnHost);
     return true;
   }
-  function release(ticket, keepIndex = false) {
+  function release(ticket, keepIndex = false, workspace) {
+    watchers.delete(`ticket:${ticket}`);
+    if (workspace) watchers.delete(`workspace:${workspace}`);
     jobs.get(ticket)?.abort();
     const cache = caches.get(ticket);
     caches.delete(ticket);
     if (cache && painted === cache) {
       clearPaint(); returnHost?.remove(); returnHost = null;
     }
-    if (!keepIndex && !caches.size && ![...jobs.values()].some(job => !job.cancelled)) releaseAll();
+    if (!keepIndex && !watchers.size && !caches.size && ![...jobs.values()].some(job => !job.cancelled)) releaseAll();
   }
   function releaseAll() {
-    revision++; jobs.forEach(job => job.abort()); caches.clear(); index = null; savedScroll = null; clearTimeout(expiry); watching = null;
+    revision++; jobs.forEach(job => job.abort()); caches.clear(); index = null; savedScroll = null; clearTimeout(expiry); watchers.clear();
     observers.splice(0).forEach(o => o.disconnect()); clearPaint(); returnHost?.remove(); returnHost = null;
   }
   window.addEventListener('pagehide', releaseAll);
   global.LegalPinpointerSearchPage = { search, units, preview, reveal, passage, plainCopy, restore, release, releaseAll, clearPaint, setOnChange(fn) { onChange = fn; },
-    watch(ticket) { watching = { ...watching, ticket }; notified = false; } };
+    watch(ticket) { watch('ticket', ticket); } };
 })(globalThis);

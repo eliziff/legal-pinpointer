@@ -3,7 +3,7 @@
 (function exposeSonarBroker(global) {
   function createBroker(api) {
     const prefix = 'pinpointer-sonar:', TTL = 15 * 60_000, MAX_RESULTS = 1000, RANKED_RESULTS = 200, CONCURRENCY = 4, MAX_INDEX_CHARS = 32_000_000;
-    const pending = new Map(), running = new Map(), gates = new Map();
+    const pending = new Map(), running = new Map(), gates = new Map(), unitReads = new Map();
     const messageTypes = new Set(['SONAR_SEARCH', 'SONAR_GO', 'SONAR_RETURN', 'SONAR_CLOSE', 'SONAR_CANCEL', 'SONAR_BACK', 'SONAR_PREVIEW', 'SONAR_COPY', 'SONAR_UNITS', 'SONAR_ISSUE']);
     const sessionKey = sender => sender.workspace
       ? `${prefix}workspace:${sender.workspace}` : `${prefix}${sender.tab.id}:${sender.documentId}`;
@@ -56,7 +56,7 @@
       const targets = state.targets || [];
       for (let offset = 0; offset < targets.length; offset += CONCURRENCY) {
         await Promise.allSettled(targets.slice(offset, offset + CONCURRENCY).map(target =>
-          timeout(invoke(target, 'release', [state.ticket, warm === true || (warm instanceof Set && warm.has(target.tabId))]), 1000)));
+          timeout(invoke(target, 'release', [state.ticket, warm === true || (warm instanceof Set && warm.has(target.tabId)), state.workspace]), 1000)));
       }
     }
     function claim(key, sequence) {
@@ -218,38 +218,58 @@
     async function units(message, sender) {
       if (!sender.workspace || !Array.isArray(message.tabIds) || !message.tabIds.length || message.tabIds.length > CONCURRENCY ||
           !message.tabIds.every(Number.isInteger) || typeof message.known !== 'object' || !message.known) throw new Error('Invalid read request.');
-      const pages = await Promise.all(message.tabIds.map(async tabId => {
-        let tab;
-        try { tab = await api.tabs.get(tabId); } catch (_) { return { tabId, skipped: 'Closed' }; }
-        const title = String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 300);
-        const reason = Boolean(tab.incognito) !== sender.incognito ? 'Cannot mix private and normal windows.' : !supported(tab) ? 'Browser-restricted or unsupported page'
-          : tab.discarded || tab.frozen ? 'Discarded or frozen; open it and refresh' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
-        if (reason) return { tabId, title, skipped: reason };
-        try {
-          const target = await timeout(install(tab.id));
-          const known = typeof message.known[tabId] === 'string' ? message.known[tabId] : '';
-          const value = await timeout(invoke(target, 'units', [{ known, workspace: sender.workspace, deadline: Date.now() + 9000 }]), 10_000);
-          if (!value || value.url !== tab.url || typeof value.revision !== 'string' || value.revision.length > 40) throw new Error('Page changed or returned invalid text.');
-          const page = { tabId, ...target, windowId: tab.windowId, url: value.url, title: String(value.title || title).slice(0, 300), revision: value.revision };
-          if (value.same) return { ...page, same: true };
-          let count = 0;
-          if (typeof value.text === 'string' && value.text.length <= 4_200_000) for (let at = -1; count <= 200_000 && (count++, at = value.text.indexOf('\n', at + 1)) >= 0;);
-          if (!count || !value.text || !Array.isArray(value.paras) || value.paras.length !== count) throw new Error('Page returned invalid text.');
-          return { ...page, text: value.text, limited: Boolean(value.limited),
-            paras: value.paras.map(number => Number.isSafeInteger(number) && number > 0 ? number : 0) };
-        } catch (error) { return { tabId, title, skipped: `Unavailable: ${String(error.message || error).slice(0, 180)}` }; }
-      }));
       const key = unitsKey(sender.workspace);
-      await exclusive(key, async () => {
-        const state = (await load(key)) || { targets: [], incognito: sender.incognito };
-        for (const page of pages) {
-          state.targets = state.targets.filter(t => t.tabId !== page.tabId);
-          if (page.documentId) state.targets.push({ tabId: page.tabId, documentId: page.documentId, url: page.url });
-        }
-        state.updated = Date.now();
-        await save(key, state);
-      });
-      return { pages };
+      // Close advances only active reads' generation. Once they finish, no
+      // workspace tombstone is needed; a reopened panel may read normally.
+      let lifecycle = unitReads.get(key);
+      if (!lifecycle) unitReads.set(key, lifecycle = { generation: 0, readers: 0 });
+      const generation = lifecycle.generation;
+      lifecycle.readers++;
+      const check = () => { if (lifecycle.generation !== generation) throw new Error('Search closed. Read the tab again.'); };
+      try {
+        // A reopened panel waits for an older Close's page cleanup before
+        // installing its own watches. Normal reads do not serialize page scans.
+        await exclusive(key, check);
+        const pages = await Promise.all(message.tabIds.map(async tabId => {
+          let tab;
+          try { tab = await api.tabs.get(tabId); } catch (_) { return { tabId, skipped: 'Closed' }; }
+          const title = String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 300);
+          const reason = Boolean(tab.incognito) !== sender.incognito ? 'Cannot mix private and normal windows.' : !supported(tab) ? 'Browser-restricted or unsupported page'
+            : tab.discarded || tab.frozen ? 'Discarded or frozen; open it and refresh' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
+          if (reason) return { tabId, title, skipped: reason };
+          try {
+            check();
+            const target = await timeout(install(tab.id));
+            check();
+            const known = typeof message.known[tabId] === 'string' ? message.known[tabId] : '';
+            const value = await timeout(invoke(target, 'units', [{ known, workspace: sender.workspace, deadline: Date.now() + 9000 }]), 10_000);
+            if (!value || value.url !== tab.url || typeof value.revision !== 'string' || value.revision.length > 40) throw new Error('Page changed or returned invalid text.');
+            const page = { tabId, ...target, windowId: tab.windowId, url: value.url, title: String(value.title || title).slice(0, 300), revision: value.revision };
+            if (value.same) return { ...page, same: true };
+            let count = 0;
+            if (typeof value.text === 'string' && value.text.length <= 4_200_000) for (let at = -1; count <= 200_000 && (count++, at = value.text.indexOf('\n', at + 1)) >= 0;);
+            if (!count || !value.text || !Array.isArray(value.paras) || value.paras.length !== count) throw new Error('Page returned invalid text.');
+            return { ...page, text: value.text, limited: Boolean(value.limited),
+              paras: value.paras.map(number => Number.isSafeInteger(number) && number > 0 ? number : 0) };
+          } catch (error) { return { tabId, title, skipped: `Unavailable: ${String(error.message || error).slice(0, 180)}` }; }
+        }));
+        await exclusive(key, async () => {
+          check();
+          const state = (await load(key)) || { targets: [], incognito: sender.incognito };
+          check();
+          state.workspace = sender.workspace;
+          for (const page of pages) {
+            state.targets = state.targets.filter(t => t.tabId !== page.tabId);
+            if (page.documentId) state.targets.push({ tabId: page.tabId, documentId: page.documentId, url: page.url });
+          }
+          state.updated = Date.now();
+          await save(key, state);
+        });
+        check();
+        return { pages };
+      } finally {
+        if (!--lifecycle.readers && unitReads.get(key) === lifecycle) unitReads.delete(key);
+      }
     }
     // Handles for ranked results the side panel found in its own index. Each must
     // name a document this workspace read; the page revalidates the unit's text.
@@ -366,14 +386,22 @@
           if (keepIndex && state) {
             state.results = []; state.sequence = message.sequence; state.updated = Date.now();
             await save(key, state);
-          } else await api.storage.session.remove(key);
+          } else {
+            // Queue units cleanup before yielding to session removal. A newly
+            // reopened read must run after it, never be erased by the old Close.
+            const readKey = !keepIndex && sender.workspace && unitsKey(sender.workspace);
+            const lifecycle = readKey && unitReads.get(readKey);
+            if (lifecycle) lifecycle.generation++;
+            const cleanup = readKey && exclusive(readKey, async () => {
+              const read = await load(readKey);
+              if (read) read.workspace = sender.workspace;
+              await api.storage.session.remove(readKey);
+              await dispose(read);
+            });
+            await Promise.all([api.storage.session.remove(key), cleanup]);
+          }
         });
         await dispose(state, keepIndex);
-        if (!keepIndex && sender.workspace) {
-          const read = await load(unitsKey(sender.workspace));
-          await api.storage.session.remove(unitsKey(sender.workspace));
-          await dispose(read);
-        }
         return {};
       }
       if (typeof message.session !== 'string' || !message.session.startsWith(prefix)) throw new Error('Invalid search session.');
@@ -403,7 +431,12 @@
       for (const [key, value] of Object.entries(stored)) if (key.startsWith(prefix) && Date.now() - value.updated > TTL) {
         await exclusive(key, async () => {
           const latest = await load(key);
-          if (latest && Date.now() - latest.updated > TTL) { await api.storage.session.remove(key); void dispose(latest); }
+          // An active read is renewing this workspace's watches and registry.
+          // Otherwise finish old page cleanup before a new read crosses the gate.
+          if (!unitReads.has(key) && latest && Date.now() - latest.updated > TTL) {
+            await api.storage.session.remove(key);
+            await dispose(latest);
+          }
         });
       }
       for (const [key, value] of Object.entries(stored)) if (key.startsWith('sonar-launch:') && Date.now() - value.created > 60_000) await api.storage.session.remove(key);
