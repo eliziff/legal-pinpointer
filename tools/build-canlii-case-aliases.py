@@ -1,4 +1,4 @@
-"""Build canlii-case-aliases.tsv: reporter/alias citation version-3 identity key -> CanLII case target.
+"""Build canlii-case-aliases.tsv.gz: reporter/alias citation version-3 identity key -> CanLII case target.
 
 Sources (local, read-only):
   A2AJ reporter aliases  (ALR-Quote-Verifier data/a2aj_reporter_aliases.json): alias -> canonical citation

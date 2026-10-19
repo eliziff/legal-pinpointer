@@ -11,7 +11,7 @@ async function init(assets){
   const w=new Worker(assets['duckdb-browser-eh.worker.js']);db=new duckdb.AsyncDuckDB(new duckdb.VoidLogger(),w);
   await db.instantiate(assets['duckdb-eh.wasm']);conn=await db.connect();
   assetBase=new URL('.',assets['duckdb-eh.wasm']).href;
-  parseStructure=await structureEngine(new URL('../../legal-structure.wasm',assetBase));
+  parseStructure=await structureEngine(new URL('../../legal-structure.wasm.gz',assetBase));
   const repository=assetBase.replace(/\/$/,'');
   await conn.query(`SET custom_extension_repository=${sqlValue(repository)}; LOAD parquet;`);
   await conn.query("SET memory_limit='512MB'; SET threads=1; SET preserve_insertion_order=true; SET autoinstall_known_extensions=false; SET autoload_known_extensions=false;");

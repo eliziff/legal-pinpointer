@@ -6,60 +6,105 @@
   <title>Legal Pinpointer</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
+<body data-tab="copy">
+  <header class="top">
+    <div class="brand"><span class="logo" aria-hidden="true">¶</span><span>Legal Pinpointer</span></div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" data-tab="copy" aria-selected="true">Copy</button>
+      <button type="button" role="tab" data-tab="marker" aria-selected="false">Marker</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+  </header>
+
   <main>
-    <h1>Legal Pinpointer</h1>
-    <div class="actions" aria-label="Page search">
-      <button id="find-in-page" type="button">Tab Sonar / Find · Ctrl+Shift+S</button>
-      <button id="canlii-text-search" type="button">CanLII text search · Alt+Shift+S</button>
-      <button id="lens-route" class="secondary" type="button">Lens semantic search</button>
-    </div>
-    <p id="shortcut-status" class="summary" role="status" hidden></p>
-    <p id="document-summary" class="summary">Checking this document…</p>
+    <section class="panel" data-panel="copy" role="tabpanel">
+      <div class="doc" id="doc">
+        <p class="doc-kind" id="doc-kind">Checking this page…</p>
+        <p class="doc-cite" id="doc-cite"></p>
+      </div>
+      <div class="grid">
+        <button type="button" class="action primary" data-copy="pinpoint" disabled><span>Pinpoint</span><kbd>Ctrl X</kbd></button>
+        <button type="button" class="action primary" data-copy="quote" disabled><span>Quote</span><kbd>Ctrl ⇧ X</kbd></button>
+        <button type="button" class="action" data-copy="citation" disabled><span>Citation</span><kbd>Alt X</kbd></button>
+        <button type="button" class="action canlii" id="open-canlii" disabled><span>Open in CanLII</span><kbd>Alt C</kbd></button>
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="Pinpoint format">
+        <label><input type="radio" name="pinpointStyle" value="full"><span>at paras 12–14</span></label>
+        <label><input type="radio" name="pinpointStyle" value="bare"><span>12–14</span></label>
+      </div>
+      <h2 class="label">Search &amp; links</h2>
+      <div class="list">
+        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_FIND"><span>Tab Sonar — search this window</span><kbd>Ctrl ⇧ S</kbd></button>
+        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_CANLII_SEARCH"><span>CanLII text search</span><kbd>Alt ⇧ S</kbd></button>
+        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_PDF_LINK"><span>Link to copied text (PDFs)</span><kbd>Ctrl ⇧ F</kbd></button>
+      </div>
+      <p class="hint" id="shortcut-hint" hidden></p>
+    </section>
 
-    <div class="actions" aria-label="Copy actions">
-      <button id="copy-pinpoint" type="button">Copy pinpoint</button>
-      <button id="copy-quote" type="button">Copy with quote</button>
-      <button id="copy-citation" class="secondary" type="button">Copy citation</button>
-      <button id="open-canlii" class="secondary" type="button">Open in CanLII</button>
-    </div>
+    <section class="panel" data-panel="marker" role="tabpanel" hidden>
+      <div class="project">
+        <select id="project" aria-label="Project"></select>
+        <button type="button" class="icon" data-project="add" title="New project">+</button>
+        <button type="button" class="icon" data-project="rename" title="Rename project">✎</button>
+        <button type="button" class="icon" data-project="delete" title="Delete project">🗑</button>
+      </div>
+      <form class="inline" id="name-form" hidden>
+        <input id="name-input" maxlength="80" autocomplete="off" spellcheck="false">
+        <button type="submit">Save</button><button type="button" id="name-cancel" class="ghost">Cancel</button>
+      </form>
+      <div class="folders-head"><h2 class="label">Folders</h2><button type="button" class="link" id="add-folder">+ New folder</button></div>
+      <div id="tree" class="tree"></div>
+      <div id="viewer" class="viewer" hidden>
+        <div class="viewer-head">
+          <h2 class="label" id="viewer-title"></h2>
+          <select id="viewer-sort" aria-label="Sort">
+            <option value="saved">Saved order</option><option value="alpha">A–Z</option><option value="newest">Newest</option>
+          </select>
+          <button type="button" class="link" id="copy-links">Copy links</button>
+        </div>
+        <ol id="viewer-list"></ol>
+      </div>
+    </section>
 
-    <fieldset>
-      <legend>Pinpoint format</legend>
-      <label>
-        <input type="radio" name="pinpoint-style" value="bare">
-        <span><strong>Bare</strong><small>12-14 or 7(2)-(4)</small></span>
-      </label>
-      <label>
-        <input type="radio" name="pinpoint-style" value="full">
-        <span><strong>Full</strong><small>at paras 12-14, at 353, or ss 7(2)-(4)</small></span>
-      </label>
-      <label>
-        <input id="link-full-text-fragment-pinpoint" type="checkbox">
-        <span><strong>Link full pinpoint phrase</strong><small>For text fragments, include “at para(s)” or the provision prefix.</small></span>
-      </label>
-      <label>
-        <input id="build-text-fragment-without-structure" type="checkbox">
-        <span><strong>Link passages when no structure is found</strong><small>Build a text-fragment link for the selected or hovered passage on pages without paragraphs or provisions.</small></span>
-      </label>
-    </fieldset>
-
-    <details>
-      <summary>Keyboard shortcuts</summary>
-      <dl>
-        <div><dt>Ctrl+Shift+S</dt><dd>Tab Sonar: search open tabs; ? lists the search operators</dd></div>
-        <div><dt>Alt+Shift+S</dt><dd>CanLII document text search, including from new tabs</dd></div>
-        <div><dt>Ctrl+X</dt><dd>Copy pinpoint</dd></div>
-        <div><dt>Ctrl+Shift+X</dt><dd>Copy with selected quote</dd></div>
-        <div><dt>Alt+X</dt><dd>Copy citation</dd></div>
-        <div><dt>Alt+C</dt><dd>Open the CanLII version</dd></div>
-      </dl>
-    </details>
-
-    <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></p>
+    <section class="panel" data-panel="settings" role="tabpanel" hidden>
+      <h2 class="label">Copying</h2>
+      <div class="card">
+        <label class="toggle"><span><b>Keyboard shortcuts</b><small>Ctrl+X, Ctrl+Shift+X, Alt+X and Alt+C on legal pages</small></span><input type="checkbox" data-setting="copyShortcuts"></label>
+        <label class="toggle"><span><b>Link the whole pinpoint</b><small>For text-fragment sources, link “at para” too</small></span><input type="checkbox" data-setting="linkFullTextFragmentPinpoint"></label>
+        <label class="toggle"><span><b>Link passages without structure</b><small>Text-fragment links on pages with no paragraphs or provisions</small></span><input type="checkbox" data-setting="buildTextFragmentWithoutStructure"></label>
+      </div>
+      <h2 class="label">On the page</h2>
+      <div class="card">
+        <label class="toggle"><span><b>Copy buttons beside paragraphs</b><small>Pinpoint, quote and link for the hovered paragraph or section</small></span><input type="checkbox" data-setting="unitCopyButtons"></label>
+        <label class="toggle"><span><b>Name in CanLII’s header</b><small>The style of cause stays visible as you scroll, with copy buttons</small></span><input type="checkbox" data-setting="canliiHeader"></label>
+        <label class="toggle"><span><b>Clean titles on Westlaw &amp; Lexis</b><small>A roomy, selectable title block with copy buttons</small></span><input type="checkbox" data-setting="cleanTitles"></label>
+        <label class="toggle"><span><b>CanLII button on Westlaw &amp; Lexis</b><small>Lit when a CanLII version is found</small></span><input type="checkbox" data-setting="canliiButton"></label>
+        <label class="toggle"><span><b>Hide selection menus</b><small>Westlaw, Lexis and Practical Law’s highlight/annotate pop-ups</small></span><input type="checkbox" data-setting="suppressSelectionMenus"></label>
+      </div>
+      <h2 class="label">Tab Sonar</h2>
+      <div class="card">
+        <label class="toggle"><span><b>Wake sleeping tabs</b><small>Reload tabs Chrome discarded so they can be searched</small></span><input type="checkbox" data-setting="sonarWakeTabs"></label>
+      </div>
+      <h2 class="label">Case Marker</h2>
+      <div class="card">
+        <label class="toggle"><span><b>Circles on CanLII</b><small>On search results and document titles</small></span><input type="checkbox" data-setting="caseMarker"></label>
+        <label class="field"><span>Hover + C files into</span><select data-slot="canliiHotkeySlot1"></select></label>
+        <label class="field"><span>Hover + V files into</span><select data-slot="canliiHotkeySlot2"></select></label>
+        <div class="field"><span>Data</span><span class="pair"><button type="button" class="ghost" id="export">Export</button><button type="button" class="ghost" id="import">Import</button></span></div>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+      <h2 class="label">PDF links</h2>
+      <div class="card">
+        <label class="toggle"><span><b>Link to copied text</b><small>Ctrl+Shift+F and the right-click menu</small></span><input type="checkbox" data-setting="pdfFragments"></label>
+        <label class="field"><span>Copy as</span><select data-setting-select="pdfLinkFormat">
+          <option value="url">The link</option><option value="text">The text, linked</option><option value="tag">The text + [Link]</option>
+        </select></label>
+      </div>
+      <button type="button" class="link shortcuts" id="shortcuts">Change keyboard shortcuts…</button>
+    </section>
   </main>
+
+  <footer><p id="status" role="status" aria-live="polite"></p></footer>
   <script src="popup.js"></script>
-  <script src="popup-find.js"></script>
-  <script src="lens-launcher.js"></script>
 </body>
 </html>

@@ -9,7 +9,7 @@ citation-copying shortcuts and output formats are unchanged.
 | Control | Action |
 | --- | --- |
 | Ctrl+Shift+S | Open/focus Open tabs search. macOS uses Control, not Command. |
-| All tabs / This group / This tab | Choose which tabs are searched. All tabs is the default. |
+| This window / This group / This tab | Choose which tabs are searched. This window is the default and the widest scope. |
 | ? | Hover to see CanLII's search operators; click to keep them open. |
 | Enter or Tab in the query | Put keyboard focus on the results. Nothing opens. |
 | Tab / Shift+Tab | Move forward / back: query, results, then the other controls. |
@@ -82,11 +82,15 @@ source ranges. Changed or unavailable passages refuse to open (search again)
 rather than jump approximately. Existing renderer indexes and highlight reuse remain intact.
 
 This tab and This group stay pinned to the originating tab while
-visiting results. All tabs includes other windows without mixing normal and
-incognito contexts. A source in another window opens that window's native panel
-**within the original click/key gesture** and hands off the query, result list,
-selection and list scroll. No source tab is moved or regrouped. A window whose
-shared search has been changed or cleared elsewhere says so.
+visiting results. This window covers the origin's window; other windows have
+their own panels. A tab Chrome freezes or discards keeps its last reading in the
+index (plain-word queries still find it); opening one of its results activates the
+tab, waits until it is awake, reads it again and opens the same passage. Never-read
+sleeping tabs are reloaded in the background to be read (setting *Wake sleeping tabs*).
+Operator queries run in the pages themselves, so they skip sleeping tabs and list
+them. A search started from a tab in another window still opens that window's
+native panel **within the original click/key gesture** and hands off the query,
+result list, selection and list scroll. No source tab is moved or regrouped.
 
 ## Query language
 

@@ -23,27 +23,54 @@
   const QUOTE_BLOCK = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DIV', 'DT', 'FIGCAPTION', 'FIGURE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'P', 'PRE', 'SECTION', 'TD', 'TH', 'TR']);
 
   document.addEventListener('pointerover', (event) => {
-    lastHoverTarget = event.target instanceof Element ? event.target : event.target.parentElement;
+    const target = event.target instanceof Element ? event.target : event.target.parentElement;
+    // The copy bar and title card are Pinpointer's own: hovering them keeps the passage.
+    if (target && !target.closest('[data-lp-ui]')) lastHoverTarget = target;
   }, true);
   document.addEventListener('pointermove', (event) => {
     lastPointer = { x: event.clientX, y: event.clientY };
   }, { capture: true, passive: true });
 
-  function storageGet(defaults) {
-    return new Promise((resolve) => chrome.storage.local.get(defaults, resolve));
+  // Settings are read once and kept current, so no copy waits on a storage round trip.
+  const SETTINGS = {
+    pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true
+  };
+  const settingsReady = new Promise((resolve) => chrome.storage.local.get(SETTINGS, (stored) => {
+    Object.assign(SETTINGS, stored);
+    resolve(SETTINGS);
+  }));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    for (const key of Object.keys(SETTINGS)) if (changes[key]) SETTINGS[key] = changes[key].newValue ?? SETTINGS[key];
+  });
+  function storageGet() {
+    return settingsReady;
   }
 
   function ownOverlay(node) {
     const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
-    return Boolean(element?.closest('#legal-pinpointer-status, [data-pinpointer-sonar]'));
+    return Boolean(element?.closest('#legal-pinpointer-status, [data-pinpointer-sonar], [data-lp-ui]'));
   }
 
+  // Document identity and structure live in the document root, <head> and the provider's title
+  // block. Toolbars, tooltips and menus elsewhere change constantly and must not force a re-parse.
+  const IDENTITY = 'h1, h2, title, meta, #co_docHeader, #citeInfo, .co_cites, #titleInfo, .crsw_prelim, .SS_DocumentHeader, '
+    + '#SS_DocumentTitle, .documentheadertitle, #title-container, .documentMeta, #metas-container';
+  const modelRoots = new Set();
+  function affectsModel(node) {
+    if (!node || ownOverlay(node)) return false;
+    const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    if (!element || !element.isConnected || !modelRoots.size || element.closest('head')) return true;
+    for (const root of modelRoots) if (!root.isConnected || root.contains(element) || element.contains(root)) return true;
+    return Boolean(element.closest(IDENTITY) || (node.nodeType === Node.ELEMENT_NODE && (element.matches(IDENTITY) || element.querySelector?.(IDENTITY))));
+  }
   function invalidateModels(records) {
-    if (!modelCache.size || !records.some(record => !ownOverlay(record.target) && (
-      record.type !== 'childList' || [...record.addedNodes, ...record.removedNodes].some(node => !ownOverlay(node))
-    ))) return;
+    if (!modelCache.size || !records.some((record) => record.type === 'childList'
+      ? affectsModel(record.target) && [...record.addedNodes, ...record.removedNodes].some((node) => !ownOverlay(node) && (node.nodeType !== Node.TEXT_NODE || node.data.trim()))
+      : affectsModel(record.target))) return;
     documentRevision += 1;
     modelCache.clear();
+    modelRoots.clear();
   }
 
   function flushModels() {
@@ -53,7 +80,7 @@
       // Headers and metadata outside the document root affect citation identity too.
       modelObserver.observe(document.documentElement, {
         subtree: true, childList: true, characterData: true, attributes: true,
-        attributeFilter: ['id', 'name', 'content', 'href', 'class', 'style', 'hidden', 'aria-hidden',
+        attributeFilter: ['id', 'name', 'content', 'href', 'hidden', 'aria-hidden',
           'lang', 'data-document-type', 'data-section-number', 'data-rule-number', 'data-article-number']
       });
     }
@@ -87,6 +114,7 @@
         throw new Error('The document changed during this operation. Please try again.');
       }
       modelStamps.set(model, { revision, url });
+      modelRoots.add(model.root);
       return model;
     } catch (error) {
       if (modelCache.get(level) === entry) modelCache.delete(level);
@@ -571,11 +599,17 @@
     }
     toast.classList.toggle('legal-pinpointer-toast--error', Boolean(error));
     toast.textContent = message;
-    toast.hidden = false;
     clearTimeout(toastTimer);
+    toast.lpFade?.cancel();
+    // Opacity and transform only: the compositor animates it without a layout pass.
+    if (toast.hidden) {
+      toast.hidden = false;
+      toast.animate?.([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 110, easing: 'ease-out' });
+    }
     toastTimer = window.setTimeout(() => {
-      toast.hidden = true;
-    }, 2800);
+      const fade = toast.lpFade = toast.animate?.([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: 'ease-in' });
+      if (fade) fade.onfinish = () => { toast.hidden = true; toast.lpFade = null; }; else toast.hidden = true;
+    }, error ? 3600 : 2200);
   }
 
   // The hovered passage: the block (or preformatted paragraph) under the pointer.
@@ -816,6 +850,48 @@
     return {ok:true,target:targetForNode(model,{kind:'lens'},node)};
   }
 
+  // One unit's pinpoint, quote or link, copied exactly as selecting the whole unit would.
+  async function copyUnit(model, node, mode) {
+    const range = lensRange(model, node);
+    if (!range) throw new Error('This passage is no longer on the page.');
+    let payload, message;
+    if (mode === 'link') {
+      const target = targetForNode(model, { kind: 'selection' }, node);
+      const [{ plain }] = await core.pinpointLayouts(model.structure.kind, [[node.locator]], SETTINGS.pinpointStyle);
+      payload = { plain: target, html: anchorHtml(target, target) };
+      message = `Copied link to ${plain}`;
+    } else {
+      ({ payload, message } = await copy(mode, false, range));
+    }
+    assertCurrentModel(model);
+    await clipboardWrite(payload);
+    rememberedFragment = null;
+    showToast(message, false);
+    return payload;
+  }
+
+  async function copyPayload(payload, message) {
+    await clipboardWrite(payload);
+    rememberedFragment = null;
+    showToast(message, false);
+  }
+
+  // The page UI (page-ui.js) shares this model, these builders and the one toast.
+  globalThis.LegalPinpointerPage = {
+    settingsReady,
+    settings: SETTINGS,
+    model: (metadataOnly) => inspectPage(metadataOnly),
+    current: (model) => { try { assertCurrentModel(model); return true; } catch (_) { return false; } },
+    unitAt: (model, target) => nodeForTarget(model, target),
+    unitStart: (node) => nodeBoundary(node, true),
+    copyUnit,
+    copyPayload,
+    copyCitation: () => copy('citation'),
+    openCanlii,
+    toast: showToast,
+    report: handleTask
+  };
+
   globalThis.LegalPinpointerSonarCopy = (range, mode) => copy(mode, false, range);
   // Tab Sonar titles its results with the citation Alt+X copies.
   globalThis.LegalPinpointerSonarCitation = async () => (await inspectPage(true)).citation.plain;
@@ -846,7 +922,7 @@
   }
 
   document.addEventListener('keydown', (event) => {
-    if (event.repeat || !/^(?:www\.)?(?:canlii\.org|advance\.lexis\.com|nextcanada\.westlaw\.com)$/.test(location.hostname)) return;
+    if (event.repeat || !SETTINGS.copyShortcuts || !/^(?:www\.)?(?:canlii\.org|advance\.lexis\.com|nextcanada\.westlaw\.com)$/.test(location.hostname)) return;
     const key = event.key.toLowerCase();
     const copyPinpoint = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === 'x';
     const copyQuote = event.ctrlKey && !event.altKey && !event.metaKey && event.shiftKey && key === 'x';

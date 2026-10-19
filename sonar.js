@@ -4,7 +4,7 @@
   const $ = id => document.getElementById(id), core = LegalPinpointerFindCore;
   const window = await chrome.windows.getCurrent(), windowId = window.id, incognito = Boolean(window.incognito);
   const launchKey = `sonar-launch:${windowId}`;
-  let workspace = crypto.randomUUID(), origin = null, route = 'tabs', scope = 'all';
+  let workspace = crypto.randomUUID(), origin = null, route = 'tabs', scope = 'window';
   let query = '', canliiQuery = '', result = null, current = -1, sequence = Date.now(), observedSequence = sequence;
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', noticeTimer = 0, focusOnResults = false;
   let refreshPending = false, originRequest = 0;
@@ -20,6 +20,12 @@
   const MAX_INDEX_CHARS = 32_000_000, reads = new Map(), readQueue = [], indexWaiting = new Map();
   const RECHECK_AFTER = 10 * 60_000, RETRY_AFTER = 1000;
   let indexer = null, indexReady = false, indexCalls = 0, reading = 0;
+  // Chrome freezes and discards background tabs. A sleeping tab keeps its last reading in the
+  // index; opening one of its results wakes it first. A sleeping tab never read can be reloaded
+  // in the background (Settings: Wake sleeping tabs) so it can be read at all.
+  const waking = new Set();
+  let wakeTabs = true, wakes = 0, pendingOpen = null;
+  chrome.storage.local?.get({ sonarWakeTabs: true }, (stored) => { wakeTabs = stored?.sonarWakeTabs !== false; });
   const favicon = url => url ? `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=16` : '';
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'),
     { choose: (index, action) => choose(index, action), icon: favicon, leave: () => $('query').focus() });
@@ -105,6 +111,12 @@
       if (result.note) tell(result.note);
       if (focusOnResults) { focusOnResults = false; focusFirst(); }
       if (result.ranked) { issue(result); rerank(token); fillExcerpts(result); }
+      if (pendingOpen) {
+        const wanted = pendingOpen; pendingOpen = null;
+        const found = result.results.findIndex(item => item.tabId === wanted.tabId && item.hash === wanted.hash);
+        if (found >= 0) { current = found; list.select(found); visit(); }
+        else tell('The tab woke up with different text. Pick the passage again.', true);
+      }
     } catch (error) {
       if (token !== sequence || route !== 'tabs') return;
       busy = false; result = null; current = -1; focusOnResults = false; show([]); $('empty').hidden = true; details();
@@ -118,10 +130,12 @@
   // Tabs a search covers, in the broker's order: origin, then window and position.
   // One tabs query answers every scope (each browser round trip delays results).
   async function scopeTabs() {
-    const all = await chrome.tabs.query({}), start = all.find(tab => tab.id === origin.id);
+    let all = await chrome.tabs.query({ windowId: origin.windowId ?? windowId }), start = all.find(tab => tab.id === origin.id);
+    if (!start) { start = await chrome.tabs.get(origin.id).catch(() => null); all = start ? await chrome.tabs.query({ windowId: start.windowId }) : []; }
     if (!start) throw new Error(`No tab with id: ${origin.id}.`);
     if (Boolean(start.incognito) !== incognito) throw new Error('Cannot mix private and normal windows.');
-    const tabs = scope === 'current' ? [start] : scope === 'group' ? all.filter(tab => start.groupId >= 0 && tab.groupId === start.groupId && tab.windowId === start.windowId) : all;
+    // The widest scope is the origin's window.
+    const tabs = scope === 'current' ? [start] : scope === 'group' ? all.filter(tab => start.groupId >= 0 && tab.groupId === start.groupId) : all;
     return { start, tabs: tabs.filter(tab => Boolean(tab.incognito) === incognito).sort((a, b) => (b.id === start.id) - (a.id === start.id) || a.windowId - b.windowId || a.index - b.index) };
   }
   async function rankSearch(token, refresh) {
@@ -140,7 +154,10 @@
     const skipped = tabs.filter(tab => !indexed.includes(tab)).map(tab => ({ title: String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 200),
       reason: reads.get(tab.id)?.reason || 'Still reading; search again when ready' }));
     const windows = new Map(tabs.map(tab => [tab.id, tab.windowId]));
-    for (const item of reply.results) item.windowId = windows.get(item.tabId) ?? item.windowId;
+    for (const item of reply.results) {
+      item.windowId = windows.get(item.tabId) ?? item.windowId;
+      item.asleep = Boolean(reads.get(item.tabId)?.asleep);
+    }
     return { ranked: true, results: reply.results, passages: reply.passages, tag: reply.tag, searched: reply.searched, total: tabs.length, skipped, limited: reply.limited,
       sequence: token, note: scope === 'group' && start.groupId < 0 ? 'This tab is not in a tab group. No other ungrouped tabs were searched.' : '' };
   }
@@ -189,7 +206,7 @@
   // Streams every eligible tab into the index, origin first, four pages at a time.
   async function readAll() {
     if (!indexReady || !origin) return;
-    const tabs = (await chrome.tabs.query({})).filter(tab => Boolean(tab.incognito) === incognito);
+    const tabs = (await chrome.tabs.query({ windowId: origin.windowId ?? windowId })).filter(tab => Boolean(tab.incognito) === incognito);
     const open = new Set(tabs.map(tab => tab.id));
     for (const tabId of reads.keys()) if (!open.has(tabId)) forget(tabId);
     tabs.sort((a, b) => (b.id === origin.id) - (a.id === origin.id) || (b.windowId === windowId) - (a.windowId === windowId) || a.windowId - b.windowId || a.index - b.index);
@@ -230,10 +247,15 @@
     const used = [...reads.values()].reduce((sum, other) => sum + (other !== entry && other.revision ? other.characters : 0), 0);
     if (!page.skipped && !page.same && used + page.text.length > MAX_INDEX_CHARS) page = { tabId, skipped: 'Text budget; narrow the scope' };
     try {
-      if (page.skipped) {
+      if (page.skipped && /^Asleep/.test(page.skipped)) {
+        // Keep the last reading of a sleeping tab; a never-read one may be woken to read it.
+        entry.asleep = true; entry.reason = page.skipped;
+        if (!entry.revision) wake(tabId);
+      } else if (page.skipped) {
         if (entry.revision) indexer.postMessage({ type: 'drop', tabId });
         Object.assign(entry, { revision: '', reason: page.skipped });
       } else {
+        entry.asleep = false;
         const { text, paras, ...meta } = page;
         await indexCall(page.same ? { type: 'meta', meta } : { type: 'put', page });
         if (reads.get(tabId) !== entry) return;
@@ -245,6 +267,22 @@
     if (entry.dirty) setTimeout(() => {
       if (reads.get(tabId) === entry) want(tabId).then(() => sourceChanged(tabId));
     }, 250); // Changed again while reading; never publish it as a clean source.
+  }
+  function wake(tabId) {
+    if (!wakeTabs || waking.has(tabId) || wakes >= 24) return;
+    waking.add(tabId); wakes++;
+    chrome.tabs.reload(tabId).catch(() => {}).finally(() => setTimeout(() => waking.delete(tabId), 30_000));
+  }
+  // Resolves once a tab is loaded and awake (or after a bounded wait).
+  function awake(tabId, ms = 20_000) {
+    return new Promise(resolve => {
+      const ready = tab => tab && tab.status === 'complete' && !tab.discarded && !tab.frozen;
+      const done = () => { chrome.tabs.onUpdated.removeListener(listener); clearTimeout(timeout); resolve(); };
+      const listener = (id, change, tab) => { if (id === tabId && ready(tab)) done(); };
+      const timeout = setTimeout(done, ms);
+      chrome.tabs.onUpdated.addListener(listener);
+      chrome.tabs.get(tabId).then(tab => { if (ready(tab)) done(); }, done);
+    });
   }
   function forget(tabId) {
     const entry = reads.get(tabId);
@@ -269,7 +307,10 @@
     const relevant = change.status || change.url !== undefined || change.discarded !== undefined || change.frozen !== undefined || change.groupId !== undefined;
     if (!relevant || (tab && Boolean(tab.incognito) !== incognito)) return;
     if (origin?.id === tabId && tab) setOrigin(tab);
-    if (change.status === 'loading' || change.discarded || change.frozen) forget(tabId);
+    // Only the origin's window is searched.
+    if (tab && origin && tab.windowId !== origin.windowId && origin.id !== tabId) { if (reads.has(tabId)) forget(tabId); return; }
+    if (change.discarded || change.frozen) { const entry = reads.get(tabId); if (entry) entry.asleep = true; return; }
+    if (change.status === 'loading') forget(tabId);
     else if (indexReady && (change.status === 'complete' || change.url !== undefined || change.discarded === false || change.frozen === false)) want(tabId, false, true);
     if (tab && !/^(https?|file):/.test(tab.url || '') && origin?.id !== tabId) return;
     sourceChanged(tabId);
@@ -373,9 +414,27 @@
     const { issued, passages, ...transfer } = result;
     return { workspace, origin, query, canliiQuery, scope, sequence, result: transfer, current, scrollTop: list.viewport.scrollTop };
   }
+  // A result in a sleeping tab: wake the tab, read it again, then open the same passage.
+  async function wakeAndOpen(item) {
+    opening = true;
+    try {
+      tell('Waking the tab\u2026');
+      await chrome.tabs.update(item.tabId, { active: true });
+      await awake(item.tabId);
+      await want(item.tabId, true, true);
+      pendingOpen = { tabId: item.tabId, hash: item.hash };
+    } catch (error) { tell(error.message, true); }
+    finally { opening = false; }
+    if (pendingOpen) schedule(0, true);
+  }
   async function visit() {
     if (busy || opening || result?.stale || route !== 'tabs' || current < 0 || !result) return;
-    const destination = result.results[current].windowId;
+    const item = result.results[current];
+    if (item.asleep) {
+      const tab = await chrome.tabs.get(item.tabId).catch(() => null);
+      if (tab && (tab.discarded || tab.frozen)) return wakeAndOpen(item);
+    }
+    const destination = item.windowId;
     // Cross-window sidePanel.open must remain in this click/key gesture; never
     // defer it until after tab activation or a service-worker response.
     const panelOpen = destination === windowId ? Promise.resolve() : chrome.sidePanel.open({ windowId: destination });

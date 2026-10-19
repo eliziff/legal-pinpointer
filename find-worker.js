@@ -94,7 +94,7 @@
     }
     async function search(message, sender) {
       if (typeof message.query !== 'string' || message.query.length > 1024 ||
-          !['current', 'all', 'group'].includes(message.scope) || (message.refresh !== undefined && typeof message.refresh !== 'boolean')) {
+          !['current', 'window', 'all', 'group'].includes(message.scope) || (message.refresh !== undefined && typeof message.refresh !== 'boolean')) {
         throw new Error('Invalid search request.');
       }
       // Ranked (plain-word) queries run in the side panel's own index; see SONAR_ISSUE.
@@ -107,9 +107,10 @@
       try {
         const origin = await api.tabs.get(sender.workspace ? message.originTabId : sender.tab.id);
         if (sender.workspace && Boolean(origin.incognito) !== sender.incognito) throw new Error('Cannot mix private and normal windows.');
+        // The widest scope is the origin's window ('all' is the former name of that scope).
         const tabs = !compiled.tree ? [] : message.scope === 'current' ? [origin]
           : message.scope === 'group' ? (origin.groupId < 0 ? [] : await api.tabs.query({ groupId: origin.groupId, windowId: origin.windowId }))
-            : await api.tabs.query({});
+            : await api.tabs.query({ windowId: origin.windowId });
         const candidates = tabs.filter(t => Boolean(t.incognito) === Boolean(origin.incognito))
           .sort((a, b) => (b.id === origin.id) - (a.id === origin.id) || a.windowId - b.windowId || a.index - b.index);
         const warm = new Set(candidates.filter(t => supported(t) && !t.discarded && !t.frozen && t.status !== 'loading').map(t => t.id));
@@ -140,7 +141,7 @@
           }
           const batch = await Promise.all(candidates.slice(offset, offset + CONCURRENCY).map(async tab => {
             const reason = !supported(tab) ? 'Browser-restricted or unsupported page' : tab.discarded || tab.frozen
-              ? 'Discarded or frozen; open it and refresh' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
+              ? 'Asleep (Chrome froze or discarded it); plain-word search still uses its last reading' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
             if (reason) { skip(tab, reason); return null; }
             try {
               const target = await timeout(install(tab.id), Math.min(5000, Math.max(1, deadline - Date.now())));
@@ -235,7 +236,7 @@
           try { tab = await api.tabs.get(tabId); } catch (_) { return { tabId, skipped: 'Closed' }; }
           const title = String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 300);
           const reason = Boolean(tab.incognito) !== sender.incognito ? 'Cannot mix private and normal windows.' : !supported(tab) ? 'Browser-restricted or unsupported page'
-            : tab.discarded || tab.frozen ? 'Discarded or frozen; open it and refresh' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
+            : tab.discarded || tab.frozen ? 'Asleep (Chrome froze or discarded it)' : tab.status === 'loading' ? 'Still loading; refresh when ready' : '';
           if (reason) return { tabId, title, skipped: reason };
           try {
             check();
@@ -275,7 +276,7 @@
     // name a document this workspace read; the page revalidates the unit's text.
     async function issue(message, sender) {
       const valid = r => Number.isInteger(r?.tabId) && typeof r.documentId === 'string' && Number.isInteger(r.unit) && r.unit >= 0 && Number.isSafeInteger(r.hash);
-      if (!sender.workspace || typeof message.query !== 'string' || message.query.length > 1024 || !['current', 'all', 'group'].includes(message.scope) ||
+      if (!sender.workspace || typeof message.query !== 'string' || message.query.length > 1024 || !['current', 'window', 'all', 'group'].includes(message.scope) ||
           !Array.isArray(message.results) || message.results.length > RANKED_RESULTS || !message.results.every(valid)) throw new Error('Invalid search request.');
       const key = sessionKey(sender);
       if (!claim(key, message.sequence)) return { stale: true };

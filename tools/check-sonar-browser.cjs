@@ -10,7 +10,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '..');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-test('installed extension recovers stale sources and searches across tabs/windows', { timeout: 150_000 }, async () => {
+test('installed extension recovers stale sources and searches the tabs of its window', { timeout: 150_000 }, async () => {
   const bodies = new Map([
     ['/a', '<title>Source A</title><p>Privilege remains with the client in alpha.</p>'],
     ['/b', '<title>Source B</title><p>Nothing relevant yet.</p>'],
@@ -82,8 +82,8 @@ test('installed extension recovers stale sources and searches across tabs/window
     const matching = (page, text) => page.waitForFunction(text => [...document.querySelectorAll('.result-text')].some(row => row.textContent.includes(text)), text, { timeout: 20_000 });
     await panel.click('#use-active'); await settled(panel);
     let found = await search(panel, 'privilege');
-    assert.equal(found.length, 3); assert.ok(found.some(item => item.title === 'Other window'));
-    record('ranked search includes other tabs and browser windows');
+    assert.equal(found.length, 2); assert.ok(!found.some(item => item.title === 'Other window'));
+    record('ranked search covers the tabs of this window and leaves other windows out');
     found = await search(panel, 'waiver /p privilege'); assert.equal(found.length, 1);
     record('exact proximity search is preserved');
 
@@ -108,20 +108,24 @@ test('installed extension recovers stale sources and searches across tabs/window
     await matching(panel, 'same-URL reload');
     record('current source refreshes after same-URL navigation');
 
-    await panel.getByRole('button', { name: 'All tabs', exact: true }).click(); await settled(panel); await panel.focus('#query');
+    await panel.getByRole('button', { name: 'This window', exact: true }).click(); await settled(panel); await panel.focus('#query');
     await b.evaluate(() => { document.querySelector('p').textContent = 'Privilege newly appears in a previously zero-hit source.'; });
     await matching(panel, 'previously zero-hit');
-    record('background mutation adds previously missing All-tabs matches');
+    record('background mutation adds previously missing window matches');
     await b.bringToFront(); await a.close();
     await panel.getByRole('button', { name: 'This tab', exact: true }).click(); found = await settled(panel);
     assert.equal(found.length, 1); assert.equal(found[0].title, 'Source B');
     record('closing the pinned origin reattaches to the remaining active tab');
 
-    const panel2 = await openPanel(second.id, other); await panel2.click('#use-active'); await settled(panel2); await search(panel2, 'privilege');
+    const panel2 = await openPanel(second.id, other); await panel2.click('#use-active'); await settled(panel2);
+    const own = await search(panel2, 'privilege');
+    assert.deepEqual(own.map(item => item.title), ['Other window']);
+    record("another window's panel searches its own window");
     await panel.focus('#query'); await panel2.focus('#query');
-    await b.evaluate(() => { document.querySelector('p').textContent = 'Privilege broadcast reaches two independent panels.'; });
-    await Promise.all([matching(panel, 'two independent panels'), matching(panel2, 'two independent panels')]);
-    record('independent native panels both receive source changes');
+    await b.evaluate(() => { document.querySelector('p').textContent = 'Privilege change in the first window.'; });
+    await other.evaluate(() => { document.querySelector('p').textContent = 'Privilege change in the second window.'; });
+    await Promise.all([matching(panel, 'first window'), matching(panel2, 'second window')]);
+    record('independent native panels receive their own windows\' source changes');
     await panel2.focus('#query');
     const closed = panel2.waitForEvent('close');
     await panel2.keyboard.press('Escape').catch(error => {
@@ -133,12 +137,6 @@ test('installed extension recovers stale sources and searches across tabs/window
     await matching(panel, 'other panel closing');
     record('independent panels receive invalidations and one Close preserves the other watcher');
 
-    await panel.getByRole('button', { name: 'All tabs', exact: true }).click(); found = await settled(panel);
-    const destination = found.find(item => item.title === 'Other window'); assert.ok(destination);
-    await row(panel, destination.at).getByRole('button', { name: 'Open', exact: true }).click();
-    await other.waitForFunction(() => CSS.highlights.has('legal-pinpointer-sonar-active'));
-    assert.ok((await worker.evaluate(() => chrome.tabs.query({ active: true }))).some(tab => tab.url.endsWith('/other')));
-    record('cross-window Open targets and highlights the original passage');
     assert.deepEqual(errors, []); passed = true;
   } finally {
     const report = { passed, checks, errors, browser: context?.browser()?.version(), nativeExtension: true };

@@ -23,7 +23,7 @@ const syntheticUrl = originalUrl || (provider === 'canlii'
   : 'https://nextcanada.westlaw.com/Document/Icapture');
 
 async function analyzeEngine(input) {
-  const bytes = fs.readFileSync(path.join(projectRoot, 'legal-structure.wasm'));
+  const bytes = require('./engine-node.cjs').wasmBytes();
   const { instance } = await WebAssembly.instantiate(bytes);
   const encoded = new TextEncoder().encode(JSON.stringify(input));
   const pointer = instance.exports.legal_structure_alloc(encoded.length);

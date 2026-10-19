@@ -179,7 +179,7 @@ async function main() {
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception ? result.exceptionDetails.exception.description : result.exceptionDetails.text);
     return result.result.value;
   };
-  const wasm = fs.readFileSync(path.join(projectRoot, 'legal-structure.wasm')).toString('base64');
+  const wasm = require('./engine-node.cjs').wasmBytes().toString('base64');
   await evaluate(shim(originalUrl, wasm));
   for (const name of ['core.js', 'text-fragments.js', 'providers.js']) {
     await evaluate(fs.readFileSync(path.join(projectRoot, name), 'utf8'));
