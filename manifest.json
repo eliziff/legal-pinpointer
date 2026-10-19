@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Legal Pinpointer",
-  "version": "0.2.0",
-  "description": "Canadian legal pinpoints, Tab Sonar, and local semantic passage search across tabs and A2AJ Parquet files.",
-  "permissions": ["clipboardRead", "clipboardWrite", "storage", "unlimitedStorage", "activeTab", "scripting", "sidePanel", "favicon"],
+  "version": "0.3.0",
+  "description": "Canadian legal pinpoints and citations, CanLII links from Westlaw and Lexis, Tab Sonar search, Case Marker and PDF text-fragment links.",
+  "permissions": ["clipboardRead", "clipboardWrite", "storage", "unlimitedStorage", "activeTab", "scripting", "sidePanel", "favicon", "offscreen", "contextMenus"],
   "background": {"service_worker": "engine-worker.js"},
   "action": {"default_popup": "popup.html", "default_title": "Legal Pinpointer"},
   "side_panel": {"default_path": "sonar.html"},
@@ -11,13 +11,21 @@
   "cross_origin_opener_policy": {"value": "same-origin"},
   "content_scripts": [{
     "matches": ["https://www.canlii.org/*/doc/*", "https://www.canlii.org/*/laws/*", "https://canlii.org/*/doc/*", "https://canlii.org/*/laws/*", "https://advance.lexis.com/document/*", "https://advance.lexis.com/search/*", "https://nextcanada.westlaw.com/Document/*", "https://www.nextcanada.westlaw.com/Document/*"],
-    "js": ["core.js", "text-fragments.js", "providers.js", "content.js"],
+    "js": ["core.js", "text-fragments.js", "providers.js", "content.js", "page-ui.js"],
     "css": ["content.css"], "run_at": "document_idle"
+  }, {
+    "matches": ["https://*.westlaw.com/*", "https://*.lexis.com/*", "https://*.lexisnexis.com/*", "https://*.lexisnexis.ca/*", "https://*.practicallaw.thomsonreuters.com/*", "https://practicallaw.thomsonreuters.com/*", "https://*.practicallaw.ca/*", "https://practicallaw.ca/*"],
+    "js": ["selection-guard.js"], "run_at": "document_start"
+  }, {
+    "matches": ["https://www.canlii.org/*", "https://canlii.org/*"],
+    "js": ["marker.js"],
+    "css": ["marker.css"], "run_at": "document_idle"
   }],
   "content_security_policy": {"extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self'; connect-src 'self' blob: data:; img-src 'self' blob: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"},
   "commands": {
-    "find-in-page": {"suggested_key": {"default": "Ctrl+Shift+S", "mac": "MacCtrl+Shift+S"}, "description": "Tab Sonar: find in page, all tabs or current tab group"},
-    "canlii-text-search": {"suggested_key": {"default": "Alt+Shift+S", "mac": "Alt+Shift+S"}, "description": "CanLII document text search (including from new tabs)"}
+    "find-in-page": {"suggested_key": {"default": "Ctrl+Shift+S", "mac": "MacCtrl+Shift+S"}, "description": "Tab Sonar: search this window, this tab group or this tab"},
+    "canlii-text-search": {"suggested_key": {"default": "Alt+Shift+S", "mac": "Alt+Shift+S"}, "description": "CanLII document text search (including from new tabs)"},
+    "pdf-fragment-link": {"suggested_key": {"default": "Ctrl+Shift+F", "mac": "Command+Shift+F"}, "description": "Link to the text copied in the clipboard (PDFs and any page)"}
   },
   "minimum_chrome_version": "116",
   "host_permissions": ["http://*/*", "https://*/*"]

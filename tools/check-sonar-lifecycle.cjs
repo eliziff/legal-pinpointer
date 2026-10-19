@@ -24,10 +24,11 @@ function timers() {
   return { setTimeout(fn, ms) { const id = setTimeout(() => { all.delete(id); fn(); }, ms); id.unref(); all.add(id); return id; },
     clearTimeout(id) { clearTimeout(id); all.delete(id); }, close() { for (const id of all) clearTimeout(id); } };
 }
-function panelFixture() {
+function panelFixture({ otherWindow = false } = {}) {
   const time = timers(), elements = new Map(), calls = [], storage = {}, workers = [], changes = event(), messages = event();
   let now = Date.now(), list, unitsHook, storageHook, issueHook;
-  const tabs = [1, 2, 3].map(id => ({ id, windowId: id === 3 ? 11 : 10, groupId: id === 3 ? 8 : 7, index: id,
+  // Tab 3 is in another group; with otherWindow, also in another window (outside the widest scope).
+  const tabs = [1, 2, 3].map(id => ({ id, windowId: id === 3 && otherWindow ? 11 : 10, groupId: id === 3 ? 8 : 7, index: id,
     title: `Source ${id}`, url: `https://source${id}.test/`, incognito: false, active: id === 1, status: 'complete',
     text: id === 2 ? 'Nothing relevant here.' : `Privilege in source ${id}.`, documentId: `doc${id}` }));
   class Element {
@@ -46,7 +47,7 @@ function panelFixture() {
   const $ = id => { if (!elements.has(id)) elements.set(id, new Element(id)); return elements.get(id); };
   const document = { body: { dataset: {} }, activeElement: null, getElementById: $, createElement: () => new Element(),
     querySelector: selector => selector === 'label[for=query]' ? $('label') : null, querySelectorAll: () => [], addEventListener() {} };
-  $('scope').children = ['all', 'group', 'current'].map(scope => Object.assign(new Element(), { dataset: { scope } }));
+  $('scope').children = ['window', 'group', 'current'].map(scope => Object.assign(new Element(), { dataset: { scope } }));
   class Worker {
     constructor(name) {
       if (name !== 'sonar-index.js') throw Error('Optional reranker omitted in lifecycle checks');
@@ -70,6 +71,8 @@ function panelFixture() {
     windows: { getCurrent: async () => ({ id: 10, incognito: false }) },
     tabs: { query: async query => tabs.filter(tab => Object.entries(query).every(([key, value]) => tab[key] === value)).map(tab => ({ ...tab })),
       get: async id => { const tab = tabs.find(tab => tab.id === id); if (!tab) throw Error('No tab'); return { ...tab }; },
+      reload: async id => { calls.push({ type: 'reload', id }); },
+      update: async (id, change) => { calls.push({ type: 'update', id, change }); return { ...tabs.find(tab => tab.id === id) }; },
       onUpdated: event(), onRemoved: event(), onReplaced: event(), onAttached: event(), onDetached: event() },
     storage: { onChanged: changes, session: { get: async key => ({ [key]: storage[key] }), set: async values => { await storageHook?.(values); Object.assign(storage, values); }, remove: async key => { delete storage[key]; } } },
     sidePanel: { open: async () => {}, close: async () => {} },
@@ -107,7 +110,8 @@ function panelFixture() {
     get results() { return list.results; }, set unitsHook(fn) { unitsHook = fn; },
     set storageHook(fn) { storageHook = fn; },
     set issueHook(fn) { issueHook = fn; },
-    async ready() { await until(() => workers.length && calls.filter(call => call.type === 'SONAR_UNITS').length >= tabs.length, 'initial tab reads'); await sleep(20); },
+    // The panel reads the origin's window (window 10) only.
+    async ready() { await until(() => workers.length && calls.filter(call => call.type === 'SONAR_UNITS').length >= tabs.filter(tab => tab.windowId === 10).length, 'initial tab reads'); await sleep(20); },
     async search(query = 'privilege') {
       const count = calls.filter(call => call.type === 'index:search').length;
       $('query').focus(); $('query').value = query; $('query').emit('input');
@@ -123,9 +127,10 @@ function panelFixture() {
   };
 }
 
-test('ranked search covers other windows; origin stays pinned during ordinary activation', async t => {
-  const f = panelFixture(); t.after(f.close); await f.ready();
-  assert.deepEqual((await f.search()).map(row => row.tabId), [1, 3]);
+test('ranked search covers the origin window, not others; origin stays pinned during ordinary activation', async t => {
+  const f = panelFixture({ otherWindow: true }); t.after(f.close); await f.ready();
+  assert.deepEqual((await f.search()).map(row => row.tabId), [1]);
+  assert.ok(!f.calls.some(call => call.type === 'SONAR_UNITS' && call.tabIds.includes(3)), 'another window is not read');
   f.tabs[0].active = false; f.tabs[1].active = true;
   await f.scope('current'); assert.deepEqual(f.results.map(row => row.tabId), [1]);
   await f.scope('group'); assert.deepEqual(f.results.map(row => row.tabId), [1]);
@@ -234,7 +239,9 @@ test('the next query advances beyond another panel’s observed sequence', async
 });
 
 test('changing the search while handoff storage is pending cancels the old navigation', async t => {
-  const f = panelFixture(); t.after(f.close); await f.ready(); await f.search();
+  // Searching from a tab in another window makes its results open through a cross-window handoff.
+  const f = panelFixture({ otherWindow: true }); t.after(f.close); await f.ready();
+  f.launch({ ...f.tabs[2] }, 'tabs'); await f.search();
   const held = deferred(), started = deferred();
   f.storageHook = async () => { started.resolve(); await held.promise; };
   f.choose(f.results.findIndex(row => row.tabId === 3), 'open'); await started.promise;
@@ -296,4 +303,23 @@ test('independent workspace and exact-ticket watchers all receive mutations; Clo
   assert.equal((await f.page.passage('ranked-b', key)).toString(), 'Privilege changed again.');
   f.mutate('Entirely different source text.');
   await assert.rejects(f.page.passage('ranked-b', key), /changed or expired/);
+});
+
+test('a tab Chrome freezes or discards keeps its last reading and stays searchable', async t => {
+  const f = panelFixture(); t.after(f.close); await f.ready();
+  assert.deepEqual((await f.search()).map(row => row.tabId), [1, 3]);
+  Object.assign(f.tabs[2], { frozen: true });
+  f.chrome.tabs.onUpdated.emit(3, { frozen: true }, { ...f.tabs[2] });
+  f.unitsHook = (_message, tab) => tab.id === 3 ? { tabId: 3, skipped: 'Asleep (Chrome froze or discarded it)' } : null;
+  f.advance(11 * 60_000);
+  const results = await f.search('privilege source');
+  assert.deepEqual(results.map(row => row.tabId).sort(), [1, 3]);
+  assert.equal(results.find(row => row.tabId === 3).asleep, true);
+});
+
+test('a sleeping tab that was never read is woken in the background to read it', async t => {
+  const f = panelFixture(); t.after(f.close);
+  f.unitsHook = (_message, tab) => tab.id === 2 ? { tabId: 2, skipped: 'Asleep (Chrome froze or discarded it)' } : null;
+  await f.ready();
+  await until(() => f.calls.some(call => call.type === 'reload' && call.id === 2), 'sleeping tab reloaded');
 });

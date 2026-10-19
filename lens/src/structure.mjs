@@ -6,7 +6,9 @@ import initStructure from '../../legal-structure.mjs';
 export async function structureEngine(url) {
   const response = await fetch(url);
   if (!response.ok) throw new Error('Cannot load the packaged legal structure parser.');
-  const e = await initStructure({ module_or_path: await response.arrayBuffer() });
+  // The packaged engine is gzip-compressed (legal-structure.wasm.gz).
+  const body = url.toString().endsWith('.gz') ? new Response(response.body.pipeThrough(new DecompressionStream('gzip'))) : response;
+  const e = await initStructure({ module_or_path: await body.arrayBuffer() });
   return (text,meta={}) => {
     const bytes = new TextEncoder().encode(JSON.stringify({source_kind:meta.documentType==='legislation'?'laws':'cases',text,citation:meta.citation||'',name:meta.title||''}));
     const pointer=e.legal_structure_alloc(bytes.length);

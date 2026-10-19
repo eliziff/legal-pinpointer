@@ -22,9 +22,14 @@ async function open(name, device) {
 function load() {
   loading ||= (async () => {
     const vocab = asset('tokenizer.json').then(response => response.json());
-    const adapter = await navigator.gpu?.requestAdapter().catch(() => null), gpu = adapter?.features.has('shader-f16');
+    const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
+    // The GPU model is optional (npm run fetch:rerank -- --gpu); without it every machine runs TinyBERT.
+    const gpu = adapter?.features.has('shader-f16') && await fetch(base + 'model-gpu.onnx', { method: 'HEAD' }).then(response => response.ok, () => false);
     // The GPU path needs no WASM thread pool (each pool thread is a worker of its own).
     ort.env.wasm.wasmPaths = base; ort.env.wasm.numThreads = gpu ? 1 : threads;
+    // The runtime ships gzip-compressed; it is handed to onnxruntime in memory.
+    ort.env.wasm.wasmBinary = await new Response((await asset('ort-wasm-simd-threaded.jspi.wasm.gz')).body
+      .pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
     let session = null, device = 'webgpu';
     if (gpu) { ort.env.webgpu.adapter = adapter; session = await open('model-gpu.onnx', device).catch(() => null); }
     if (!session) { device = 'wasm'; session = await open('model-cpu.onnx', device); }

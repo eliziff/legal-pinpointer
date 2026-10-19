@@ -8,7 +8,11 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-legal-structure = { git = "https://github.com/eliziff/legal-structure-parser.git", rev = "0031ee8c5a73fa72273fb638b345de56dca73cd8", features = ["provider-text", "citator"] }
+# The packaged legal-structure.wasm.gz (0.3.0) was built with tools/refresh-engine.ps1's settings
+# from local sources: legal-structure e5525a0 and common-law-cite fc9ad9a plus its CanLII citation keys for
+# legislation lookup (canlii_citation_key, LegislationLookup.keys). Neither revision is on GitHub
+# yet; update the pin below once they are pushed.
+legal-structure = { git = "https://github.com/eliziff/legal-structure-parser.git", rev = "0031ee8c5a73fa72273fb638b345de56dca73cd8", default-features = false, features = ["canada", "journal", "provider-text", "citator"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

@@ -31,7 +31,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-legal-structure = { path = "$cargoPath", features = ["provider-text", "citator"] }
+legal-structure = { path = "$cargoPath", default-features = false, features = ["canada", "journal", "provider-text", "citator"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
@@ -46,6 +46,17 @@ strip = true
     # Windows PowerShell treats Cargo's ordinary stderr progress as a terminating
     # error under Stop. Read the actual exit status, then restore strict file ops.
     $ErrorActionPreference = 'Continue'
+    # Keep personal and toolchain paths out of panic locations compiled into the binary: the
+    # sources' folder becomes /src and Cargo's becomes /cargo. The encoded form allows spaces.
+    $previousRustFlags = $env:CARGO_ENCODED_RUSTFLAGS
+    $home_ = [Environment]::GetFolderPath('UserProfile')
+    $sourceParent = Split-Path -Parent $sourceRoot
+    $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $home_ '.cargo' }
+    $remaps = foreach ($pair in @(@($home_, '/home'), @($cargoHome, '/cargo'), @($sourceParent, '/src'))) {
+        "--remap-path-prefix=$($pair[0])=$($pair[1])"
+        "--remap-path-prefix=$($pair[0].Replace('\', '/'))=$($pair[1])"
+    }
+    $env:CARGO_ENCODED_RUSTFLAGS = $remaps -join [char]0x1f
     try {
         cargo build --manifest-path (Join-Path $temporaryRoot 'Cargo.toml') --target wasm32-unknown-unknown --release --offline
         $buildCode = $LASTEXITCODE
@@ -54,6 +65,7 @@ strip = true
             $metadataCode = $LASTEXITCODE
         }
     } finally {
+        $env:CARGO_ENCODED_RUSTFLAGS = $previousRustFlags
         $ErrorActionPreference = 'Stop'
     }
     if ($buildCode -ne 0) { throw "The browser engine build failed with exit code $buildCode." }
@@ -72,14 +84,24 @@ strip = true
     $package = Join-Path $temporaryRoot 'pkg'
     & wasm-bindgen --target no-modules --no-modules-global legalStructureInit --no-typescript --out-name legal-structure --out-dir $package $builtWasm
     if ($LASTEXITCODE -ne 0) { throw 'Browser engine binding generation failed.' }
-    Copy-Item -LiteralPath (Join-Path $package 'legal-structure_bg.wasm') -Destination (Join-Path $projectRoot 'legal-structure.wasm') -Force
+    # The extension ships the engine gzip-compressed and inflates it with DecompressionStream.
+    $wasm = Join-Path $package 'legal-structure_bg.wasm'
+    $bytes = [IO.File]::ReadAllBytes($wasm)
+    $text = [Text.Encoding]::ASCII.GetString($bytes)
+    foreach ($private in @($home_, $sourceParent)) { if ($text.Contains($private) -or $text.Contains($private.Replace("\", "/"))) { throw "The engine still contains $private; check the path remapping." } }
+    $target = [IO.File]::Create((Join-Path $projectRoot 'legal-structure.wasm.gz'))
+    try {
+        $gzip = New-Object IO.Compression.GZipStream($target, [IO.Compression.CompressionLevel]::Optimal)
+        $gzip.Write($bytes, 0, $bytes.Length)
+        $gzip.Dispose()
+    } finally { $target.Dispose() }
     Copy-Item -LiteralPath (Join-Path $package 'legal-structure.js') -Destination (Join-Path $projectRoot 'legal-structure.js') -Force
     $modulePackage = Join-Path $package 'esm'
     & wasm-bindgen --target web --no-typescript --out-name legal-structure --out-dir $modulePackage $builtWasm
     if ($LASTEXITCODE -ne 0) { throw 'Browser engine module binding generation failed.' }
     Copy-Item -LiteralPath (Join-Path $modulePackage 'legal-structure.js') -Destination (Join-Path $projectRoot 'legal-structure.mjs') -Force
-    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $projectRoot 'legal-structure.wasm')).Hash.ToLowerInvariant()
-    Write-Host "Refreshed legal-structure.wasm ($hash)"
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $wasm).Hash.ToLowerInvariant()
+    Write-Host "Refreshed legal-structure.wasm.gz (inflated sha256 $hash)"
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         $resolvedTemporaryRoot = (Resolve-Path -LiteralPath $temporaryRoot).Path

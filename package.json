@@ -1,6 +1,6 @@
 {
   "name": "legal-pinpointer",
-  "version": "0.1.30",
+  "version": "0.3.0",
   "private": true,
   "description": "Dependency-free source and tests for the Legal Pinpointer browser extension.",
   "scripts": {

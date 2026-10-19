@@ -1,27 +1,107 @@
 #legal-pinpointer-status.legal-pinpointer-toast {
   all: initial;
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: 18px;
+  bottom: 18px;
   z-index: 2147483647;
   box-sizing: border-box;
-  max-width: min(420px, calc(100vw - 32px));
-  padding: 10px 12px;
-  border: 1px solid #245b42;
-  border-radius: 6px;
-  background: #173d2d;
+  max-width: min(440px, calc(100vw - 36px));
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: #16352a;
   color: #ffffff;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 22%);
-  font: 600 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 8px 24px rgb(0 0 0 / 18%);
+  font: 600 13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
   overflow-wrap: anywhere;
   pointer-events: none;
+  contain: layout paint style;
 }
 
 #legal-pinpointer-status.legal-pinpointer-toast--error {
-  border-color: #8c2e2e;
-  background: #652525;
+  background: #7a2424;
 }
 
 #legal-pinpointer-status[hidden] {
   display: none !important;
+}
+
+/* CanLII: the document's name inside CanLII's own sticky header. */
+#canlii-header > .lp-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 4px 0 6px;
+}
+
+#canlii-header > .lp-banner .lp-banner-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: inherit;
+  font-size: 16.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  user-select: text;
+}
+
+#canlii-header > .lp-banner .lp-banner-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+#canlii-header > .lp-banner button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--gray-300, #cdd3d0);
+  border-radius: 7px;
+  background: var(--gray-50, #ffffff);
+  color: var(--main-link-color, #0b4f8a);
+  font: 600 12.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: border-color 80ms, background 80ms;
+}
+
+#canlii-header > .lp-banner button:hover {
+  border-color: var(--main-link-color, #0b4f8a);
+}
+
+#canlii-header > .lp-banner button.done {
+  color: #187243;
+  border-color: #7fb597;
+}
+
+/* Westlaw and Lexis: the native title as plain, wrapping, selectable text. */
+html.lp-clean-titles #co_docHeaderTitleLine,
+html.lp-clean-titles #co_docHeaderTitleLine *,
+html.lp-clean-titles .documentheadertitle h1 {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  user-select: text !important;
+  -webkit-user-drag: none !important;
+}
+
+html.lp-clean-titles #co_docHeaderTitleLine a {
+  color: inherit !important;
+  text-decoration: none !important;
+  cursor: text !important;
+}
+
+html.lp-clean-titles #co_documentStatusIcons,
+html.lp-clean-titles #crsw_legalMemoIcon {
+  display: none !important;
+}
+
+@media print {
+  #canlii-header > .lp-banner { display: none !important; }
 }

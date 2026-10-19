@@ -231,9 +231,10 @@ test('Ranked handles preserve the origin, exact document targeting, and both cop
   await assert.rejects(f.send('SONAR_COPY', { ...handle, mode: 'quote' }), /navigated/);
 });
 
-test('Exact search keeps current/all/group scopes, private-tab filtering, and sender guards', async () => {
+test('Exact search keeps current/window/group scopes, private-tab filtering, and sender guards', async () => {
   const f = fixture();
-  for (const [scope, sequence, ids] of [['current', 1, [1]], ['all', 2, [1, 2, 3]], ['group', 3, [1, 2]]]) {
+  // The widest scope is the origin's window; 'all' is that scope's former name.
+  for (const [scope, sequence, ids] of [['current', 1, [1]], ['window', 2, [1, 2]], ['all', 3, [1, 2]], ['group', 4, [1, 2]]]) {
     const response = await f.send('SONAR_SEARCH', { originTabId: 1, query: 'privileg* waiv*', scope, sequence });
     assert.deepEqual(response.results.map(result => result.tabId), ids);
     assert.equal(response.origin.tabId, 1);
