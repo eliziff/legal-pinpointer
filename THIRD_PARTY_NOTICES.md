@@ -35,3 +35,9 @@ of `cross-encoder/ms-marco-MiniLM-L4-v2` (<https://huggingface.co/cross-encoder/
 Apache License 2.0) and the int8 ONNX export (<https://huggingface.co/Xenova/ms-marco-TinyBERT-L-2-v2>)
 of `cross-encoder/ms-marco-TinyBERT-L2-v2` (<https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L2-v2>,
 Apache License 2.0).
+
+## CanLII logo
+
+The CanLII button in `page-ui.js` shows the CanLII wordmark (from canlii.org's page header, with the
+anniversary numerals removed). CanLII and its logo are trademarks of the Federation of Law Societies
+of Canada; the logo is used only to identify links to CanLII.
