@@ -1,6 +1,6 @@
 'use strict';
 
-// Tab Sonar's ranked index, in a dedicated worker of the side panel. Each tab's
+// Tab Search's ranked index, in a dedicated worker of the side panel. Each tab's
 // paragraphs are read once (and again only when that tab changes) and kept here
 // as UTF-8 with compact postings; ranked queries never touch the tabs. Scoring
 // is Okapi BM25 over the tabs in scope, summed at query time, so adding,
@@ -106,7 +106,7 @@
     // Best first across `tabIds` (in tab priority order): BM25 with statistics
     // summed over those tabs; equal scores keep tab order, then document order.
     // The first `depth` results also carry a window of `window` characters
-    // around their densest query words, for the reranker.
+    // around their densest query words.
     function search({ query, tabIds, depth = 0, window = 0, eager = RESULTS }) {
       const scope = tabIds.map(id => tabs.get(id)).filter(Boolean), { terms: words, marked } = core.rankTerms(query);
       const ids = words.map(word => terms.get(word)), dfs = new Float64Array(words.length);
@@ -165,7 +165,7 @@
         const text = unitText(tab, u), hits = core.rankHits(text, wanted, marked, 100, folded);
         Object.assign(result, core.excerpt(text, hits, hits.length ? core.densest(text, hits) : 0));
         if (position < depth) {
-          // The reranker reads a window around the densest query words, a third of it before them.
+          // A window around the densest query words, a third of it before them.
           let passage = text;
           if (window && text.length > window && hits.length) {
             const lead = Math.round(window / 3);

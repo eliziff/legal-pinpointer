@@ -1,10 +1,10 @@
 'use strict';
 
-// In-page controls: a copy bar beside the hovered paragraph or provision, CanLII's sticky header
-// naming the document, a clean selectable title on Westlaw and Lexis, and a CanLII button there.
-// Speed rules: one overlay layer for everything floating; hover work runs only when the hovered
-// element changes (pointerover, once per frame) and is cached per element; positions are
-// compositor transforms; the document model is the content script's own, built in idle time.
+// In-page controls: copy controls on every paragraph and provision, CanLII's sticky header naming
+// the document, a clean selectable title on Westlaw and Lexis, and a CanLII button there.
+// Speed and memory: the controls exist only for units near the viewport (an IntersectionObserver
+// mounts and recycles a small pool), contain no text, and sit out of flow, so the page never
+// re-lays out; the document model is the content script's own, built once in idle time.
 (function startPageUi() {
   const page = globalThis.LegalPinpointerPage;
   if (!page || globalThis.LegalPinpointerPageUi) return;
@@ -15,16 +15,21 @@
     : /(?:^|\.)nextcanada\.westlaw\.com$/.test(hostname) ? 'westlaw' : '';
   if (!provider) return;
 
-  const settings = { unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true };
+  const settings = { unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   const idle = (callback, timeout = 1200) => (window.requestIdleCallback
     ? requestIdleCallback(callback, { timeout }) : setTimeout(callback, 16));
   const svg = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
   const ICONS = {
-    quote: svg('<path d="M3 9.5h3.2V13H3zM3 9.5C3 6.2 4.2 4.4 6.4 3.6M9.8 9.5H13V13H9.8zM9.8 9.5c0-3.3 1.2-5.1 3.4-5.9"/>'),
     link: svg('<path d="M6.6 9.4a2.9 2.9 0 0 0 4.1 0l2.2-2.2a2.9 2.9 0 0 0-4.1-4.1l-.9.9M9.4 6.6a2.9 2.9 0 0 0-4.1 0L3.1 8.8a2.9 2.9 0 0 0 4.1 4.1l.9-.9"/>'),
     copy: svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V3.6c0-.9-.7-1.6-1.6-1.6H3.6C2.7 2 2 2.7 2 3.6v5.3c0 .9.7 1.6 1.6 1.6h1.9"/>'),
     check: svg('<path d="M3.2 8.6 6.4 11.6 12.8 4.6"/>')
   };
+
+  function sheet(css) {
+    const style = new CSSStyleSheet();
+    style.replaceSync(css);
+    return style;
+  }
 
   const CANLII_CSS = `
     .canlii {
@@ -44,67 +49,34 @@
     .canlii:hover::after { opacity: 1; transition-delay: 200ms; }
   `;
 
-  function sheet(css) {
-    const style = new CSSStyleSheet();
-    style.replaceSync(css);
-    return style;
-  }
-
-  // ---------------------------------------------------------------------------
-  // The overlay layer: one fixed, zero-size host whose shadow root holds every floating control.
-
+  // One fixed host for the floating CanLII button.
   const LAYER_CSS = `
     :host { all: initial; }
-    * { box-sizing: border-box; }
-    button, a { font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; }
-    .bar {
-      position: fixed; left: 0; top: 0; display: flex; flex-direction: column; gap: 2px; padding: 3px;
-      background: #fff; border: 1px solid rgb(16 40 30 / 14%); border-radius: 9px;
-      box-shadow: 0 1px 2px rgb(16 40 30 / 8%), 0 4px 14px rgb(16 40 30 / 10%);
-      opacity: 0; pointer-events: none; transition: opacity 90ms ease-out; contain: layout paint style;
-      will-change: transform, opacity;
-    }
-    .bar.on { opacity: 1; pointer-events: auto; }
-    .bar button {
-      position: relative; display: grid; place-items: center; min-width: 26px; height: 26px; padding: 0 4px;
-      border: 0; border-radius: 6px; background: transparent; color: #33463d; cursor: pointer;
-      font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
-    }
-    .bar button:hover { background: #e9f2ed; color: #154a33; }
-    .bar button:active { background: #d7e8de; }
-    .bar button.done { color: #187243; }
-    .bar button::after {
-      content: attr(data-tip); position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
-      padding: 5px 8px; border-radius: 6px; background: #17241e; color: #fff; white-space: nowrap;
-      font-weight: 500; opacity: 0; pointer-events: none; transition: opacity 80ms;
-    }
-    .bar button:hover::after { opacity: 1; transition-delay: 250ms; }
-    /* No gutter beside the text: a strip above the unit's first line instead of over its words. */
-    .bar.row { flex-direction: row; }
-    .bar.row button::after { left: 50%; top: calc(100% + 7px); transform: translateX(-50%); }
-    .float { position: fixed; left: 16px; bottom: 18px; opacity: 0; transform: scale(.9); pointer-events: none; }
-    .float.ready { opacity: 1; transform: none; pointer-events: auto; }
-    @media print { .bar, .float { display: none; } }
+    .canlii.float { position: fixed; left: 16px; bottom: 18px; opacity: 0; transform: scale(.9); pointer-events: none; }
+    .canlii.float.ready { opacity: 1; transform: none; pointer-events: auto; }
+    @media print { .float { display: none; } }
   ` + CANLII_CSS;
 
   let layerRoot = null;
-  let layerHost = null;
   function layer() {
     if (layerRoot) return layerRoot;
-    layerHost = document.createElement('div');
-    layerHost.setAttribute('data-lp-ui', '');
-    layerHost.style.cssText = 'all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483646';
-    layerRoot = layerHost.attachShadow({ mode: 'open' });
+    const host = document.createElement('div');
+    host.setAttribute('data-lp-ui', '');
+    // Full-viewport and click-through, so the button's corner is the viewport's corner.
+    host.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483646';
+    layerRoot = host.attachShadow({ mode: 'open' });
     layerRoot.adoptedStyleSheets = [sheet(LAYER_CSS)];
-    document.documentElement.appendChild(layerHost);
+    document.documentElement.appendChild(host);
     return layerRoot;
   }
 
   function flash(button) {
-    const previous = button.innerHTML;
     button.classList.add('done');
-    if (!button.dataset.label) button.innerHTML = ICONS.check;
-    setTimeout(() => { button.classList.remove('done'); if (!button.dataset.label) button.innerHTML = previous; }, 900);
+    if (button.dataset.icon !== 'css') {
+      const previous = button.innerHTML;
+      button.innerHTML = ICONS.check;
+      setTimeout(() => { button.classList.remove('done'); button.innerHTML = previous; }, 900);
+    } else setTimeout(() => button.classList.remove('done'), 900);
   }
 
   function run(task, button) {
@@ -112,134 +84,122 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Model: metadata for titles and the CanLII button, the full structure for the copy bar.
+  // The document model: metadata for titles and the CanLII button, structure for the controls.
 
-  let model = null, metadata = null, loading = null, units = new WeakMap(), unsupported = '';
+  let metadata = null, loading = null, unsupported = '';
 
   function fullModel() {
-    if (model && page.current(model)) return Promise.resolve(model);
     // A page that is not a legal document (a results list) is not inspected again until it navigates.
     if (unsupported === location.href) return Promise.reject(new Error('Not a supported document.'));
-    loading ||= page.model(false).then((value) => {
-      model = value; metadata = value; units = new WeakMap(); rootLeft = null;
-      return value;
-    }, (error) => { unsupported = location.href; throw error; }).finally(() => { loading = null; });
+    loading ||= page.model(false).then((value) => { metadata = value; return value; },
+      (error) => { unsupported = location.href; throw error; }).finally(() => { loading = null; });
     return loading;
   }
 
   // ---------------------------------------------------------------------------
-  // The copy bar beside the hovered unit.
+  // Copy controls on each paragraph and provision. With text selected they copy the selection
+  // (a range, as the hotkeys do); otherwise their own unit. Pinpoint, quote, link.
 
-  const bar = { el: null, label: null, node: null, target: null, frame: 0, hide: 0, over: false };
-  let rootLeft = null;
+  const BLOCKS = new Set(['P', 'LI', 'DIV', 'BLOCKQUOTE', 'DD', 'DT', 'TD', 'TH', 'SECTION', 'ARTICLE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+  const KIND_LABEL = { paragraph: 'para', page: 'page', section: 's', rule: 'r', article: 'art', pilcrow: '¶', silcrow: '§' };
+  const units = { model: null, observer: null, nodes: new Map(), mounted: new Map(), pool: [], place: 'row' };
 
-  function buildBar() {
-    const el = document.createElement('div');
-    el.className = 'bar';
-    el.setAttribute('role', 'toolbar');
-    el.setAttribute('aria-label', 'Copy this passage');
-    el.innerHTML = `<button type="button" data-mode="pinpoint" data-label="1" data-tip="Copy pinpoint"></button>`
-      + `<button type="button" data-mode="quote" data-tip="Copy quote">${ICONS.quote}</button>`
-      + `<button type="button" data-mode="link" data-tip="Copy link">${ICONS.link}</button>`;
-    el.addEventListener('pointerenter', () => { bar.over = true; clearTimeout(bar.hide); });
-    el.addEventListener('pointerleave', () => { bar.over = false; scheduleHide(); });
-    el.addEventListener('mousedown', (event) => event.preventDefault());
-    el.addEventListener('click', (event) => {
-      const button = event.target.closest('button');
-      if (!button || !bar.node || !model) return;
-      run(page.copyUnit(model, bar.node, button.dataset.mode), button);
-    });
-    layer().appendChild(el);
-    bar.el = el;
-    bar.label = el.firstElementChild;
-  }
-
-  function unitFor(target) {
-    const element = target && (target.nodeType === 1 ? target : target.parentElement);
-    if (!element || !model || !model.root.contains(element)) return null;
-    let node = units.get(element);
-    if (node === undefined) {
-      node = page.unitAt(model, element) || null;
-      units.set(element, node);
+  // The room left of the text inside the nearest ancestor that clips it decides where controls sit:
+  // a row in the margin, a narrow column, or a row in the space above the unit's first line.
+  function placement(root) {
+    const left = root.getBoundingClientRect().left;
+    let edge = 0;
+    for (let element = root.parentElement; element && element !== document.body; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      if (style.overflowX !== 'visible') { edge = element.getBoundingClientRect().left + (parseFloat(style.borderLeftWidth) || 0); break; }
     }
-    return node;
+    const room = left - edge;
+    return room >= 90 ? 'row' : room >= 34 ? 'column' : 'above';
   }
 
-  function unitRect(node) {
-    const start = page.unitStart(node);
-    const rect = start && start.startContainer.nodeType === Node.TEXT_NODE ? start.getClientRects()[0] : null;
-    return rect || node.element.getBoundingClientRect();
+  function createControl() {
+    const control = document.createElement('span');
+    control.className = 'lp-unit';
+    control.setAttribute('data-lp-ui', '');
+    control.setAttribute('role', 'group');
+    control.contentEditable = 'false';
+    control.innerHTML = '<button type="button" class="lp-unit-pin" data-mode="pinpoint" data-icon="css"></button>'
+      + '<button type="button" class="lp-unit-quote" data-mode="quote" data-icon="css" data-tip="Copy quote" aria-label="Copy quote"></button>'
+      + '<button type="button" class="lp-unit-link" data-mode="link" data-icon="css" data-tip="Copy link" aria-label="Copy link"></button>';
+    return control;
   }
 
-  function place() {
-    if (!bar.node || !bar.el) return;
-    const rect = unitRect(bar.node);
-    if (rootLeft === null) rootLeft = model.root.getBoundingClientRect().left;
-    const gutter = Math.min(rootLeft, rect.left);
-    const row = gutter < 44;
-    bar.el.classList.toggle('row', row);
-    const x = row ? Math.max(4, rect.left) : gutter - 40;
-    const y = row ? Math.max(4, rect.top - 36) : rect.top - 4;
-    bar.el.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
+  function attach(element) {
+    const node = units.nodes.get(element);
+    if (!node || units.mounted.has(element) || !element.isConnected) return;
+    const control = units.pool.pop() || createControl();
+    const kind = units.model.structure.kind;
+    control.dataset.place = units.place;
+    control.dataset.kind = kind;
+    control.lpNode = node;
+    const pin = control.firstElementChild;
+    const label = `Copy pinpoint · ${KIND_LABEL[kind] || kind} ${node.locator}`;
+    pin.dataset.tip = label;
+    pin.setAttribute('aria-label', label);
+    if (BLOCKS.has(element.tagName)) element.insertBefore(control, element.firstChild);
+    else element.before(control);
+    units.mounted.set(element, control);
   }
 
-  function label(node) {
-    const kind = model.structure.kind;
-    const short = node.locator.length <= 5 ? node.locator : kind === 'paragraph' || kind === 'pilcrow' ? '¶' : '§';
-    bar.label.textContent = short;
-    bar.label.dataset.tip = `Copy pinpoint · ${kind === 'paragraph' ? 'para' : kind === 'page' ? 'page' : kind === 'section' ? 's' : kind} ${node.locator}`;
+  function detach(element) {
+    const control = units.mounted.get(element);
+    if (!control) return;
+    units.mounted.delete(element);
+    control.remove();
+    control.lpNode = null;
+    if (units.pool.length < 64) units.pool.push(control);
   }
 
-  function show(node) {
-    if (!bar.el) buildBar();
-    bar.node = node;
-    label(node);
-    place();
-    bar.el.classList.add('on');
+  function unmountUnits() {
+    units.observer?.disconnect();
+    units.observer = null;
+    for (const element of [...units.mounted.keys()]) detach(element);
+    units.nodes.clear();
+    units.model = null;
   }
 
-  function scheduleHide() {
-    clearTimeout(bar.hide);
-    bar.hide = setTimeout(() => {
-      if (bar.over || !bar.el) return;
-      bar.el.classList.remove('on');
-      bar.node = null;
-    }, 380);
+  function mountUnits(model) {
+    unmountUnits();
+    const nodes = model.structure?.nodes || [];
+    if (!nodes.length) return;
+    units.model = model;
+    units.place = placement(model.root);
+    // One control per element: units that share an element (a preformatted block) keep the first.
+    for (const node of nodes) {
+      const element = node.element;
+      if (element && element.isConnected && model.root.contains(element) && !units.nodes.has(element)) units.nodes.set(element, node);
+    }
+    units.observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) (entry.isIntersecting ? attach : detach)(entry.target);
+    }, { rootMargin: '1200px 0px' });
+    for (const element of units.nodes.keys()) units.observer.observe(element);
   }
 
-  function hover() {
-    bar.frame = 0;
-    const target = bar.target;
-    if (!settings.unitCopyButtons || !target || target === layerHost) return;
-    if (!model || !page.current(model)) { if (unsupported !== location.href && !loading) idle(() => fullModel().catch(() => {})); return; }
-    const node = unitFor(target);
-    if (!node) { if (bar.node) scheduleHide(); return; }
-    clearTimeout(bar.hide);
-    if (node !== bar.node) show(node);
-  }
-
-  document.addEventListener('pointerover', (event) => {
-    if (!settings.unitCopyButtons || event.pointerType === 'touch') return;
-    bar.target = event.target;
-    if (!bar.frame) bar.frame = requestAnimationFrame(hover);
-  }, { capture: true, passive: true });
-
-  let scrollFrame = 0;
-  const follow = () => { scrollFrame = 0; place(); };
-  document.addEventListener('scroll', () => {
-    if (bar.node && !scrollFrame) scrollFrame = requestAnimationFrame(follow);
-  }, { capture: true, passive: true });
-  window.addEventListener('resize', () => { rootLeft = null; if (bar.node && !scrollFrame) scrollFrame = requestAnimationFrame(follow); }, { passive: true });
-
-  function unmountBar() {
-    bar.el?.classList.remove('on');
-    bar.node = null;
-  }
+  // Delegated, in the capture phase: the provider's own handlers never see these presses, and the
+  // selection survives the press.
+  document.addEventListener('mousedown', (event) => {
+    if (!event.target.closest?.('.lp-unit')) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('.lp-unit > button');
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const node = button.parentElement.lpNode;
+    if (node && units.model) run(page.copyUnit(units.model, node, button.dataset.mode), button);
+  }, true);
 
   // ---------------------------------------------------------------------------
   // CanLII: the document's name in CanLII's own sticky header.
 
-  let banner = null, headerObserver = null;
+  let banner = null, headerObserver = null, headerHeight = 0;
 
   function mountBanner(current) {
     const header = document.getElementById('canlii-header');
@@ -254,14 +214,16 @@
       banner.addEventListener('mousedown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
       banner.addEventListener('click', (event) => {
         const button = event.target.closest('button');
-        if (!button) return;
-        run(button.dataset.act === 'citation' ? page.copyCitation() : copyLink(), button);
+        if (button) run(button.dataset.act === 'citation' ? page.copyCitation() : copyLink(), button);
       });
       header.appendChild(banner);
-      // CanLII positions its side toolbar under the header from the header's height.
+      // CanLII positions its side toolbar under the header from the header's height. React only to
+      // a real change in height, so the resize event this sends cannot feed back into itself.
       headerObserver?.disconnect();
       headerObserver = new ResizeObserver(([entry]) => {
-        const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+        const height = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height);
+        if (Math.abs(height - headerHeight) < 1) return;
+        headerHeight = height;
         window.dispatchEvent(new Event('resize'));
         for (const side of document.querySelectorAll('.main > .toolbar, .main > .canlii-sidebar, .main > .heatmap, .toolbar.bootstrap')) {
           if (side.style.top && Math.abs(parseFloat(side.style.top) - height) > 1) {
@@ -279,6 +241,7 @@
   function unmountBanner() {
     headerObserver?.disconnect();
     headerObserver = null;
+    headerHeight = 0;
     banner?.remove();
     banner = null;
   }
@@ -295,7 +258,7 @@
   const CARD_CSS = `
     :host { all: initial; display: block; margin: 0 0 18px; }
     .card {
-      display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; padding: 14px 16px;
+      display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px;
       border: 1px solid #dde3df; border-radius: 10px; background: #fbfcfb; color: #16211b;
       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
     }
@@ -313,21 +276,18 @@
     button:hover { background: #eef5f1; border-color: #9fbcad; }
     button:active { background: #e1ede6; }
     button.done { color: #187243; border-color: #7fb597; }
-    @media (max-width: 760px) { .card { flex-direction: column; } .actions { justify-content: flex-start; } }
     .card .canlii { margin-top: 1px; }
+    .marker { display: contents; }
+    ::slotted([slot="marker"]) { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 44px; }
     .card .canlii[hidden] { display: none; }
+    @media (max-width: 760px) { .card { flex-wrap: wrap; } .actions { justify-content: flex-start; } }
     @media print { :host { display: none; } }
   ` + CANLII_CSS;
 
   let card = null;
 
-  function cardAnchor(current) {
-    const root = current.root;
-    return root && root !== document.body && root.isConnected ? root : null;
-  }
-
   function mountCard(current) {
-    const anchor = cardAnchor(current);
+    const anchor = current.root && current.root !== document.body && current.root.isConnected ? current.root : null;
     if (!anchor || !current.citation) return;
     if (!card || !card.host.isConnected) {
       const host = document.createElement('div');
@@ -335,8 +295,8 @@
       const shadow = host.attachShadow({ mode: 'open' });
       shadow.adoptedStyleSheets = [sheet(CARD_CSS)];
       shadow.innerHTML = '<section class="card" aria-label="Document title"><a class="canlii pending" data-tip="Looking for a CanLII version">CanLII</a>'
-        + '<div class="text"><h2 class="name"></h2><p class="cite"></p></div>'
-        + '<div class="actions">'
+        + '<span class="marker"><slot name="marker"></slot></span>'
+        + '<div class="text"><h2 class="name"></h2><p class="cite"></p></div><div class="actions">'
         + `<button type="button" data-act="name" title="Copy the name">${ICONS.copy}<span>Name</span></button>`
         + `<button type="button" data-act="citation" title="Copy the linked citation (Alt+X)">${ICONS.copy}<span>Citation</span></button>`
         + `<button type="button" data-act="link" title="Copy a link to this document">${ICONS.link}<span>Link</span></button>`
@@ -353,17 +313,25 @@
         const italic = ['case', 'legislation'].includes(metadata.documentType);
         run(page.copyPayload({ plain: name, html: italic ? `<i>${escaped}</i>` : escaped }, `Copied name: ${name}`), button);
       });
-      card = { host, name: shadow.querySelector('.name'), cite: shadow.querySelector('.cite'), canlii: shadow.querySelector('.canlii') };
+      // Case Marker's circle is light DOM slotted into the block, so Case Marker's own styles reach it.
+      const marker = document.createElement('span');
+      marker.slot = 'marker';
+      host.appendChild(marker);
+      card = { host, marker, name: shadow.querySelector('.name'), cite: shadow.querySelector('.cite'), canlii: shadow.querySelector('.canlii') };
       card.canlii.addEventListener('click', noCanlii);
       anchor.before(host);
       watchCard();
     }
-    const name = current.citation.title || current.citation.plain;
-    card.name.textContent = name;
+    card.name.textContent = current.citation.title || current.citation.plain;
     card.name.classList.toggle('case', current.documentType === 'case');
     card.cite.textContent = current.citation.citation || '';
     card.cite.hidden = !current.citation.citation;
     card.canlii.hidden = !settings.canliiButton;
+    const caseMarker = globalThis.LegalPinpointerCaseMarker;
+    if (caseMarker && settings.caseMarker) {
+      caseMarker.attachExternal(card.marker, current.canliiUrl, current.citation.citation || current.citation.plain, current.citation.plain,
+        { url: current.cleanUrl, citation: current.citation.citation || '', provider });
+    } else card.marker.replaceChildren();
   }
 
   function unmountCard() {
@@ -392,10 +360,10 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Westlaw and Lexis: CanLII, lit when the document has a reliable CanLII version.
+  // Westlaw and Lexis: CanLII, lit when the document has a reliable CanLII version. It sits at the
+  // left of the title block; a floating copy appears in the bottom-left corner once that block
+  // scrolls out of view (or always, when titles are not cleaned up).
 
-  // The button sits at the left of the title card; a floating copy appears in the bottom-left
-  // corner once the card scrolls out of view (or always, when titles are not cleaned up).
   let floating = null, cardObserver = null, cardVisible = false;
 
   function noCanlii(event) {
@@ -453,14 +421,14 @@
   let applying = 0;
   async function apply() {
     const ticket = ++applying;
-    const wantsMetadata = provider === 'canlii' ? settings.canliiHeader : settings.cleanTitles || settings.canliiButton;
-    if (!settings.unitCopyButtons) unmountBar();
+    if (!settings.unitCopyButtons) unmountUnits();
     if (provider === 'canlii' && !settings.canliiHeader) unmountBanner();
     if (provider !== 'canlii') {
       if (!settings.cleanTitles) unmountCard();
       if (!settings.canliiButton) unmountCanliiButton();
       tameNativeTitle(settings.cleanTitles);
     }
+    const wantsMetadata = provider === 'canlii' ? settings.canliiHeader : settings.cleanTitles || settings.canliiButton;
     if (wantsMetadata) {
       try {
         const current = metadata && page.current(metadata) ? metadata : (metadata = await page.model(true));
@@ -472,15 +440,41 @@
         // Not a supported legal document (a search page or an error page): nothing to show.
       }
     }
-    if (settings.unitCopyButtons) idle(() => fullModel().catch(() => {}), 2500);
+    if (settings.unitCopyButtons) whenVisible(() => idle(() => fullModel().then((model) => {
+      if (ticket === applying && settings.unitCopyButtons && units.model !== model) mountUnits(model);
+    }, () => {}), 2500));
   }
+
+  // A tab opened or restored in the background reads its document only once it is shown.
+  function whenVisible(callback) {
+    if (document.visibilityState === 'visible') return callback();
+    document.addEventListener('visibilitychange', function shown() {
+      if (document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', shown);
+      callback();
+    });
+  }
+
+  // The document changed (or the page navigated in place): re-mount once things settle. A page
+  // that keeps changing its text backs off, so it is never re-read more than every few seconds.
+  let refreshes = [];
+  let refreshTimer = 0;
+  function refresh() {
+    clearTimeout(refreshTimer);
+    const now = Date.now();
+    refreshes = refreshes.filter((at) => now - at < 30_000);
+    refreshTimer = setTimeout(() => { refreshes.push(Date.now()); metadata = null; apply(); }, refreshes.length > 3 ? 8000 : 500);
+  }
+  page.onInvalidate?.(refresh);
+  window.navigation?.addEventListener('navigatesuccess', refresh);
+  window.addEventListener('popstate', refresh);
+  window.addEventListener('pageshow', (event) => { if (event.persisted) refresh(); });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !Object.keys(settings).some((key) => changes[key])) return;
     for (const key of Object.keys(settings)) if (changes[key]) settings[key] = changes[key].newValue ?? settings[key];
-    apply();
+    if (changes.caseMarker) setTimeout(apply, 60); else apply();
   });
-  window.addEventListener('pageshow', (event) => { if (event.persisted) apply(); });
   chrome.storage.local.get(settings, (stored) => {
     Object.assign(settings, stored);
     idle(apply, 400);

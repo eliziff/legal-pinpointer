@@ -14,7 +14,9 @@ const index = legislation.parseIndex(text);
 const parsed = performance.now() - started;
 let exact = 0, consolidated = 0, ambiguous = 0, wrong = 0;
 const samples = [];
-for (const [key, rows] of index.byCitation) {
+const byKey = new Map();
+for (const [key, found] of legislation.entries(index)) (byKey.get(key) || byKey.set(key, []).get(key)).push(found);
+for (const [key, rows] of byKey) {
   for (const row of rows) {
     const resolved = legislation.resolve(index, row.title, key, 'en', { keys: [key], candidates: [] });
     if (resolved === legislation.rowUrl(row, 'en')) exact += 1;
@@ -23,7 +25,7 @@ for (const [key, rows] of index.byCitation) {
     else { wrong += 1; if (samples.length < 12) samples.push(`other: ${key} ${row.id} -> ${resolved}`); }
   }
 }
-console.log(JSON.stringify({ records: index.rows.length, citationKeys: index.byCitation.size, parseMs: Math.round(parsed),
+console.log(JSON.stringify({ records: index.starts.length, citationKeys: index.byCitation.size, parseMs: Math.round(parsed),
   exact, consolidated, ambiguous, wrong }, null, 2));
 for (const sample of samples) console.log(sample);
 process.exitCode = wrong ? 1 : 0;

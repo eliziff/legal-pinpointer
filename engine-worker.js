@@ -171,5 +171,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 chrome.commands.onCommand.addListener((command, tab) => { if (command === 'pdf-fragment-link') pdfFragmentLink(tab); });
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.pdfFragments) syncMenus(); });
-chrome.runtime.onInstalled.addListener(() => { syncMenus(); ensureHost(); });
-chrome.runtime.onStartup.addListener(() => { ensureHost(); });
+chrome.runtime.onInstalled.addListener(syncMenus);
+
+// The engine host asks to be closed once idle; the next request opens it again.
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type !== 'LEGAL_PINPOINTER_ENGINE_IDLE' || sender.id !== chrome.runtime.id || sender.tab
+      || sender.url !== chrome.runtime.getURL('engine-host.html')) return false;
+  hostKnown = false;
+  chrome.offscreen.closeDocument().catch(() => {});
+  return false;
+});

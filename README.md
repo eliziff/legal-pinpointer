@@ -21,7 +21,7 @@ No build or package installation is required to use the extension. After updatin
 
 If no structure is detected and text is selected, quote/pinpoint copy outputs literal **`[Link]: selected text`**. In rich text, only `[Link]` links to the source; selected text retains the safe inline-formatting allowlist. No paragraph number, provision or page is fabricated. With no selection, copy falls back to the cleaned page link labelled with the citation title. Citation-only copy still copies the citation.
 
-With **Link passages when no structure is found** turned on in the popup, `[Link]` instead points at a text-fragment link for the selected passage (or, with nothing selected, the hovered paragraph), built against the page itself. The link is accepted only if the browser's own search, modelled on Chromium's and checked against current Chrome and newer Chromium alike, lands on exactly that passage; leading paragraph markers and stray edge punctuation are left out. When no link can single the passage out (its opening words recur verbatim elsewhere on the page), `[Link]` keeps the page link and the toast says why. Tab Sonar passage links use the same builder.
+With **Link passages when no structure is found** turned on in the popup, `[Link]` instead points at a text-fragment link for the selected passage (or, with nothing selected, the hovered paragraph), built against the page itself. The link is accepted only if the browser's own search, modelled on Chromium's and checked against current Chrome and newer Chromium alike, lands on exactly that passage; leading paragraph markers and stray edge punctuation are left out. When no link can single the passage out (its opening words recur verbatim elsewhere on the page), `[Link]` keeps the page link and the toast says why. Tab Search passage links use the same builder.
 
 Secondary-source section headings such as `§ 12.02` act as page-wide pinpoints, while citation copy uses the provider's separate source and author metadata without the pinpoint.
 
@@ -31,17 +31,17 @@ A current-page text-fragment URL in the clipboard has precedence over both selec
 
 ## On the page
 
-- **Copy buttons beside paragraphs and sections.** Hovering a numbered paragraph or provision on CanLII, Westlaw or Lexis shows a small bar in the margin: the pinpoint (`at para 12`, linked), the quote, and a link to that paragraph. Where the page has no margin, the bar sits in the space above the paragraph's first line. Ctrl+X still copies the hovered unit while the pointer is on the bar.
+- **Copy buttons on every paragraph and section.** Each numbered paragraph or provision on CanLII, Westlaw and Lexis carries three small controls in its margin: the pinpoint (`at para 12`, linked), the quote, and a link to that paragraph. With text selected, they copy the selection instead, exactly as Ctrl+X and Ctrl+Shift+X do (a range such as `at paras 12-14`, a quote across paragraphs, or a text-fragment link to the selected words). Where the page has no margin, they sit in the space above the paragraph's first line. They hold no text and sit outside the page's layout, so selecting and copying the page itself is unaffected, and they exist only for paragraphs near the screen.
 - **CanLII's sticky header names the document.** The style of cause or statute name, as Pinpointer cites it, stays visible while scrolling, with **Citation** and **Link** copy buttons.
 - **Clean titles on Westlaw and Lexis.** A roomy, selectable title block (name, citation, and **Name**, **Citation** and **Link** buttons) sits above the document, clear of the provider's toolbars. Westlaw's own title stops being a draggable link, so a press selects text instead of starting a drag, and it wraps instead of truncating.
 - **CanLII button.** At the left of the title block: red when a reliable CanLII version is known, grey when none is. It opens CanLII in a new tab; once the title scrolls away it rides in the bottom-left corner.
 - **No selection menus.** Westlaw, Lexis and Practical Law stop opening their highlight/annotate/copy-with-reference menus when text is selected. Clicks on links, buttons and fields are untouched.
 
-All page controls share one overlay layer, react only when the hovered element changes, move by compositor transforms, and reuse the content script's document model, which is built in idle time after load.
+The page controls reuse the content script's document model, built in idle time once the tab is shown (background tabs wait until they are opened). The citation engine runs in an offscreen document that opens on first use and closes after ten idle minutes.
 
 ## Case Marker
 
-On CanLII search results and the open document's title, a circle files the document into the current project's folders (up to three levels; nested rings show the path). Click a circle for its folders, a note and a badge. Hover a circle and press **C** or **V** to file it into the folders chosen in Settings, or **N** to clear it. Only search results and current versions get circles, never past versions of legislation or citations in the text.
+On CanLII search results, the open document's title, and the Westlaw and Lexis title block, a circle files the document into the current project's folders (up to three levels; nested rings show the path). A document has one identity everywhere, its CanLII path, which Westlaw and Lexis pages resolve to: a case filed from Westlaw shows as filed on CanLII and Lexis. A document with no CanLII version is filed under its citation and links back to the page it was filed from. Click a circle for its folders, a note and a badge. Hover a circle and press **C** or **V** to file it into the folders chosen in Settings, or **N** to clear it. Only search results and current versions get circles, never past versions of legislation or citations in the text.
 
 The popup's **Marker** tab manages projects and folders (each new folder takes the next colour of a palette; click a swatch to change it), lists a folder's documents, and copies them as links. The data format is the original Case Marker's, and **Settings → Data** imports and exports it. To bring over data from the standalone Case Marker extension, run this in its popup's DevTools console, then import the downloaded file:
 
@@ -55,7 +55,7 @@ Copies never add a line or paragraph break that the source does not have. A sing
 
 Selections include every structural unit crossed. Rich clipboard output links the two ends of a collapsed range separately, such as `32-33` or `7(2)-(4)`. Quote output preserves a small safe set of inline formatting and uses inline HTML with explicit breaks between units and one newline between units in plain text, without adding a leading or trailing paragraph break. Provisions use hanging indents so explicit and word-processor-wrapped continuation lines remain aligned beneath the provision text. An ellipsis is added only after the first marker when the selection omits substantive opening text; trailing ellipses are never emitted.
 
-## Tab Sonar — persistent results across your tabs
+## Tab Search — persistent results across your tabs
 
 **Ctrl+Shift+S** opens Chrome's native side panel. It searches **This window**
 (the default and widest scope), **This group** or **This tab**. Plain words rank by relevance; CanLII's operators

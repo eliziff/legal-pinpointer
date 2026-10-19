@@ -4,16 +4,13 @@
 // every CanLII statute and regulation keyed by common-law-cite's canlii_citation_key of CanLII's own
 // printed citation, so a provider page's citation resolves exactly by the keys the same engine
 // derives for it (legislationLookup). Titles only break ties or stand in for a missing citation.
+// Memory: the index stays one string; maps hold row numbers, and a row is read only when used.
 (function exposeCanliiLegislation(global) {
-  const PATHS = new Set(['stat', 'regu', 'astat', 'hstat', 'const']);
   // Consolidated text first: an act printed in both the consolidation and the annual volume is the same act.
   const PATH_RANK = { stat: 0, regu: 1, const: 2, hstat: 3, astat: 4 };
-  function fold(value) {
-    return String(value || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  }
 
   function normalizeTitle(value) {
-    return fold(value)
+    return String(value || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
       .replace(/&/g, ' and ')
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
@@ -25,55 +22,86 @@
       .replace(/\bregulations\b/g, 'regulation').replace(/\breglements\b/g, 'reglement');
   }
 
-  // Index lines: id, databaseId, path, citation key ('' when it equals the id), title key. Only the
-  // citation map is built up front; the id and title maps are built on the first fallback lookup.
+  function add(map, key, row) {
+    const value = map.get(key);
+    if (value === undefined) map.set(key, row);
+    else if (typeof value === 'number') map.set(key, [value, row]);
+    else value.push(row);
+  }
+
+  // Index lines: id, databaseId, path, citation key ('' when it equals the id), title key.
   function parseIndex(text) {
-    const rows = [], byCitation = new Map();
     const source = String(text || '');
+    const starts = [], byCitation = new Map();
     for (let start = 0, end; start < source.length; start = end + 1) {
       end = source.indexOf('\n', start);
       if (end < 0) end = source.length;
       if (end === start || source.charCodeAt(start) === 35) continue;
-      const fields = source.slice(start, end).split('\t');
-      if (fields.length < 4 || !PATHS.has(fields[2])) continue;
-      const row = { id: fields[0], databaseId: fields[1], path: fields[2], title: fields[4] || '' };
-      rows.push(row);
-      const key = fields[3] || row.id, list = byCitation.get(key);
-      if (list) list.push(row); else byCitation.set(key, [row]);
+      const a = source.indexOf('\t', start), b = source.indexOf('\t', a + 1), c = source.indexOf('\t', b + 1);
+      const d = source.indexOf('\t', c + 1);
+      if (a < 0 || c < 0 || c > end) continue;
+      const row = starts.length;
+      starts.push(start);
+      const key = d > c + 1 && d <= end ? source.slice(c + 1, d) : source.slice(start, a);
+      add(byCitation, key, row);
     }
-    return { rows, byCitation, maps: null };
+    return { source, starts: Int32Array.from(starts), byCitation, byId: null, byTitle: null, byLoose: null };
   }
 
-  function lookupMaps(index) {
-    if (!index.maps) {
-      const byId = new Map(), byTitle = new Map(), byLoose = new Map();
-      const add = (map, key, row) => { const list = map.get(key); if (list) list.push(row); else map.set(key, [row]); };
-      for (const row of index.rows) {
-        add(byId, row.id, row);
-        if (row.title) { add(byTitle, row.title, row); add(byLoose, looseTitle(row.title), row); }
+  function row(index, at) {
+    const start = index.starts[at];
+    let end = index.source.indexOf('\n', start);
+    if (end < 0) end = index.source.length;
+    const [id, databaseId, path, , title = ''] = index.source.slice(start, end).replace(/\r$/, '').split('\t');
+    return { id, databaseId, path, title };
+  }
+
+  function rows(index, value) {
+    return value === undefined ? [] : (typeof value === 'number' ? [value] : value).map((at) => row(index, at));
+  }
+
+  function idMap(index) {
+    if (!index.byId) {
+      index.byId = new Map();
+      for (let at = 0; at < index.starts.length; at += 1) {
+        const start = index.starts[at];
+        add(index.byId, index.source.slice(start, index.source.indexOf('\t', start)), at);
       }
-      index.maps = { byId, byTitle, byLoose };
     }
-    return index.maps;
+    return index.byId;
   }
 
-  function rowUrl(row, language) {
+  function titleMaps(index) {
+    if (!index.byTitle) {
+      index.byTitle = new Map();
+      index.byLoose = new Map();
+      for (let at = 0; at < index.starts.length; at += 1) {
+        const { title } = row(index, at);
+        if (!title) continue;
+        add(index.byTitle, title, at);
+        add(index.byLoose, looseTitle(title), at);
+      }
+    }
+    return index;
+  }
+
+  function rowUrl(found, language) {
     const lang = String(language || '').toLowerCase().startsWith('fr') ? 'fr' : 'en';
-    const jurisdiction = row.databaseId.slice(0, 2);
-    return `https://www.canlii.org/${lang}/${jurisdiction}/laws/${row.path}/${row.id}/latest/${row.id}.html`;
+    const jurisdiction = found.databaseId.slice(0, 2);
+    return `https://www.canlii.org/${lang}/${jurisdiction}/laws/${found.path}/${found.id}/latest/${found.id}.html`;
   }
 
   // One instrument among rows: best path rank, then the title, else abstain.
-  function choose(rows, titleKey) {
-    if (!rows || !rows.length) return null;
-    const best = Math.min(...rows.map((row) => PATH_RANK[row.path] ?? 9));
-    let ranked = rows.filter((row) => (PATH_RANK[row.path] ?? 9) === best);
-    if (new Set(ranked.map((row) => row.id)).size === 1) return ranked[0];
+  function choose(candidates, titleKey) {
+    if (!candidates.length) return null;
+    const best = Math.min(...candidates.map((found) => PATH_RANK[found.path] ?? 9));
+    let ranked = candidates.filter((found) => (PATH_RANK[found.path] ?? 9) === best);
+    if (new Set(ranked.map((found) => found.id)).size === 1) return ranked[0];
     if (titleKey) {
-      const titled = ranked.filter((row) => row.title === titleKey);
-      if (new Set(titled.map((row) => row.id)).size === 1) return titled[0];
-      ranked = rows.filter((row) => row.title === titleKey);
-      if (new Set(ranked.map((row) => row.id)).size === 1) return ranked[0];
+      const titled = ranked.filter((found) => found.title === titleKey);
+      if (new Set(titled.map((found) => found.id)).size === 1) return titled[0];
+      ranked = candidates.filter((found) => found.title === titleKey);
+      if (new Set(ranked.map((found) => found.id)).size === 1) return ranked[0];
     }
     return null;
   }
@@ -91,30 +119,38 @@
     const titleKey = normalizeTitle(title);
     // 1. CanLII's own citation for the instrument.
     for (const key of (lookup && lookup.keys) || []) {
-      const row = choose(index.byCitation.get(key), titleKey);
-      if (row && similarTitles(row.title, titleKey)) return rowUrl(row, language);
+      const found = choose(rows(index, index.byCitation.get(key)), titleKey);
+      if (found && similarTitles(found.title, titleKey)) return rowUrl(found, language);
     }
     // 2. Identifier candidates the shared citation engine derives.
     const candidates = (lookup && lookup.candidates) || [];
-    for (const id of candidates) {
-      const row = choose(lookupMaps(index).byId.get(id), titleKey);
-      if (row && similarTitles(row.title, titleKey)) return rowUrl(row, language);
+    if (candidates.length) {
+      const byId = idMap(index);
+      for (const id of candidates) {
+        const found = choose(rows(index, byId.get(id)), titleKey);
+        if (found && similarTitles(found.title, titleKey)) return rowUrl(found, language);
+      }
     }
     if (!titleKey) return '';
     // 3. A unique title, narrowed to the citation's jurisdiction where one is known.
     const jurisdiction = lookup && lookup.jurisdiction;
-    const { byTitle, byLoose } = lookupMaps(index);
-    for (const rows of [byTitle.get(titleKey), byLoose.get(looseTitle(title))]) {
-      let pool = rows || [];
-      if (jurisdiction) pool = pool.filter((row) => row.databaseId.startsWith(jurisdiction));
-      const ids = new Set(pool.map((row) => row.id));
+    const { byTitle, byLoose } = titleMaps(index);
+    for (const value of [byTitle.get(titleKey), byLoose.get(looseTitle(title))]) {
+      let pool = rows(index, value);
+      if (jurisdiction) pool = pool.filter((found) => found.databaseId.startsWith(jurisdiction));
+      const ids = new Set(pool.map((found) => found.id));
       if (ids.size === 1) return rowUrl(choose(pool, titleKey) || pool[0], language);
       if (ids.size > 1 && !jurisdiction) break;
     }
     return '';
   }
 
-  const api = { looseTitle, normalizeTitle, parseIndex, resolve, rowUrl };
+  // Every row as [citation key, row] pairs, for audits.
+  function* entries(index) {
+    for (const [key, value] of index.byCitation) for (const found of rows(index, value)) yield [key, found];
+  }
+
+  const api = { entries, looseTitle, normalizeTitle, parseIndex, resolve, rowUrl };
   global.LegalPinpointerCanliiLegislation = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

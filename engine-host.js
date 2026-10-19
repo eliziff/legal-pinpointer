@@ -1,13 +1,23 @@
 'use strict';
 
 // The engine host: an offscreen document that keeps the legal-structure WASM and the CanLII
-// indexes loaded while the browser runs. The service worker is suspended after 30 idle seconds;
-// before, every suspension cost a fresh WASM compile and a second-long legislation index parse.
-// Only the service worker talks to this page, so a request is never answered twice.
+// indexes loaded while they are in use. The service worker is suspended after 30 idle seconds;
+// before, every suspension cost a fresh WASM compile and the legislation index parse. The host
+// is created on first use and asks to be closed after ten idle minutes (sooner once a very large
+// document has grown the engine's memory, which WASM never returns), so idle browsing holds none
+// of it. Only the service worker talks to this page, so a request is never answered twice.
 (function startEngineHost() {
   const legislation = globalThis.LegalPinpointerCanliiLegislation;
   const workerUrl = chrome.runtime.getURL('engine-worker.js');
-  let enginePromise, legislationPromise, caseAliasPromise;
+  const IDLE_CLOSE = 10 * 60_000, LARGE_CLOSE = 20_000, LARGE_MEMORY = 96 * 1024 * 1024;
+  let enginePromise, legislationPromise, caseAliasPromise, engineMemory = null, idleTimer = 0;
+
+  function touch() {
+    clearTimeout(idleTimer);
+    const large = engineMemory && engineMemory.buffer.byteLength > LARGE_MEMORY;
+    idleTimer = setTimeout(() => chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_ENGINE_IDLE' }).catch(() => {}),
+      large ? LARGE_CLOSE : IDLE_CLOSE);
+  }
 
   function gunzip(name) {
     return fetch(chrome.runtime.getURL(name)).then((response) => {
@@ -23,7 +33,9 @@
   function loadEngine() {
     enginePromise ||= once(async () => {
       const response = await gunzip('legal-structure.wasm.gz');
-      return legalStructureInit({ module_or_path: await response.arrayBuffer() });
+      const engine = await legalStructureInit({ module_or_path: await response.arrayBuffer() });
+      engineMemory = engine.memory;
+      return engine;
     }, () => { enginePromise = undefined; });
     return enginePromise;
   }
@@ -104,13 +116,16 @@
         || sender.tab || sender.url !== workerUrl || !handlers[message.op]) return false;
     handlers[message.op](message.input || {})
       .then((value) => sendResponse({ ok: true, value }))
-      .catch((error) => sendResponse({ ok: false, message: error.message || 'Legal Pinpointer engine request failed.' }));
+      .catch((error) => sendResponse({ ok: false, message: error.message || 'Legal Pinpointer engine request failed.' }))
+      .finally(touch);
     return true;
   });
 
-  // Warm everything in idle time so the first copy after browser start is already fast.
+  // The host opens for a request; warm the engine's tables and the case index behind it. The
+  // legislation index loads on the first legislation page.
   setTimeout(() => {
     loadEngine().then(() => citation('formatDocument', { documentType: 'case', title: 'A v B', citation: '2016 SCC 27' }))
-      .then(loadCaseAliases).then(loadLegislation).catch(() => {});
+      .then(loadCaseAliases).catch(() => {});
   }, 50);
+  touch();
 })();

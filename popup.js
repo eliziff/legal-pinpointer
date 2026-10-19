@@ -266,6 +266,7 @@
   }
 
   function documentUrl(key) {
+    if (key.startsWith('cite:')) return marker.markers[key]?.meta?.url || '';
     return `https://www.canlii.org/en/${key.replace(/^\/+/, '')}`;
   }
 
@@ -284,7 +285,7 @@
     if (!folder) return;
     $('viewer-title').textContent = folder.name;
     const items = viewerItems();
-    $('viewer-list').innerHTML = items.length ? items.map((item) => `<li><a href="${escapeHtml(documentUrl(item.key))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>`
+    $('viewer-list').innerHTML = items.length ? items.map((item) => `<li>${documentUrl(item.key) ? `<a href="${escapeHtml(documentUrl(item.key))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : `<span>${escapeHtml(item.title)}</span>`}`
       + (item.note ? `<small>${escapeHtml(item.note)}</small>` : '') + '</li>').join('') : '<li class="empty">Nothing filed here yet.</li>';
   }
 

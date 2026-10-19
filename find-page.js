@@ -15,7 +15,7 @@
   const pause = () => global.scheduler?.yield ? global.scheduler.yield()
     : global.scheduler?.postTask ? global.scheduler.postTask(() => {})
       : new Promise(resolve => setTimeout(resolve, 0));
-  const ownUI = node => node.nodeType === 1 && node.hasAttribute('data-pinpointer-sonar');
+  const ownUI = node => node.nodeType === 1 && (node.hasAttribute('data-pinpointer-sonar') || node.hasAttribute('data-lp-ui'));
 
   function watch(kind, id) {
     if (!id) return;
@@ -387,7 +387,7 @@
     returnHost = document.createElement('div'); returnHost.setAttribute('data-pinpointer-sonar', '');
     returnHost.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647';
     const shadow = returnHost.attachShadow({ mode: 'closed' }), button = document.createElement('button');
-    button.textContent = '← Return to Tab Sonar'; button.style.cssText = 'padding:10px 16px;border-radius:10px;border:1px solid #78988b;background:#fff;color:#154c42;font:14px system-ui;cursor:pointer';
+    button.textContent = '← Return to Tab Search'; button.style.cssText = 'padding:10px 16px;border-radius:10px;border:1px solid #78988b;background:#fff;color:#154c42;font:14px system-ui;cursor:pointer';
     button.onclick = async () => {
       try {
         const reply = await chrome.runtime.sendMessage({ type: 'SONAR_RETURN', session: origin });

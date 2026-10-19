@@ -7,7 +7,6 @@
     "audit:legislation": "node tools/audit-canlii-legislation-index.cjs",
     "benchmark:sonar": "node tools/benchmark-sonar.cjs",
     "benchmark:pinpointer": "node tools/benchmark-pinpointer.cjs",
-    "benchmark:text": "node tools/benchmark-text-hotpaths.cjs",
-    "fetch:rerank": "node tools/fetch-rerank-model.cjs"
+    "benchmark:text": "node tools/benchmark-text-hotpaths.cjs"
   }
 }

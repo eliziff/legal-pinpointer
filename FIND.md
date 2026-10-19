@@ -1,6 +1,6 @@
-# Tab Sonar: persistent proximity search
+# Tab Search: persistent proximity search
 
-Tab Sonar opens in Chrome's **native side panel**. The query and the virtualized
+Tab Search opens in Chrome's **native side panel**. The query and the virtualized
 result list remain visible when a source tab is activated. Chrome 116 or newer is required. Existing
 citation-copying shortcuts and output formats are unchanged.
 
@@ -104,50 +104,17 @@ Lower-case and/or/not are ordinary words here. There are no scores or badges.
   it opens (the starting tab first), into an index in a worker of its own:
   UTF-8 text and compact postings. A tab is read again only when it navigates,
   finishes loading or its text changes. Plain-word queries never touch the tabs.
-- First pass, shown at once: Okapi BM25 (k1 1.2, b 0.75) over paragraphs, with
+- Okapi BM25 (k1 1.2, b 0.75) over paragraphs, with
   unit counts, lengths and document frequencies summed over every searched tab,
   so a rare word weighs the same whichever tab it is in. Words are folded for
   scoring only (case, accents, light English/French inflection: `Waivers` ~
   `waiver`, `accommodating` ~ `accommodate`, `généraux` ~ `general`); offsets,
-  highlights and copies always refer to the original text. The best 200 are listed.
-- Second pass: the top 30 are rescored on the device by a cross-encoder in a
-  worker of the side panel, each reading a 620-character window around its
-  densest query words (192 tokens). A GPU with 16-bit shaders runs
-  ms-marco-MiniLM-L4-v2 (fp16 ONNX, 38 MB) through WebGPU; any other machine runs
-  ms-marco-TinyBERT-L2-v2 (int8 ONNX, 4.5 MB) on up to four WASM threads. The
-  30 pairs run in three batches sorted by length, so little is padded. The model
-  loads once the tabs have been read and is released after three idle minutes.
-  It is English-only, so French queries keep the first-pass order. If the model
-  is absent or fails (or Chrome is older than 137, which the runtime needs), the
-  first-pass order stays.
-- The list never jumps under the user: the reranked order replaces the first
-  one once, and only while the pointer is off the list and no result has been
-  clicked or arrowed to (a first result focused with Enter stays first: the best
-  one after reordering). Otherwise it waits for the pointer to leave, or is
-  dropped once a result has been chosen. Open and the copy commands use the result's
-  issued handle, so they work from either order.
+  highlights and copies always refer to the original text. The best 200 are listed;
+  the index answers a query in a few milliseconds. Open and the copy commands use
+  the result's issued handle.
 
-Measured 2026-09-23 on an i3-1315U laptop with Intel UHD graphics, loaded to
-80-90% CPU by other work: the 38 judged queries over 30 tabs holding the 30
-longest A2AJ judgments (20.4M characters), each query's top 30 from the panel's
-own index given to the shipped reranker worker in headless Chromium. "4x" slows
-the whole renderer process (worker and WASM threads included) to a quarter
-speed; DevTools CPU throttling would miss the workers. It slows the CPU only: the
-GPU runs at full speed.
-
-| Ranking | Target in top 10 | MRR | Rerank p50 / p95, 1x | Rerank p50 / p95, 4x | Memory over an idle renderer |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| First pass (BM25) | 0.698 | 0.503 | - | - | - |
-| GPU: MiniLM-L4 fp16, WebGPU | 0.809 | 0.711 | 361 / 493 ms | 406 / 477 ms | 250 MB + 175 MB GPU process |
-| CPU: TinyBERT-L2 int8, WASM | 0.737 | 0.585 | 103 / 125 ms | 440 / 755 ms | 160 MB |
-| Before: MiniLM-L6 int8, WASM | 0.836 | 0.724 | 1.48 s | 4.06 s | 445 MB (peak 742) |
-
-The L6 model on WASM, which this replaces, ranked best but took 1.5 s on this
-laptop and 4.1 s at 4x per 30 passages (timed separately on three queries' top
-30); on this GPU it still takes 0.52 s, so L4 is the largest model that fits in
-half a second. Both new paths rank below L6: on the GPU by one query in 38, on
-CPU-only machines by a real margin, traded for speed. The index answers a query
-in 5.7 ms (p50; p95 11.9 ms) at 1x.
+There is no on-device semantic reranker in this build; it may return later as a
+separate option.
 
 **Exact search** uses CanLII's document-text grammar and keeps document order.
 A document is one tab's page; its paragraphs are the listed passages.
@@ -182,13 +149,7 @@ The native workspace adds only the **sidePanel** permission. Existing activeTab,
 scripting and HTTP/HTTPS host access support user-invoked cross-tab searches.
 Automatic citation scripts keep their original provider matches. Search code is
 not injected into every website on page load. No backend, telemetry, polling or
-worker-keepalive loop is added. The one packaged dependency is the reranker in
-`vendor/rerank/` (onnxruntime-web 1.30.0's JSPI build for WebGPU and WASM, and
-the two models; 60 MB, not committed): `npm run fetch:rerank` downloads it and
-checks every file against a pinned SHA-256; nothing is fetched at run time. The
-manifest makes extension pages cross-origin isolated (COOP/COEP), which lets the
-panel's reranker use up to four WASM threads on machines without a suitable GPU;
-its pool threads sleep rather than spin between operators.
+worker-keepalive loop is added. There are no vendored dependencies.
 
 The broker stores compact navigation handles in extension-private RAM session
 storage; queries/previews normally remain in the panel instance. For a deliberate
@@ -209,7 +170,7 @@ previews; four million text characters/150,000 traversal steps per page; a
 32-million-character queue-start threshold across pages (last batch may overshoot);
 five-second operation waits within an 18-second deadline. Ranked mode indexes up
 to 32 million characters across tabs, keeps the best 200 (the 1,000-result stop
-does not apply) and reranks the top 30, each cut to 620 characters and 192 tokens. Physical paragraphs over
+does not apply). Physical paragraphs over
 65,536 UTF-16 characters and budget-truncated units are skipped whole, not split
 into misleading proximity/NOT matches. Highlight caps are 100 ranges/unit and
 2,000 background ranges; excerpts contain at most 460 characters. Skipped tabs
