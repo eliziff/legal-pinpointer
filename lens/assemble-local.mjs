@@ -5,6 +5,8 @@ for(const name of ['decision-worker','corpus-worker'])await build({...common,ent
 await build({...common,entryPoints:[path.join(root,'src/lens.mjs')],format:'esm',outfile:path.join(out,'lens.mjs')});
 const event=await build({...common,entryPoints:[path.join(root,'src/event-strip.mjs')],format:'esm',write:false});
 for(const n of ['lens.html','ui.css','page.js'])await copyFile(path.join(root,'src',n),path.join(out,n));
+// Source builds only bundle code; embedding assets and archiving are delivery work.
+if(process.argv.includes('--package')){
 const template=await readFile(path.join(root,'src/event-strip.html'),'utf8'),css=await readFile(path.join(root,'src/ui.css'),'utf8'),script=event.outputFiles[0].text.replaceAll('</script','<\\/script');
 const [before,after]=template.replace('/* INLINE_CSS */',()=>css).replace('/* INLINE_APP */',()=>script).split('<!-- PACKAGED_ASSETS -->');
 const stream=createWriteStream(path.join(dist,'event-strip.html'));async function emit(text){if(!stream.write(text))await new Promise(r=>stream.once('drain',r));}await emit(before);
@@ -16,3 +18,5 @@ if(!process.env.SKIP_ARCHIVE){
  if(result.status!==0)throw new Error('Extension archive failed.');
 }
 const sums=[];for(const name of process.env.SKIP_ARCHIVE?['event-strip.html']:['event-strip.html','legal-pinpointer-lens.zip']){const h=createHash('sha256');for await(const c of createReadStream(path.join(dist,name)))h.update(c);sums.push(h.digest('hex')+'  '+name);}await writeFile(path.join(dist,'SHA256SUMS.txt'),sums.join('\n')+'\n');console.log(sums.join('\n'));
+
+}

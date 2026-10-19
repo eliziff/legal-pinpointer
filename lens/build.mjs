@@ -8,6 +8,9 @@ import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {mirrorParquet} from './mirror-parquet.mjs';
 const root=import.meta.dirname,repo=path.resolve(root,'..'),out=path.join(repo,'lens-dist'),assets=path.join(out,'assets'),dist=path.join(root,'dist');
+if(!process.argv.includes('--package')){
+  await import('./assemble-local.mjs');
+}else{
 await import('./preload-ocr.mjs');
 await mkdir(assets,{recursive:true});await mkdir(dist,{recursive:true});
 const manifest=[];
@@ -54,3 +57,5 @@ const info={application:'Pinpointer Lens + Event Strip',version:'0.3.0',gitCommi
 await writeFile(path.join(assets,'build-info.json'),JSON.stringify(info,null,2));
 await import('./assemble-local.mjs');
 await copyFile(path.join(assets,'build-info.json'),path.join(dist,'build-info.json'));
+
+}
