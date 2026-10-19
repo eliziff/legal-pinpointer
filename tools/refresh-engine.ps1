@@ -15,6 +15,7 @@ if (-not (Test-Path -LiteralPath $sourceManifest -PathType Leaf)) {
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("legal-pinpointer-engine-" + [guid]::NewGuid().ToString('N'))
 $temporarySource = Join-Path $temporaryRoot 'src'
+$targetDirectory = Join-Path $projectRoot 'engine-src\target'
 New-Item -ItemType Directory -Path $temporarySource | Out-Null
 
 try {
@@ -58,7 +59,7 @@ strip = true
     }
     $env:CARGO_ENCODED_RUSTFLAGS = $remaps -join [char]0x1f
     try {
-        cargo build --manifest-path (Join-Path $temporaryRoot 'Cargo.toml') --target wasm32-unknown-unknown --release --offline
+        cargo build --manifest-path (Join-Path $temporaryRoot 'Cargo.toml') --target wasm32-unknown-unknown --release --offline --jobs 1 --target-dir $targetDirectory
         $buildCode = $LASTEXITCODE
         if ($buildCode -eq 0) {
             $metadataJson = & cargo metadata --manifest-path (Join-Path $temporaryRoot 'Cargo.toml') --format-version 1 --offline
@@ -80,7 +81,7 @@ strip = true
     if ($LASTEXITCODE -ne 0 -or $installedBindgen -ne $bindgenVersion) {
         throw "Install wasm-bindgen-cli $bindgenVersion to match the browser engine."
     }
-    $builtWasm = Join-Path $metadata.target_directory 'wasm32-unknown-unknown\release\legal_structure_browser_engine.wasm'
+    $builtWasm = Join-Path $targetDirectory 'wasm32-unknown-unknown\release\legal_structure_browser_engine.wasm'
     $package = Join-Path $temporaryRoot 'pkg'
     & wasm-bindgen --target no-modules --no-modules-global legalStructureInit --no-typescript --out-name legal-structure --out-dir $package $builtWasm
     if ($LASTEXITCODE -ne 0) { throw 'Browser engine binding generation failed.' }

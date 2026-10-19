@@ -144,7 +144,7 @@ Refresh the exact parser after changing `legal-structure`:
 .\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
 ```
 
-The refresh script builds a disposable offline WASM project from the checked-in ABI and the supplied parser source (Canadian and journal providers only; US and UK adapters are left out), with personal paths remapped out of the binary, then replaces `legal-structure.wasm.gz` and its generated classic-worker (`legal-structure.js`) and module (`legal-structure.mjs`) loaders. Tools load the compressed engine through `tools/engine-node.cjs`. It requires `wasm-bindgen-cli` at the version resolved in the engine dependency lock; the script checks that version before generating bindings.
+The refresh script builds an offline WASM wrapper with one Cargo job and reuses `engine-src/target` across runs. It uses the checked-in ABI and the supplied parser source (Canadian and journal providers only; US and UK adapters are left out), with personal paths remapped out of the binary, then replaces `legal-structure.wasm.gz` and its generated classic-worker (`legal-structure.js`) and module (`legal-structure.mjs`) loaders. Tools load the compressed engine through `tools/engine-node.cjs`. It requires `wasm-bindgen-cli` at the version resolved in the engine dependency lock; the script checks that version before generating bindings.
 
 Citation parsing, formatting, reporter preferences and CanLII court routes come from
 `common-law-cite` through the parser's shared citation dependency. Rebuild the
@@ -165,3 +165,7 @@ npm run test:workspace
 ```
 
 The browser fixture covers full and partial quotes, edge ellipses, formatting and line breaks, separately linked range endpoints, text-fragment precedence, and non-duplicated toast feedback. The optional Playwright-backed `npm run test:pinpointer:browser` additionally checks compact-map equivalence, sparse offsets, metadata paths across provider-shaped fixtures, structureless selected quotes, and mutation safety. `npm run test:workspace` checks native-panel markup and routing with simulated Chrome APIs, not installed keyboard dispatch. `tools/fragment-quirks.cjs` checks the text-fragment search model against the installed Chrome case by case.
+
+### Lens source loop
+
+From `lens/`, `npm run build` or `node build.mjs` bundles local source into the existing `lens-dist/` assets without downloading corpora/models, converting embeddings or assembling an archive. Run `npm run build:package` or `node build.mjs --package` explicitly to prepare those assets and deliver the standalone HTML and extension archive. Source builds reuse previously prepared assets; initial offline setup requires that explicit package build.

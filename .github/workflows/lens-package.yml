@@ -21,7 +21,7 @@ jobs:
       - run: npm test
         working-directory: lens
       - run: python -m pip install numpy==2.3.3 safetensors==0.6.2 tokenizers==0.22.0
-      - run: npm run build
+      - run: npm run build:package
         working-directory: lens
         env:
           NODE_OPTIONS: --max-old-space-size=6144
