@@ -10,7 +10,8 @@
     'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'OL', 'P', 'PRE', 'SECTION', 'TABLE',
     'TBODY', 'TD', 'TFOOT', 'TH', 'THEAD', 'TR', 'UL'
   ]);
-  const NON_SEARCHABLE = 'script, style, noscript, template, [hidden], [aria-hidden="true"]';
+  // [data-lp-ui] is Pinpointer's own page UI (copy controls, title block, Case Marker circles).
+  const NON_SEARCHABLE = 'script, style, noscript, template, [hidden], [aria-hidden="true"], [data-lp-ui]';
   // CanLII renders scanned reporter pages as one positioned span per printed line.
   const LINE_ELEMENTS = '.pdf-viewer-line';
 
@@ -1176,7 +1177,7 @@
     return { range, matches, url: String(value).trim(), text: range.toString() };
   }
 
-  // A text-fragment URL for this range (Tab Sonar passages, Lens), from the same verified builder as
+  // A text-fragment URL for this range (Tab Search passages, Lens), from the same verified builder as
   // the unstructured-passage option: the browser lands on the passage, or this throws.
   function urlForRange(range, root, cleanUrl) {
     if (!range.toString().trim()) throw new Error('No text was selected.');

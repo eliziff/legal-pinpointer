@@ -95,29 +95,41 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
           log(`${label}: CanLII button`, `${await button.getAttribute('class')} ${await button.getAttribute('href') || ''}`);
         } catch (_) { log(`${label}: CanLII button`, 'MISSING'); }
       }
-      // Hover a paragraph in the middle of the document and time the copy bar.
-      const target = await page.evaluateHandle((provider) => {
-        const selector = provider === 'canlii' ? 'a[name^="par"]' : provider === 'westlaw' ? '[id^="crsw_paragraph_num_"]' : '[id^="PARA_"]';
+      // The embedded controls of a paragraph in the middle of the document.
+      const markerSelector = sample.provider === 'canlii' ? 'a[name^="par"]' : sample.provider === 'westlaw' ? '[id^="crsw_paragraph_num_"]' : '[id^="PARA_"]';
+      const ready = await page.evaluate((selector) => {
         const markers = [...document.querySelectorAll(selector)];
         const marker = markers[Math.min(4, markers.length - 1)];
         const block = marker && (marker.closest('p, li, div') || marker);
-        block?.scrollIntoView({ block: 'center' });
-        return block;
-      }, sample.provider);
-      if (await target.evaluate((node) => Boolean(node))) {
-        await sleep(2500); // the model is built in idle time after load
-        const box = await target.asElement().boundingBox();
-        const hoverStart = Date.now();
-        await page.mouse.move(box.x + Math.min(200, box.width / 2), box.y + Math.min(10, box.height / 2));
+        if (!block) return null;
+        block.scrollIntoView({ block: 'center' });
+        window.__lpBlock = block;
+        const after = markers[Math.min(5, markers.length - 1)];
+        window.__lpNext = after && after !== marker ? (after.closest('p, li, div') || after) : null;
+        window.__lpTop = block.getBoundingClientRect().top;
+        window.__lpText = document.body.innerText.length;
+        return true;
+      }, markerSelector);
+      if (ready) {
+        const mountStart = Date.now();
         try {
-          await page.waitForSelector('.bar.on', { timeout: 5000 });
-          log(`${label}: hover bar ms`, Date.now() - hoverStart);
-          log(`${label}: hover bar label`, await page.locator('.bar button[data-mode="pinpoint"]').getAttribute('data-tip'));
-          await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-hover.png`) });
-          for (const mode of ['pinpoint', 'quote', 'link']) {
-            const clickAt = Date.now();
+          await page.waitForFunction(() => window.__lpBlock.querySelector('.lp-unit') || window.__lpBlock.previousElementSibling?.matches?.('.lp-unit'), null, { timeout: 15_000 });
+          log(`${label}: controls mounted ms (model in idle)`, Date.now() - mountStart);
+          log(`${label}: controls`, await page.evaluate(() => ({
+            mounted: document.querySelectorAll('.lp-unit').length,
+            units: document.querySelectorAll(window.__lpSelector || 'p').length,
+            layoutShift: Math.round(window.__lpBlock.getBoundingClientRect().top - window.__lpTop),
+            innerTextChange: document.body.innerText.length - window.__lpText,
+            place: document.querySelector('.lp-unit')?.dataset.place
+          })));
+          await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-units.png`) });
+          const control = page.locator('.lp-unit').filter({ has: page.locator('button') }).nth(0);
+          const ownControl = await page.evaluateHandle(() => window.__lpBlock.querySelector('.lp-unit') || window.__lpBlock.previousElementSibling);
+          const copyWith = async (mode) => {
             await page.evaluate(() => { const toast = document.getElementById('legal-pinpointer-status'); if (toast) toast.textContent = ''; });
-            await page.locator(`.bar button[data-mode="${mode}"]`).click();
+            const clickAt = Date.now();
+            const button = await ownControl.evaluateHandle((element, mode) => element.querySelector(`button[data-mode="${mode}"]`), mode);
+            await button.asElement().click();
             await page.waitForFunction(() => /^Copied/.test(document.getElementById('legal-pinpointer-status')?.textContent || ''), null, { timeout: 5000 });
             const elapsed = Date.now() - clickAt;
             const clip = await page.evaluate(async () => {
@@ -126,21 +138,27 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
               return { plain: await text('text/plain'), html: await text('text/html') };
             });
             const fragment = clip.html.replace(/^[\s\S]*?<body[^>]*>|<\/body>[\s\S]*$/gi, '').replace(/<!--(?:Start|End)Fragment-->/g, '');
-            log(`${label}: copy ${mode}`, { ms: elapsed, toast: await page.locator('#legal-pinpointer-status').innerText(),
-              plain: clip.plain.slice(0, 160), plainBreaks: (clip.plain.match(/\n/g) || []).length,
-              htmlBlocks: (fragment.match(/<(?:p|div|br|li|h\d)\b/gi) || []).length, html: fragment.slice(0, 220) });
-            await sleep(150);
-          }
-        } catch (error) { log(`${label}: hover bar`, `MISSING (${error.message.split('\n')[0]})`); }
-      } else log(`${label}: hover target`, 'no paragraph markers');
-      // Keyboard copy of the hovered unit (the pointer is still on the copy bar).
-      await page.evaluate(() => { const toast = document.getElementById('legal-pinpointer-status'); if (toast) toast.textContent = ''; });
-      const keyStart = Date.now();
-      await page.keyboard.press('Control+x');
-      try {
-        await page.waitForFunction(() => /Copied pinpoint/.test(document.getElementById('legal-pinpointer-status')?.textContent || ''), null, { timeout: 5000 });
-        log(`${label}: Ctrl+X ms`, Date.now() - keyStart);
-      } catch (_) { log(`${label}: Ctrl+X`, await page.locator('#legal-pinpointer-status').innerText().catch(() => 'no toast')); }
+            return { ms: elapsed, toast: await page.locator('#legal-pinpointer-status').innerText(), plain: clip.plain.slice(0, 160),
+              plainBreaks: (clip.plain.match(/\n/g) || []).length, htmlBreaks: (fragment.match(/<(?:p|div|br|li|h\d)\b/gi) || []).length,
+              lpInHtml: /lp-unit|data-lp-ui/.test(fragment), html: fragment.slice(0, 200) };
+          };
+          for (const mode of ['pinpoint', 'quote', 'link']) log(`${label}: unit ${mode}`, await copyWith(mode));
+          // Select from this paragraph into the next: the same controls copy the range.
+          await page.evaluate(() => {
+            const block = window.__lpBlock, next = window.__lpNext;
+            const walk = (root, last) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let node, found = null;
+              while ((node = walker.nextNode())) if (node.data.trim().length > 20 && !node.parentElement.closest('[data-lp-ui]')) { found = node; if (!last) break; } return found; };
+            const start = walk(block, false), end = walk(next || block, true);
+            const range = document.createRange();
+            range.setStart(start, Math.min(5, start.length)); range.setEnd(end, Math.min(20, end.length));
+            getSelection().removeAllRanges(); getSelection().addRange(range);
+          });
+          for (const mode of ['pinpoint', 'quote', 'link']) log(`${label}: selection ${mode}`, await copyWith(mode));
+          void control;
+          await page.evaluate(() => getSelection().removeAllRanges());
+        } catch (error) { log(`${label}: controls`, `MISSING (${error.message.split('\n')[0]})`); }
+      } else log(`${label}: controls`, 'no paragraph markers');
+      if (sample.provider !== 'canlii') log(`${label}: Case Marker circle in title block`, await page.locator('[data-lp-ui] .lpm-circle').count());
       await page.evaluate(() => scrollTo(0, 0));
       await sleep(200);
       await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-top.png`) });

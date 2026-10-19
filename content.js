@@ -56,7 +56,7 @@
   // block. Toolbars, tooltips and menus elsewhere change constantly and must not force a re-parse.
   const IDENTITY = 'h1, h2, title, meta, #co_docHeader, #citeInfo, .co_cites, #titleInfo, .crsw_prelim, .SS_DocumentHeader, '
     + '#SS_DocumentTitle, .documentheadertitle, #title-container, .documentMeta, #metas-container';
-  const modelRoots = new Set();
+  const modelRoots = new Set(), invalidationListeners = new Set();
   function affectsModel(node) {
     if (!node || ownOverlay(node)) return false;
     const element = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
@@ -71,6 +71,7 @@
     documentRevision += 1;
     modelCache.clear();
     modelRoots.clear();
+    for (const listener of invalidationListeners) listener();
   }
 
   function flushModels() {
@@ -474,7 +475,7 @@
         return { plain: '', html: '' };
       }
       if (node.nodeType === Node.ELEMENT_NODE && (
-        node.matches('script, style, noscript, template, [hidden], [aria-hidden="true"]')
+        node.matches('script, style, noscript, template, [hidden], [aria-hidden="true"], [data-lp-ui]')
       )) return { plain: '', html: '' };
       // A unit's quote is one run of text: line breaks and nested blocks inside it
       // (converted PDFs, wrapper divs) separate words, never lines, when pasted.
@@ -643,7 +644,7 @@
       : { range, url: '' };
   }
 
-  // A passage (Tab Sonar result) replaces the selection/hover/clipboard source
+  // A passage (Tab Search result) replaces the selection/hover/clipboard source
   // and returns the payload for the caller to write instead of writing it here.
   async function copy(mode, showFeedback = true, passage = null) {
     const model = await inspectPage(mode === 'citation');
@@ -851,15 +852,25 @@
   }
 
   // One unit's pinpoint, quote or link, copied exactly as selecting the whole unit would.
-  async function copyUnit(model, node, mode) {
-    const range = lensRange(model, node);
-    if (!range) throw new Error('This passage is no longer on the page.');
+  // The page's copy controls: the selection when there is one (a range, exactly as the hotkeys
+  // copy it, but never displaced by a clipboard text fragment), else the control's own unit.
+  function selectionIn(model) {
+    const range = liveSelectionRange();
+    return range && !ownOverlay(range.startContainer) && rangeIntersects(range, model.root)
+      && nodesForRange(model, range, true).length ? range : null;
+  }
+
+  async function copyRange(model, range, mode, node) {
     let payload, message;
-    if (mode === 'link') {
+    if (mode === 'link' && node) {
       const target = targetForNode(model, { kind: 'selection' }, node);
       const [{ plain }] = await core.pinpointLayouts(model.structure.kind, [[node.locator]], SETTINGS.pinpointStyle);
       payload = { plain: target, html: anchorHtml(target, target) };
       message = `Copied link to ${plain}`;
+    } else if (mode === 'link') {
+      const target = fragments.urlForRange(range, model.root, model.cleanUrl);
+      payload = { plain: target, html: anchorHtml(target, target) };
+      message = 'Copied a link to the selected text';
     } else {
       ({ payload, message } = await copy(mode, false, range));
     }
@@ -868,6 +879,14 @@
     rememberedFragment = null;
     showToast(message, false);
     return payload;
+  }
+
+  async function copyUnit(model, node, mode) {
+    const selected = selectionIn(model);
+    if (selected) return copyRange(model, selected, mode, null);
+    const range = lensRange(model, node);
+    if (!range) throw new Error('This passage is no longer on the page.');
+    return copyRange(model, range, mode, node);
   }
 
   async function copyPayload(payload, message) {
@@ -883,7 +902,7 @@
     model: (metadataOnly) => inspectPage(metadataOnly),
     current: (model) => { try { assertCurrentModel(model); return true; } catch (_) { return false; } },
     unitAt: (model, target) => nodeForTarget(model, target),
-    unitStart: (node) => nodeBoundary(node, true),
+    onInvalidate: (listener) => invalidationListeners.add(listener),
     copyUnit,
     copyPayload,
     copyCitation: () => copy('citation'),
@@ -893,7 +912,7 @@
   };
 
   globalThis.LegalPinpointerSonarCopy = (range, mode) => copy(mode, false, range);
-  // Tab Sonar titles its results with the citation Alt+X copies.
+  // Tab Search titles its results with the citation Alt+X copies.
   globalThis.LegalPinpointerSonarCitation = async () => (await inspectPage(true)).citation.plain;
 
   globalThis.LegalPinpointerLensBridge={collect:lensCollect,prepare:lensPrepare,open:lensOpen,

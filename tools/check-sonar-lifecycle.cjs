@@ -50,7 +50,7 @@ function panelFixture({ otherWindow = false } = {}) {
   $('scope').children = ['window', 'group', 'current'].map(scope => Object.assign(new Element(), { dataset: { scope } }));
   class Worker {
     constructor(name) {
-      if (name !== 'sonar-index.js') throw Error('Optional reranker omitted in lifecycle checks');
+      if (name !== 'sonar-index.js') throw Error(`Unexpected worker: ${name}`);
       this.index = createIndex(core); workers.push(this); this.queue = Promise.resolve();
       queueMicrotask(() => this.onmessage?.({ data: { type: 'ready' } }));
     }
@@ -98,7 +98,7 @@ function panelFixture({ otherWindow = false } = {}) {
   const context = vm.createContext({ document, chrome, crypto: { randomUUID }, LegalPinpointerFindCore: core, Blob,
     ClipboardItem: class { constructor(values) { this.values = values; } },
     navigator: { clipboard: { write: async items => { await Promise.all(items.flatMap(item => Object.values(item.values))); } } },
-    LegalPinpointerRerankCore: { looksFrench: () => false }, Worker, console, ...time,
+    Worker, console, ...time,
     Date: class extends Date { static now() { return now; } },
     LegalPinpointerResults: { ResultsList: class {
       constructor(viewport, _spacer, _rows, callbacks) { Object.assign(this, { viewport, results: [], ...callbacks }); list = this; }

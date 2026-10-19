@@ -8,12 +8,10 @@
   let query = '', canliiQuery = '', result = null, current = -1, sequence = Date.now(), observedSequence = sequence;
   let timer = 0, flight = 0, busy = false, opening = false, nonce = '', noticeTimer = 0, focusOnResults = false;
   let refreshPending = false, originRequest = 0;
-  // Ranked mode: BM25 order from the panel's own index shows at once; the
-  // cross-encoder then reorders the top results once, but never while the
-  // pointer is on the list or after the user has moved the selection, so
-  // nothing jumps under them.
-  const RERANK_DEPTH = 30, RERANK_TOKENS = 192, RERANK_WINDOW = 620, RERANK_IDLE = 3 * 60_000;
-  let reranker = null, rerankUnavailable = false, rerankJob = 0, rerankIdle = 0, pendingOrder = null, navigated = false, pointerInList = false;
+  // Ranked mode: BM25 order from the panel's own index; excerpts of the first
+  // screenfuls come with the list, the rest just after it.
+  const EAGER_EXCERPTS = 30;
+  let pointerInList = false;
   // The ranked index (sonar-index.js): every eligible tab's paragraphs, read in
   // idle time after the panel opens and again only when that tab changes. Jump
   // and copy still go to the page through issued, revalidated handles.
@@ -71,7 +69,6 @@
   }
   function cancel() {
     clearTimeout(timer); const seq = nextSequence();
-    pendingOrder = null; navigated = false; if (rerankJob) { rerankJob = 0; reranker?.postMessage({ type: 'cancel' }); }
     if (flight) { flight = 0; send('SONAR_CANCEL', { sequence: seq - 1 }).catch(() => {}); }
     return seq;
   }
@@ -110,7 +107,7 @@
       show(result.results); details();
       if (result.note) tell(result.note);
       if (focusOnResults) { focusOnResults = false; focusFirst(); }
-      if (result.ranked) { issue(result); rerank(token); fillExcerpts(result); }
+      if (result.ranked) { issue(result); fillExcerpts(result); }
       if (pendingOpen) {
         const wanted = pendingOpen; pendingOpen = null;
         const found = result.results.findIndex(item => item.tabId === wanted.tabId && item.hash === wanted.hash);
@@ -150,7 +147,7 @@
     }));
     if (token !== sequence) return { stale: true };
     const indexed = tabs.filter(tab => reads.get(tab.id)?.revision && !reads.get(tab.id).dirty);
-    const reply = await indexCall({ type: 'search', query, tabIds: indexed.map(tab => tab.id), depth: RERANK_DEPTH, window: RERANK_WINDOW, eager: RERANK_DEPTH });
+    const reply = await indexCall({ type: 'search', query, tabIds: indexed.map(tab => tab.id), eager: EAGER_EXCERPTS });
     const skipped = tabs.filter(tab => !indexed.includes(tab)).map(tab => ({ title: String(tab.title || tab.url || `Tab ${tab.id}`).slice(0, 200),
       reason: reads.get(tab.id)?.reason || 'Still reading; search again when ready' }));
     const windows = new Map(tabs.map(tab => [tab.id, tab.windowId]));
@@ -158,7 +155,7 @@
       item.windowId = windows.get(item.tabId) ?? item.windowId;
       item.asleep = Boolean(reads.get(item.tabId)?.asleep);
     }
-    return { ranked: true, results: reply.results, passages: reply.passages, tag: reply.tag, searched: reply.searched, total: tabs.length, skipped, limited: reply.limited,
+    return { ranked: true, results: reply.results, tag: reply.tag, searched: reply.searched, total: tabs.length, skipped, limited: reply.limited,
       sequence: token, note: scope === 'group' && start.groupId < 0 ? 'This tab is not in a tab group. No other ungrouped tabs were searched.' : '' };
   }
   // Excerpts of the rows past the first screenfuls arrive just after the list.
@@ -211,7 +208,6 @@
     for (const tabId of reads.keys()) if (!open.has(tabId)) forget(tabId);
     tabs.sort((a, b) => (b.id === origin.id) - (a.id === origin.id) || (b.windowId === windowId) - (a.windowId === windowId) || a.windowId - b.windowId || a.index - b.index);
     await Promise.all(tabs.map(tab => want(tab.id)));
-    warmReranker(); // After the tabs, so the model never competes with reading them.
   }
   // Queue a (re)read of one tab; resolves once it is indexed or skipped.
   function want(tabId, first = false, again = false) {
@@ -356,7 +352,6 @@
   // The copy buttons copy that result, as its hotkeys do.
   function choose(index, action = '', byUser = true) {
     if (route !== 'tabs' || !result?.results[index]) return;
-    if (byUser) navigated = true;
     current = index; list.select(index);
     if (action === 'open') visit(); else if (action) copyPassage(action);
   }
@@ -366,52 +361,11 @@
     if (!result?.results.length) return;
     $('list-viewport').focus({ preventScroll: true }); choose(0, '', false);
   }
-  // The model loads in idle time and is released after a few idle minutes.
-  function warmReranker() {
-    if (reranker || rerankUnavailable) return;
-    try { reranker = new Worker('rerank-worker.js', { type: 'module' }); }
-    catch (_) { rerankUnavailable = true; return; }
-    reranker.onerror = () => { rerankUnavailable = true; reranker.terminate(); reranker = null; rerankJob = 0; };
-    reranker.postMessage({ type: 'warm' });
-    idleRelease();
-  }
-  function idleRelease() {
-    clearTimeout(rerankIdle);
-    rerankIdle = setTimeout(() => { if (!rerankJob) { reranker?.terminate(); reranker = null; } else idleRelease(); }, RERANK_IDLE);
-  }
-  function rerank(token) {
-    const expected = result, passages = result.passages;
-    if (rerankUnavailable || !passages || passages.length < 2 || LegalPinpointerRerankCore.looksFrench(query)) return;
-    warmReranker();
-    if (!reranker) return;
-    idleRelease();
-    const base = result.results.slice(), job = rerankJob = token;
-    reranker.onmessage = ({ data }) => {
-      if (data.type === 'unavailable') { rerankUnavailable = true; reranker?.terminate(); reranker = null; rerankJob = 0; return; }
-      if (data.job !== job || rerankJob !== job || result !== expected) return;
-      if (data.type === 'failed') { rerankJob = 0; return; }
-      if (data.type !== 'scores') return;
-      rerankJob = 0;
-      // Scored passages by cross-encoder score; the rest keep BM25 order after them.
-      const scores = new Map(data.scores), scored = base.filter(item => scores.has(item.id)).sort((a, b) => scores.get(b.id) - scores.get(a.id));
-      pendingOrder = [...scored, ...base.filter(item => !scores.has(item.id))];
-      applyOrder();
-    };
-    reranker.postMessage({ type: 'score', job, query, passages, maxLength: RERANK_TOKENS });
-  }
-  // A first result focused from the search box stays first: the best one after reordering.
-  function applyOrder() {
-    if (!pendingOrder || navigated || pointerInList || busy || !result) return;
-    const order = pendingOrder;
-    result.results = order; pendingOrder = null; current = current >= 0 ? 0 : -1;
-    show(result.results);
-    document.body.dataset.order = 'reranked';
-  }
   $('list-viewport').addEventListener('pointerenter', () => { pointerInList = true; });
-  $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; applyOrder(); refreshWhenIdle(); });
+  $('list-viewport').addEventListener('pointerleave', () => { pointerInList = false; refreshWhenIdle(); });
   $('list-viewport').addEventListener('focusout', () => setTimeout(refreshWhenIdle));
   function snapshot() {
-    const { issued, passages, ...transfer } = result;
+    const { issued, ...transfer } = result;
     return { workspace, origin, query, canliiQuery, scope, sequence, result: transfer, current, scrollTop: list.viewport.scrollTop };
   }
   // A result in a sleeping tab: wake the tab, read it again, then open the same passage.

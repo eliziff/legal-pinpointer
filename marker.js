@@ -1,12 +1,14 @@
 'use strict';
 
-// Case Marker: coloured circles on CanLII search results and document titles, filed into the
-// current project's folders (up to three levels; a circle shows the folder path as nested rings).
+// Case Marker: coloured circles on CanLII search results and document titles, and on the Westlaw
+// and Lexis title block, filed into the current project's folders (up to three levels; a circle
+// shows the folder path as nested rings). One identity across providers: a document's CanLII path
+// ("ca/scc/doc/2016/2016scc27/2016scc27.html"), which Westlaw and Lexis pages resolve to, so a case
+// filed on one provider shows as filed on the others; a document with no CanLII version is keyed
+// by its citation ("cite:...") and remembers the page it was filed from.
 // The data format is the original Case Marker's (canliiFolders, canliiMarkers, canliiProjects).
-// Circles appear only on search results (current versions) and the open document's title.
 (function startCaseMarker() {
   if (globalThis.LegalPinpointerCaseMarker) return;
-  globalThis.LegalPinpointerCaseMarker = true;
 
   const BIG = [34, 21, 11];
   const BADGE_MAX = 19;
@@ -165,7 +167,7 @@
 
   let seen = new WeakSet();
   function scan() {
-    if (!state.enabled) return;
+    if (!state.enabled || !/(?:^|\.)canlii\.org$/.test(location.hostname)) return;
     // Search results: CanLII names each result's document on the result itself.
     if (location.hash.startsWith('#search/')) {
       for (const result of document.querySelectorAll('.searchResult[data-lbh-path]')) {
@@ -193,6 +195,24 @@
       save(500);
     }
   }
+
+  // The identity a provider page files under: its CanLII document path, else its citation.
+  function identity(canliiUrl, citation) {
+    const key = canliiUrl ? docKey(canliiUrl) : '';
+    if (key && isDocument(key)) return key;
+    const cite = clean(citation).toLowerCase();
+    return cite ? `cite:${cite}` : '';
+  }
+
+  // A circle for a document shown on another provider, placed by the caller; replaces any earlier one.
+  function attachExternal(slot, canliiUrl, citation, label, meta) {
+    for (const old of slot.querySelectorAll('.lpm-wrap')) old.remove();
+    const key = identity(canliiUrl, citation);
+    if (!key || !state.enabled) return;
+    attach(key, label, (wrap) => { wrap.classList.add('lpm-title'); slot.appendChild(wrap); }, meta);
+  }
+
+  globalThis.LegalPinpointerCaseMarker = { attachExternal, identity, enabled: () => state.enabled };
 
   function removeAll() {
     for (const set of wraps.values()) for (const wrap of set) wrap.remove();
@@ -294,7 +314,7 @@
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && picker && !picker.hidden) { hidePicker(); return; }
     if (!hoveredKey || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !['KeyC', 'KeyV', 'KeyN'].includes(event.code)) return;
-    if (event.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (event.target.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
     const folder = event.code === 'KeyC' ? state.slot1 : event.code === 'KeyV' ? state.slot2 : null;
     if (event.code !== 'KeyN' && !folder) return;
     event.preventDefault();
@@ -321,12 +341,18 @@
   // Search results arrive after the page loads and on every new search; coalesce bursts.
   let pending = 0;
   const observer = new MutationObserver(() => {
-    if (!pending) pending = setTimeout(() => { pending = 0; scan(); }, 120);
+    if (!pending) pending = setTimeout(() => {
+      pending = 0;
+      scan();
+      // A document page needs only its title circle; search pages keep watching for new results.
+      if (!location.hash.startsWith('#search/') && document.querySelector('.lpm-title')) observer.disconnect();
+    }, 120);
   });
 
   chrome.storage.local.get(KEYS, (stored) => {
     load(stored);
     scan();
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Elsewhere (Westlaw, Lexis) circles are placed by the title block, not found by watching the page.
+    if (/(?:^|\.)canlii\.org$/.test(location.hostname)) observer.observe(document.body, { childList: true, subtree: true });
   });
 })();
