@@ -142,7 +142,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
               plainBreaks: (clip.plain.match(/\n/g) || []).length, htmlBreaks: (fragment.match(/<(?:p|div|br|li|h\d)\b/gi) || []).length,
               lpInHtml: /lp-unit|data-lp-ui/.test(fragment), html: fragment.slice(0, 200) };
           };
-          for (const mode of ['pinpoint', 'quote', 'link']) log(`${label}: unit ${mode}`, await copyWith(mode));
+          for (const mode of ['pinpoint', 'quote']) log(`${label}: unit ${mode}`, await copyWith(mode));
           // Select from this paragraph into the next: the same controls copy the range.
           await page.evaluate(() => {
             const block = window.__lpBlock, next = window.__lpNext;
@@ -153,12 +153,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
             range.setStart(start, Math.min(5, start.length)); range.setEnd(end, Math.min(20, end.length));
             getSelection().removeAllRanges(); getSelection().addRange(range);
           });
-          for (const mode of ['pinpoint', 'quote', 'link']) log(`${label}: selection ${mode}`, await copyWith(mode));
+          for (const mode of ['pinpoint', 'quote']) log(`${label}: selection ${mode}`, await copyWith(mode));
           void control;
           await page.evaluate(() => getSelection().removeAllRanges());
         } catch (error) { log(`${label}: controls`, `MISSING (${error.message.split('\n')[0]})`); }
       } else log(`${label}: controls`, 'no paragraph markers');
-      if (sample.provider !== 'canlii') log(`${label}: Case Marker circle in title block`, await page.locator('[data-lp-ui] .lpm-circle').count());
+      if (sample.provider !== 'canlii') {
+        log(`${label}: Case Marker circle in title block`, await page.locator('[data-lp-ui] .lpm-circle').count());
+        await page.evaluate(() => { scrollTo(0, 0); const toast = document.getElementById('legal-pinpointer-status'); if (toast) toast.textContent = ''; });
+        await page.locator('[data-lp-ui] >> .card .actions button').click();
+        await page.waitForFunction(() => /^Copied/.test(document.getElementById('legal-pinpointer-status')?.textContent || ''), null, { timeout: 5000 });
+        log(`${label}: title block Copy link`, await page.evaluate(async () => (await (await (await navigator.clipboard.read())[0].getType('text/html')).text()).replace(/^[\s\S]*?<body[^>]*>|<\/body>[\s\S]*$/gi, '').replace(/<!--(?:Start|End)Fragment-->/g, '')));
+      }
       await page.evaluate(() => scrollTo(0, 0));
       await sleep(200);
       await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-top.png`) });

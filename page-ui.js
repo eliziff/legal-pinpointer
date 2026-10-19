@@ -21,7 +21,6 @@
   const svg = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
   const ICONS = {
     link: svg('<path d="M6.6 9.4a2.9 2.9 0 0 0 4.1 0l2.2-2.2a2.9 2.9 0 0 0-4.1-4.1l-.9.9M9.4 6.6a2.9 2.9 0 0 0-4.1 0L3.1 8.8a2.9 2.9 0 0 0 4.1 4.1l.9-.9"/>'),
-    copy: svg('<rect x="5.5" y="5.5" width="8" height="8" rx="1.6"/><path d="M10.5 5.5V3.6c0-.9-.7-1.6-1.6-1.6H3.6C2.7 2 2 2.7 2 3.6v5.3c0 .9.7 1.6 1.6 1.6h1.9"/>'),
     check: svg('<path d="M3.2 8.6 6.4 11.6 12.8 4.6"/>')
   };
 
@@ -31,16 +30,21 @@
     return style;
   }
 
+  const CANLII_LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3333.33 689.90"><g transform="matrix(1.33,0,0,-1.33,-51.85,911.22)"><g><g><g transform="translate(1366.69,215.90)"><path d="m 0,0 v -23.05 h -45.31 v 5.15 c -0.13,1.39 -0.04,2.92 0,4.37 V 0 h 0.01 c 0,38.74 0.21,77.49 -0.10,116.22 -0.23,29.29 -0.44,58.62 -2.16,87.83 -4.74,80.47 -74.91,119.14 -146.35,80.4 -45.69,-24.77 -66.16,-65.17 -68.84,-115.99 -2.76,-52.50 -2.14,-105.02 -1.88,-157.54 h 0.05 V 2.47 c 0.03,-3.25 0.03,-6.51 0.03,-9.75 0,-1.12 -0.00,-2.20 -0.03,-3.21 v -12.56 h -45.82 v 33.98 h 0.01 c 0,100.68 0.19,201.38 -0.27,302.06 v 18.31 h 45.81 l -0.04,-18.31 h -0.01 c 0.10,-3.09 0.10,-6.71 0.10,-10.97 v -33.41 c 13.52,14.60 24.00,27.15 36.99,37.21 37.96,29.43 80.52,41.11 127.69,30.62 C -43.82,323.91 -8.48,279.56 -2.87,213.84 3.18,142.69 -0.47,71.3 0,0" style="fill:#0578B8;fill-rule:nonzero" /></g><g transform="translate(1822.88,431.36)"><path d="m 0,0 v 209.66 c 0,0.77 0,1.51 -0.01,2.25 H 0 v 26.36 h -48.34 l 0.06,-11.40 c -0.04,-1.00 -0.06,-2.06 -0.06,-3.21 0.48,-142.87 0.30,-285.74 0.30,-428.63 v -33.54 H 0 v 8.54 c 0,0.03 0.01,0.07 0.01,0.10 l 0.06,42.70 v 0.88 C -0.16,-124.18 0,-62.08 0,0" style="fill:#0578B8;fill-rule:nonzero" /></g><g transform="translate(908.24,339.35)"><path d="m 0,0 c -11.90,-65.39 -66.25,-112.86 -135.55,-113.74 -78.64,-1.02 -143.13,62.65 -144.00,142.15 -0.85,77.48 61.35,142.89 137.16,144.20 C -68.82,173.88 -12.15,125.82 0.01,55.70 1.48,47.30 2.29,38.59 2.42,29.61 2.58,19.41 1.74,9.51 0,0 M 0.06,207.84 0.04,157.73 C 0,153.42 -0.03,149.02 -0.03,144.46 c -77.03,99.93 -202.65,82.25 -262.45,26.51 -74.85,-69.80 -84.79,-182.16 -21.16,-259.26 30.72,-37.21 69.54,-60.71 118.02,-66.05 65.64,-7.25 119.84,15.68 165.59,68.53 v -29.41 c 0,-1.51 0,-2.96 0.02,-4.34 h -0.03 l 0.11,-26.94 h 45.03 v 354.35 z" style="fill:#0578B8;fill-rule:nonzero" /></g><g transform="translate(1697.10,238.79)"><path d="m 0,0 -140.79,-0.07 c -7.26,-0.02 -14.51,-0.09 -21.78,-0.17 -1.51,-0.01 -2.86,0.03 -4.08,0.15 h -10.00 v 10.34 c -0.01,0.10 -0.01,0.19 -0.01,0.30 -0.09,1.03 -0.12,2.17 -0.11,3.41 0.03,3.95 0.06,7.91 0.08,11.87 0.41,63.58 0.18,127.17 0.18,190.77 v 181.77 c 0,5.42 0,9.98 -0.13,13.81 v 18.64 h -48.35 v -18.94 h 0.03 c 0.27,-147.32 0.32,-294.66 -0.11,-442.00 v -15.84 h 9.84 l 24.39,-0.01 c 51.17,0.30 102.36,0.14 153.52,0.13 H 7.41 V 0 Z" style="fill:#0578B8;fill-rule:nonzero" /></g><g transform="translate(504.64,273.00)"><path d="M 0,0 0.33,-0.27 V -0.29 Z" style="fill:#3678c2;fill-rule:nonzero" /></g><g transform="translate(237.02,626.65)"><path d="m 0,0 c 79.18,23.32 151.74,7.29 213.47,-49.41 0.94,-0.88 1.88,-1.85 2.82,-2.91 l 16.16,-17.21 36.85,27.92 1.32,1.00 -4.78,5.58 -0.03,0.04 -6.98,8.15 C 206.49,31.31 139.44,56.04 59.38,56.76 48.71,56.14 35.67,56.24 22.86,54.54 -135.26,33.46 -231.09,-112.96 -187.66,-266.77 c 29.08,-103 116.91,-172.43 225.14,-178.43 78.17,-4.32 149.44,12.56 208.85,66.37 5.88,5.35 10.59,9.62 14.10,13.22 v 0.01 l 0.54,7.61 6.63,4.32 -33.51,28.36 -0.31,0.26 -0.86,0.75 -2.67,-2.70 -7.37,-7.43 -0.56,-0.56 -0.03,-0.03 c -46.38,-47.48 -103.63,-68.28 -170.67,-65.53 -130.08,5.32 -221.25,120.99 -194.28,247.40 C -125.78,-73.89 -76.49,-22.54 0,0" style="fill:#0578B8;fill-rule:nonzero" /></g><g transform="translate(506.37,271.47)"><path d="m 0,0 -3.97,-4.64 -0.04,-0.06 -4.75,-5.58 -0.14,-0.13 0.54,7.61 6.64,4.33 0.33,-0.29 z" style="fill:#3678c2;fill-rule:nonzero" /></g><g transform="translate(1974.78,669.64)"><path d="M 0,0 H -48.26 L -48.2,-11.15 V -11.3 c -0.05,-1.01 -0.06,-2.10 -0.06,-3.25 0.46,-138.56 0.33,-277.09 0.30,-415.64 l -0.30,-46.59 H 0 v 71.86 c -0.12,55.60 0,111.23 0,166.86 v 207.04 c 0,3.69 0,6.97 -0.04,9.86 z" style="fill:#0578B8;fill-rule:nonzero" /></g><g transform="translate(500.98,275.13)"><path d="M 0,0 0.34,-0.27 V -0.29 Z" style="fill:#3678c2;fill-rule:nonzero" /></g><g transform="translate(502.71,273.59)"><path d="m 0,0 -3.98,-4.64 -0.04,-0.06 -4.77,-5.59 -0.13,-0.13 0.54,7.63 6.66,4.33 0.34,-0.29 z" style="fill:#3678c2;fill-rule:nonzero" /></g><g transform="translate(2488.91,367.05)"><path d="m 0,0 49.26,65.91 -79.71,2.34 0.29,52.55 -83.35,-34.54 71.16,113.27 -61.84,10.96 -9.15,102.98 -83.89,-74.10 -49.20,43.22 -20.25,-145.77 -40.78,99.91 -39.88,-41.18 -54.08,49.81 -7.68,-88.29 -55.23,-4.56 91.47,-139.03 5.77,-9.82 -31.36,-46.42 110.42,-20.47 -57.34,-109.91 62.40,-27.90 41.29,120.43 99.02,-63.83 -1.18,67.44 172.52,37.22 z" style="fill:#bb2119;fill-rule:nonzero" /></g><g transform="translate(2489.93,368.69)"><path d="m 0,0 48.95,66.14 -79.72,1.96 0.04,52.55 -83.18,-34.93 70.62,113.61 -61.89,10.66 -9.64,102.94 -83.54,-74.49 -49.40,42.99 -19.57,-145.87 -41.25,99.72 -39.68,-41.37 -54.32,49.55 -7.27,-88.32 -55.21,-4.82 92.12,-138.60 5.82,-9.79 -31.14,-46.56 110.51,-19.95 -56.82,-110.18 62.53,-27.60 40.72,120.63 99.32,-63.36 -1.50,67.43 172.34,38.03 z" style="fill:#bb2119;fill-rule:nonzero" /></g><g transform="translate(2195.26,379.91)"></g><g transform="translate(2363.50,463.28)"></g></g></g></g></svg>`;
   const CANLII_CSS = `
     .canlii {
-      position: relative; display: grid; place-items: center; flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%;
-      text-decoration: none; letter-spacing: -0.02em; font: 800 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
-      transition: transform 120ms ease-out, opacity 120ms, box-shadow 120ms;
+      position: relative; display: grid; place-items: center; flex: 0 0 auto; box-sizing: border-box; width: 104px; height: 36px;
+      padding: 0 11px; border: 1px solid #d5dee6; border-radius: 9px; background: #fff; text-decoration: none;
+      transition: transform 120ms ease-out, opacity 120ms, box-shadow 120ms, filter 120ms;
     }
-    .canlii.live { background: #c8102e; color: #fff; box-shadow: 0 2px 8px rgb(200 16 46 / 32%); cursor: pointer; }
-    .canlii.live:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgb(200 16 46 / 42%); }
-    .canlii.dead { background: #eef0ef; color: #a1a9a5; box-shadow: inset 0 0 0 1px #d9dedb; cursor: default; }
-    .canlii.pending { background: #f4f5f4; color: #c3c9c5; box-shadow: inset 0 0 0 1px #e3e7e4; }
+    .canlii::before {
+      content: ""; width: 100%; height: 19px;
+      background: url("data:image/svg+xml,${encodeURIComponent(CANLII_LOGO)}") center / contain no-repeat;
+    }
+    .canlii.live { cursor: pointer; box-shadow: 0 1px 2px rgb(5 120 190 / 10%), 0 2px 8px rgb(5 120 190 / 12%); }
+    .canlii.live:hover { transform: translateY(-1px); border-color: #9fc3e0; box-shadow: 0 4px 14px rgb(5 120 190 / 20%); }
+    .canlii.dead { filter: grayscale(1); opacity: .42; cursor: default; }
+    .canlii.pending { filter: grayscale(1); opacity: .25; }
     .canlii::after {
       content: attr(data-tip); position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
       padding: 6px 9px; border-radius: 6px; background: #17241e; color: #fff; white-space: nowrap;
@@ -114,7 +118,7 @@
       if (style.overflowX !== 'visible') { edge = element.getBoundingClientRect().left + (parseFloat(style.borderLeftWidth) || 0); break; }
     }
     const room = left - edge;
-    return room >= 90 ? 'row' : room >= 34 ? 'column' : 'above';
+    return room >= 66 ? 'row' : room >= 34 ? 'column' : 'above';
   }
 
   function createControl() {
@@ -124,8 +128,7 @@
     control.setAttribute('role', 'group');
     control.contentEditable = 'false';
     control.innerHTML = '<button type="button" class="lp-unit-pin" data-mode="pinpoint" data-icon="css"></button>'
-      + '<button type="button" class="lp-unit-quote" data-mode="quote" data-icon="css" data-tip="Copy quote" aria-label="Copy quote"></button>'
-      + '<button type="button" class="lp-unit-link" data-mode="link" data-icon="css" data-tip="Copy link" aria-label="Copy link"></button>';
+      + '<button type="button" class="lp-unit-quote" data-mode="quote" data-icon="css" data-tip="Copy with text (Ctrl+Shift+X)" aria-label="Copy pinpoint with text"></button>';
     return control;
   }
 
@@ -138,7 +141,7 @@
     control.dataset.kind = kind;
     control.lpNode = node;
     const pin = control.firstElementChild;
-    const label = `Copy pinpoint · ${KIND_LABEL[kind] || kind} ${node.locator}`;
+    const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[kind] || kind} ${node.locator}`;
     pin.dataset.tip = label;
     pin.setAttribute('aria-label', label);
     if (BLOCKS.has(element.tagName)) element.insertBefore(control, element.firstChild);
@@ -209,12 +212,11 @@
       banner.className = 'lp-banner d-print-none';
       banner.setAttribute('data-lp-ui', '');
       banner.innerHTML = '<span class="lp-banner-title"></span><span class="lp-banner-actions">'
-        + `<button type="button" data-act="citation" title="Copy the linked citation (Alt+X)">${ICONS.copy}<span>Citation</span></button>`
-        + `<button type="button" data-act="link" title="Copy a link to this document">${ICONS.link}<span>Link</span></button></span>`;
+        + `<button type="button" title="Copy the linked citation (Alt+X)">${ICONS.link}<span>Copy link</span></button></span>`;
       banner.addEventListener('mousedown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
       banner.addEventListener('click', (event) => {
         const button = event.target.closest('button');
-        if (button) run(button.dataset.act === 'citation' ? page.copyCitation() : copyLink(), button);
+        if (button) run(page.copyCitation(), button);
       });
       header.appendChild(banner);
       // CanLII positions its side toolbar under the header from the header's height. React only to
@@ -246,12 +248,6 @@
     banner = null;
   }
 
-  function copyLink() {
-    const url = (metadata && metadata.cleanUrl) || location.href.split('#')[0];
-    const escaped = url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    return page.copyPayload({ plain: url, html: `<a href="${escaped}">${escaped}</a>` }, 'Copied link to this document');
-  }
-
   // ---------------------------------------------------------------------------
   // Westlaw and Lexis: the title as a roomy, selectable block, away from the header's controls.
 
@@ -276,7 +272,7 @@
     button:hover { background: #eef5f1; border-color: #9fbcad; }
     button:active { background: #e1ede6; }
     button.done { color: #187243; border-color: #7fb597; }
-    .card .canlii { margin-top: 1px; }
+    .card .canlii { margin-top: 3px; }
     .marker { display: contents; }
     ::slotted([slot="marker"]) { display: inline-flex; flex: 0 0 auto; align-items: center; min-height: 44px; }
     .card .canlii[hidden] { display: none; }
@@ -294,24 +290,15 @@
       host.setAttribute('data-lp-ui', '');
       const shadow = host.attachShadow({ mode: 'open' });
       shadow.adoptedStyleSheets = [sheet(CARD_CSS)];
-      shadow.innerHTML = '<section class="card" aria-label="Document title"><a class="canlii pending" data-tip="Looking for a CanLII version">CanLII</a>'
+      shadow.innerHTML = '<section class="card" aria-label="Document title"><a class="canlii pending" data-tip="Looking for a CanLII version" aria-label="CanLII"></a>'
         + '<span class="marker"><slot name="marker"></slot></span>'
         + '<div class="text"><h2 class="name"></h2><p class="cite"></p></div><div class="actions">'
-        + `<button type="button" data-act="name" title="Copy the name">${ICONS.copy}<span>Name</span></button>`
-        + `<button type="button" data-act="citation" title="Copy the linked citation (Alt+X)">${ICONS.copy}<span>Citation</span></button>`
-        + `<button type="button" data-act="link" title="Copy a link to this document">${ICONS.link}<span>Link</span></button>`
+        + `<button type="button" title="Copy the linked citation (Alt+X)">${ICONS.link}<span>Copy link</span></button>`
         + '</div></section>';
       shadow.addEventListener('mousedown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
       shadow.addEventListener('click', (event) => {
         const button = event.target.closest('button');
-        if (!button || !metadata) return;
-        const act = button.dataset.act;
-        if (act === 'citation') return run(page.copyCitation(), button);
-        if (act === 'link') return run(copyLink(), button);
-        const name = metadata.citation.title || metadata.citation.plain;
-        const escaped = name.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-        const italic = ['case', 'legislation'].includes(metadata.documentType);
-        run(page.copyPayload({ plain: name, html: italic ? `<i>${escaped}</i>` : escaped }, `Copied name: ${name}`), button);
+        if (button) run(page.copyCitation(), button);
       });
       // Case Marker's circle is light DOM slotted into the block, so Case Marker's own styles reach it.
       const marker = document.createElement('span');
@@ -401,7 +388,7 @@
     if (!floating) {
       floating = document.createElement('a');
       floating.className = 'canlii float';
-      floating.textContent = 'CanLII';
+      floating.setAttribute('aria-label', 'CanLII');
       floating.addEventListener('click', noCanlii);
       layer().appendChild(floating);
     }
