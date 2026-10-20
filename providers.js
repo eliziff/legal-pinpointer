@@ -515,6 +515,31 @@
     return null;
   }
 
+  // The provider's own paragraph and section anchors, read synchronously without the engine: what
+  // the page's copy controls attach to the moment the page has them. The full model (inspect) maps
+  // each back to its unit when a control is used.
+  function quickUnits(document, location) {
+    const hostname = String(location.hostname || '').toLowerCase();
+    if (hostname === 'www.canlii.org' || hostname === 'canlii.org') {
+      const type = canliiDocumentType(document, location);
+      if (type === 'case') return canliiParagraphNodes(document);
+      return type === 'legislation' ? canliiProvisionNodes(document, textOf(first(document, ['h1.main-title', 'h1']))) : [];
+    }
+    if (hostname === 'advance.lexis.com') {
+      const title = textOf(first(document, ['#SS_DocumentTitle', 'h1']));
+      const type = lexisDocumentType(location, document);
+      if (type === 'legislation') return lexisProvisionNodes(document, title);
+      if (type === 'secondary') return [];
+      return lexisParagraphNodes(document);
+    }
+    if (hostname === 'nextcanada.westlaw.com' || hostname === 'www.nextcanada.westlaw.com') {
+      const type = westlawDocumentType(document);
+      return type === 'legislation' ? westlawProvisionNodes(document, textOf(first(document, ['#co_docHeaderTitleLine', 'h1'])))
+        : type === 'case' ? westlawParagraphNodes(document) : [];
+    }
+    return [];
+  }
+
   function inspectBase(document, location, options) {
     const adapter = adapterFor(location);
     return adapter ? adapter(document, location, options) : null;
@@ -544,15 +569,17 @@
 
   // Pre-neutral and reporter-only cases resolve through the packaged A2AJ alias x CanLII index.
   async function caseAliasEvidence(base) {
-    const result = await core.citationCall('extract', {
-      text: `${base.citation.citation}
-${base.headerText || ''}`,
-      options: { resolve: false, parallel: false }
-    });
-    const cases = result.citations.filter(citation => citation.form === 'full' && citation.authority === 'case');
-    if (cases.some(citation => !citation.key)) return { cases: [], keys: [] };
+    const own = String(base.citation.citation || '');
+    const read = (text) => core.citationCall('extract', { text, options: { resolve: false, parallel: false } });
+    const [result, ownResult] = await Promise.all([read(`${own}
+${base.headerText || ''}`), read(own)]);
+    // Provider headers list every parallel citation; one the engine cannot key (a digest such as
+    // B.C.W.L.D.) says nothing against the others, so it is skipped rather than voiding the lookup.
+    const cases = result.citations.filter(citation => citation.form === 'full' && citation.authority === 'case' && citation.key);
     const keys = Array.from(new Set(cases.map(citation => citation.key)));
-    return { cases, keys: keys.length <= 50 ? keys : [] };
+    // The document's own citation, read alone: the header can also cite other decisions.
+    const ownKeys = Array.from(new Set(ownResult.citations.filter(citation => citation.form === 'full' && citation.key).map(citation => citation.key)));
+    return { cases, keys: keys.length <= 50 ? keys : [], ownKeys };
   }
 
   async function caseAliasKeys(base) {
@@ -578,15 +605,25 @@ ${base.headerText || ''}`,
     return candidates.length === 1 ? candidates[0].url : '';
   }
 
-  async function requestCaseUrl(base, language) {
-    const { keys, cases } = await caseAliasEvidence(base);
-    if (!keys.length) return '';
-    const response = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_RESOLVE_CASE', input: { keys } }, (response) => {
-        resolve(chrome.runtime.lastError ? null : response);
+  // The CanLII version, else the decision on its court's own Lexum/Decisia site (A2AJ metadata),
+  // found from the document's own citation only: a header's other citations can be appeals.
+  function resolveCaseKeys(input) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_RESOLVE_CASE', input }, (response) => {
+        resolve(chrome.runtime.lastError || !response || response.ok !== true ? null : response);
       });
     });
-    return response && response.ok === true ? pickCaseTarget(base, response.targets, cases, language) : '';
+  }
+
+  async function requestCaseUrl(base, language) {
+    const { keys, cases, ownKeys } = await caseAliasEvidence(base);
+    if (!keys.length) return { canliiUrl: '', siteUrl: '' };
+    const response = await resolveCaseKeys({ keys });
+    const canliiUrl = response ? await pickCaseTarget(base, response.targets, cases, language) : '';
+    if (canliiUrl) return { canliiUrl, siteUrl: '' };
+    const sites = ownKeys.length ? (await resolveCaseKeys({ keys: ownKeys, sites: true }))?.sites || {} : {};
+    const found = new Set(ownKeys.map((key) => sites[key]).filter(Boolean));
+    return { canliiUrl: '', siteUrl: found.size === 1 ? [...found][0] : '' };
   }
 
   function engineInput(base, plane) {
@@ -833,7 +870,7 @@ ${base.headerText || ''}`,
       base.canliiUrl = await requestLegislationUrl(base.citation, document.documentElement.lang || 'en');
     }
     if (base.documentType === 'case' && base.provider !== 'canlii' && !base.canliiUrl) {
-      base.canliiUrl = await requestCaseUrl(base, document.documentElement.lang || 'en');
+      Object.assign(base, await requestCaseUrl(base, document.documentElement.lang || 'en'));
     }
 
     // Citation copying/navigation and an unselected popup need metadata, not
@@ -870,6 +907,7 @@ ${base.headerText || ''}`,
     inspectLexis,
     inspectWestlaw,
     providerAnchorId,
+    quickUnits,
     symbolNodes
   };
 

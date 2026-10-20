@@ -22,8 +22,8 @@
   // index; opening one of its results wakes it first. A sleeping tab never read can be reloaded
   // in the background (Settings: Wake sleeping tabs) so it can be read at all.
   const waking = new Set();
-  let wakeTabs = true, wakes = 0, pendingOpen = null;
-  chrome.storage.local?.get({ sonarWakeTabs: true }, (stored) => { wakeTabs = stored?.sonarWakeTabs !== false; });
+  let wakeTabs = false, wakes = 0, pendingOpen = null;
+  chrome.storage.local?.get({ sonarWakeTabs: false }, (stored) => { wakeTabs = stored?.sonarWakeTabs === true; });
   const favicon = url => url ? `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=16` : '';
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'),
     { choose: (index, action) => choose(index, action), icon: favicon, leave: () => $('query').focus() });

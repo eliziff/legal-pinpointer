@@ -7,7 +7,7 @@
   const SETTINGS = {
     pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
     unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
-    sonarWakeTabs: true, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'copy'
+    sonarWakeTabs: false, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
   const MARKER = { canliiFolders: {}, canliiMarkers: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
   // Folders take the next unused colour of this palette instead of all starting the same.
@@ -31,7 +31,7 @@
   // Tabs
 
   function selectTab(tab) {
-    if (!['copy', 'marker', 'settings'].includes(tab)) tab = 'copy';
+    if (!['marker', 'copy', 'settings'].includes(tab)) tab = 'marker';
     document.body.dataset.tab = tab;
     for (const button of document.querySelectorAll('.tabs [data-tab]')) button.setAttribute('aria-selected', button.dataset.tab === tab);
     for (const panel of document.querySelectorAll('[data-panel]')) panel.hidden = panel.dataset.panel !== tab;

@@ -24,7 +24,7 @@ function timers() {
   return { setTimeout(fn, ms) { const id = setTimeout(() => { all.delete(id); fn(); }, ms); id.unref(); all.add(id); return id; },
     clearTimeout(id) { clearTimeout(id); all.delete(id); }, close() { for (const id of all) clearTimeout(id); } };
 }
-function panelFixture({ otherWindow = false } = {}) {
+function panelFixture({ otherWindow = false, settings = {} } = {}) {
   const time = timers(), elements = new Map(), calls = [], storage = {}, workers = [], changes = event(), messages = event();
   let now = Date.now(), list, unitsHook, storageHook, issueHook;
   // Tab 3 is in another group; with otherWindow, also in another window (outside the widest scope).
@@ -74,7 +74,7 @@ function panelFixture({ otherWindow = false } = {}) {
       reload: async id => { calls.push({ type: 'reload', id }); },
       update: async (id, change) => { calls.push({ type: 'update', id, change }); return { ...tabs.find(tab => tab.id === id) }; },
       onUpdated: event(), onRemoved: event(), onReplaced: event(), onAttached: event(), onDetached: event() },
-    storage: { onChanged: changes, session: { get: async key => ({ [key]: storage[key] }), set: async values => { await storageHook?.(values); Object.assign(storage, values); }, remove: async key => { delete storage[key]; } } },
+    storage: { onChanged: changes, local: { get: (defaults, callback) => callback({ ...defaults, ...settings }) }, session: { get: async key => ({ [key]: storage[key] }), set: async values => { await storageHook?.(values); Object.assign(storage, values); }, remove: async key => { delete storage[key]; } } },
     sidePanel: { open: async () => {}, close: async () => {} },
     runtime: { id: 'extension', getURL: name => `chrome-extension://extension/${name}`, onMessage: messages,
       async sendMessage(message) {
@@ -317,9 +317,18 @@ test('a tab Chrome freezes or discards keeps its last reading and stays searchab
   assert.equal(results.find(row => row.tabId === 3).asleep, true);
 });
 
-test('a sleeping tab that was never read is woken in the background to read it', async t => {
-  const f = panelFixture(); t.after(f.close);
+test('a sleeping tab that was never read is woken in the background to read it (Wake sleeping tabs on)', async t => {
+  const f = panelFixture({ settings: { sonarWakeTabs: true } }); t.after(f.close);
   f.unitsHook = (_message, tab) => tab.id === 2 ? { tabId: 2, skipped: 'Asleep (Chrome froze or discarded it)' } : null;
   await f.ready();
   await until(() => f.calls.some(call => call.type === 'reload' && call.id === 2), 'sleeping tab reloaded');
+});
+
+test('by default a sleeping tab is left asleep', async t => {
+  const f = panelFixture(); t.after(f.close);
+  f.unitsHook = (_message, tab) => tab.id === 2 ? { tabId: 2, skipped: 'Asleep (Chrome froze or discarded it)' } : null;
+  await f.ready();
+  f.advance(5000);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(f.calls.some(call => call.type === 'reload'), false);
 });

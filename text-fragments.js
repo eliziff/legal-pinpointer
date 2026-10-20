@@ -207,28 +207,28 @@
         }
       }
     }
-    const stack = [{ node: root }];
-    while (stack.length) {
-      const item = stack.pop();
-      if (item.children) {
-        if (item.at < item.children.length) {
-          stack.push(item);
-          stack.push({ node: item.children[item.at++] });
-        }
-        continue;
-      }
-      if (item.exit) { separator(); continue; }
-      const node = item.node;
-      if (node.nodeType === 3) {
-        if (!isHidden(node.parentElement, view, hiddenCache)) textNode(node);
-        continue;
-      }
-      if (node.nodeType !== 1 || isHidden(node, view, hiddenCache)) continue;
+    // A depth-first walk that skips hidden subtrees whole. Every element it reaches below the root
+    // has searchable, displayed ancestors, so each needs only its own checks: the selector on itself
+    // (not closest), and computed style only when the browser's own visibility check says it may be
+    // hidden (checkVisibility is also false for display: contents, which the style then clears).
+    const shown = (element) => {
+      if (element.matches(NON_SEARCHABLE)) return false;
+      if (element.checkVisibility && element.checkVisibility({ visibilityProperty: true })) return true;
+      const style = view && typeof view.getComputedStyle === 'function' ? view.getComputedStyle(element) : null;
+      return !style || (style.display !== 'none' && style.visibility !== 'hidden');
+    };
+    const visit = (node) => {
+      if (node.nodeType === 3) { textNode(node); return; }
+      if (node.nodeType !== 1) return;
+      if (node.tagName === 'BR') { separator(); return; }
       const block = BLOCK_TAGS.has(node.tagName) || (structural && node.matches(LINE_ELEMENTS));
-      if (block || node.tagName === 'BR') separator();
-      if (block) stack.push({ exit: true });
-      if (node.tagName !== 'BR') stack.push({ children: node.childNodes, at: 0 });
-    }
+      if (block) separator();
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType !== 1 || shown(child)) visit(child);
+      }
+      if (block) separator();
+    };
+    if (!isHidden(root.nodeType === 1 ? root : root.parentElement, view, hiddenCache)) visit(root);
     if (structural && last === '\n') { chunks.pop(); length -= 1; }
     return { text: chunks.join(''), runs };
   }

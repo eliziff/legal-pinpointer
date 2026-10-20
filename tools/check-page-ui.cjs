@@ -1,9 +1,13 @@
 'use strict';
 
 // Loads the unpacked extension in Chromium and serves saved CanLII, Westlaw and Lexis pages at
-// their real URLs (page scripts blocked), then checks and times the in-page controls: CanLII's
-// header banner, the Westlaw/Lexis title card and CanLII button, the hover copy bar and its
-// clipboard output, the toast and the popup. Screenshots go to the output directory.
+// their real URLs (page scripts blocked, and stood in for by click- and copy-swallowing handlers),
+// then uses every in-page control and checks its clipboard output: CanLII's header name and copy
+// button, the Westlaw/Lexis title tools (CanLII or court-site button, Case Marker circle, copy
+// link), Alt+X, both paragraph buttons with and without a selection, Ctrl+X, the floating CanLII
+// button, Case Marker on search results and titles, the popup. It also records when each piece
+// appeared, every layout shift, and frame times while scrolling. Screenshots go to the output
+// directory.
 // Usage: node tools/check-page-ui.cjs <pinpointer-corpus-dir> [output-dir]
 // (corpus layout: <provider>/<key>__<slug>/{capture.json, raw.html | rendered.html, styles.css})
 // Requires Playwright: set PLAYWRIGHT_MODULE to its path if it is not installed locally.
@@ -18,9 +22,10 @@ if (!corpus) { process.stderr.write('Usage: node tools/check-page-ui.cjs <corpus
 const out = path.resolve(outArg || fs.mkdtempSync(path.join(os.tmpdir(), 'lp-page-ui-')));
 fs.mkdirSync(out, { recursive: true });
 
-function samples(provider, limit) {
+function samples(provider, names) {
   const base = path.join(corpus, provider);
-  return fs.readdirSync(base).slice(0, limit).map((dir) => {
+  const dirs = fs.readdirSync(base);
+  return names.map((name) => dirs.find((dir) => dir.includes(name))).filter(Boolean).map((dir) => {
     const folder = path.join(base, dir);
     const capture = JSON.parse(fs.readFileSync(path.join(folder, 'capture.json'), 'utf8'));
     const file = ['raw.html', 'rendered.html'].map((name) => path.join(folder, name)).find((name) => fs.existsSync(name));
@@ -46,7 +51,8 @@ const log = (label, value) => { results.push({ label, value }); console.log(`${l
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (async () => {
-  const pages = [...samples('canlii', 2), ...samples('westlaw', 2), ...samples('lexis', 2)];
+  const pages = [...samples('canlii', ['Chouhan', 'Competition-Act']), ...samples('westlaw', ['Sommerer', 'Sparrow', 'Superior-Propane-Inc-Westlaw']),
+    ...samples('lexis', ['Cullinane', 'Superior-Propane-Inc-2002'])];
   const byUrl = new Map(pages.map((sample) => [sample.url.split('#')[0], sample]));
   const context = await chromium.launchPersistentContext('', {
     headless: true, channel: 'chromium', viewport: { width: 1360, height: 900 },
@@ -74,100 +80,161 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     await sleep(800);
     log('engine host open', await worker.evaluate(() => chrome.offscreen.hasDocument()));
 
+    // Timestamps (ms since navigation start) of the first paint, DOMContentLoaded and each piece of
+    // page UI, and every layout shift, recorded from before the page's first byte.
+    await context.addInitScript(() => {
+      const seen = window.__lpSeen = {};
+      window.__lpShifts = [];
+      const describe = (node) => !node ? '?' : node.nodeType === 1 ? `${node.tagName}#${node.id}.${String(node.className).slice(0, 30)}` : `text in ${node.parentElement?.tagName}#${node.parentElement?.id}`;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.hadRecentInput) continue;
+          window.__lpShifts.push(entry.value);
+          (window.__lpShiftSources ||= []).push(`${Math.round(entry.startTime)}ms ${entry.value.toFixed(4)}: ${entry.sources.map((source) => `${describe(source.node)} y${Math.round(source.previousRect.y)}->${Math.round(source.currentRect.y)}`).join(', ')}`);
+        }
+      }).observe({ type: 'layout-shift', buffered: true });
+      new PerformanceObserver((list) => { for (const entry of list.getEntries()) seen[entry.name] ??= Math.round(entry.startTime); })
+        .observe({ type: 'paint', buffered: true });
+      document.addEventListener('DOMContentLoaded', () => { seen.dcl = Math.round(performance.now()); });
+      const watch = { units: '.lp-unit', tools: '.lp-tools', crumb: '.lp-crumb-copy', circle: '.lpm-circle' };
+      new MutationObserver(() => {
+        for (const [name, selector] of Object.entries(watch)) if (seen[name] === undefined && document.querySelector(selector)) seen[name] = Math.round(performance.now());
+      }).observe(document, { childList: true, subtree: true });
+    });
+
+    const readClipboard = (page) => page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      const text = async (type) => item.types.includes(type) ? (await item.getType(type)).text() : '';
+      return { plain: await text('text/plain'), html: (await text('text/html')).replace(/^[\s\S]*?<body[^>]*>|<\/body>[\s\S]*$/gi, '').replace(/<!--(?:Start|End)Fragment-->/g, '') };
+    });
+    // Runs an action and waits for its toast; the clipboard and the time it took.
+    const copied = async (page, action) => {
+      await page.evaluate(() => { const toast = document.getElementById('legal-pinpointer-status'); if (toast) { toast.textContent = ''; toast.classList.remove('legal-pinpointer-toast--error'); } navigator.clipboard.writeText('-'); });
+      const at = Date.now();
+      await action();
+      await page.waitForFunction(() => /^Copied/.test(document.getElementById('legal-pinpointer-status')?.textContent || '')
+        || (document.getElementById('legal-pinpointer-status')?.classList.contains('legal-pinpointer-toast--error')
+          && document.getElementById('legal-pinpointer-status').textContent), null, { timeout: 8000 });
+      const ms = Date.now() - at;
+      const toast = await page.locator('#legal-pinpointer-status').innerText();
+      const clip = await readClipboard(page);
+      return { ms, toast: toast.slice(0, 120), plain: clip.plain.slice(0, 140), html: clip.html.slice(0, 160),
+        plainBreaks: (clip.plain.match(/\n/g) || []).length, ownMarkup: /lp-unit|data-lp-ui|lp-tools/.test(clip.html) };
+    };
+
     for (const sample of pages) {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       const started = Date.now();
-      await page.goto(sample.url, { waitUntil: 'domcontentloaded' });
-      const loaded = Date.now();
+      await page.goto(sample.url, { waitUntil: 'load' });
       const label = `${sample.provider} ${sample.name}`;
-      const ui = sample.provider === 'canlii' ? '#canlii-header > .lp-banner' : '[data-lp-ui] >> .card';
-      try {
-        await page.waitForSelector(ui, { timeout: 15_000 });
-        log(`${label}: title UI ms after DOMContentLoaded`, Date.now() - loaded);
-        log(`${label}: title text`, await page.locator(sample.provider === 'canlii' ? '.lp-banner-title' : '.card .name').first().innerText());
-      } catch (error) { log(`${label}: title UI`, `MISSING (${error.message.split('\n')[0]})`); }
-      if (sample.provider !== 'canlii') {
+      // Provider scripts are blocked here; stand in for their worst habits: a window click handler
+      // that swallows every click, and copy handlers that take over the clipboard.
+      await page.evaluate(() => {
+        window.addEventListener('click', (event) => event.stopImmediatePropagation(), true);
+        window.addEventListener('mousedown', (event) => event.stopImmediatePropagation(), true);
+        document.addEventListener('copy', (event) => { event.preventDefault(); event.stopImmediatePropagation(); }, true);
+      });
+      await sleep(sample.provider === 'canlii' ? 300 : 1500);
+      log(`${label}: timeline ms`, await page.evaluate(() => window.__lpSeen));
+      log(`${label}: layout shift (CLS)`, await page.evaluate(() => ({ cls: +window.__lpShifts.reduce((sum, value) => sum + value, 0).toFixed(4), sources: window.__lpShiftSources || [] })));
+
+      if (sample.provider === 'canlii') {
+        log(`${label}: header name`, await page.locator('#canlii-breadcrumbs > span:last-of-type [itemprop="name"]').innerText().catch(() => 'MISSING'));
+        if (await page.locator('.lp-crumb-copy').count()) {
+          log(`${label}: header copy link`, await copied(page, () => page.locator('.lp-crumb-copy').click()));
+        } else log(`${label}: header copy link`, 'MISSING');
+      } else {
         try {
-          await page.waitForSelector('.card .canlii:not(.pending)', { timeout: 15_000 });
-          const button = page.locator('.card .canlii');
-          log(`${label}: CanLII button`, `${await button.getAttribute('class')} ${await button.getAttribute('href') || ''}`);
-        } catch (_) { log(`${label}: CanLII button`, 'MISSING'); }
+          await page.waitForSelector('.lp-tools .lp-canlii:not(.pending)', { timeout: 15_000 });
+          const link = page.locator('.lp-tools .lp-canlii');
+          log(`${label}: title CanLII button`, `${await link.getAttribute('class')} ${await link.getAttribute('href') || ''}`);
+        } catch (_) { log(`${label}: title CanLII button`, 'MISSING'); }
+        log(`${label}: title text selectable`, await page.evaluate(() => {
+          const title = document.querySelector('#co_docHeaderTitleLine, #SS_DocumentTitle');
+          return title ? { text: title.innerText.trim().slice(0, 80), userSelect: getComputedStyle(title).userSelect, tools: Boolean(title.querySelector('.lp-tools')),
+            toolsInFlow: getComputedStyle(title.querySelector('.lp-tools') || title).position !== 'absolute' } : 'no title';
+        }));
+        log(`${label}: title Case Marker circle`, await page.locator('.lp-tools .lpm-circle').count());
+        if (await page.locator('.lp-tools .lp-link').isVisible()) log(`${label}: title copy link`, await copied(page, () => page.locator('.lp-tools .lp-link').click()));
+        else log(`${label}: title copy link`, 'not shown: the saved page does not display its document');
+        log(`${label}: Alt+X`, await copied(page, async () => { await page.locator('body').click({ position: { x: 5, y: 300 } }).catch(() => {}); await page.keyboard.press('Alt+X'); }));
       }
-      // The embedded controls of a paragraph in the middle of the document.
-      const markerSelector = sample.provider === 'canlii' ? 'a[name^="par"]' : sample.provider === 'westlaw' ? '[id^="crsw_paragraph_num_"]' : '[id^="PARA_"]';
-      const ready = await page.evaluate((selector) => {
-        const markers = [...document.querySelectorAll(selector)];
-        const marker = markers[Math.min(4, markers.length - 1)];
-        const block = marker && (marker.closest('p, li, div') || marker);
-        if (!block) return null;
-        block.scrollIntoView({ block: 'center' });
-        window.__lpBlock = block;
-        const after = markers[Math.min(5, markers.length - 1)];
-        window.__lpNext = after && after !== marker ? (after.closest('p, li, div') || after) : null;
-        window.__lpTop = block.getBoundingClientRect().top;
-        window.__lpText = document.body.innerText.length;
-        return true;
-      }, markerSelector);
-      if (ready) {
-        const mountStart = Date.now();
-        try {
-          await page.waitForFunction(() => window.__lpBlock.querySelector('.lp-unit') || window.__lpBlock.previousElementSibling?.matches?.('.lp-unit'), null, { timeout: 15_000 });
-          log(`${label}: controls mounted ms (model in idle)`, Date.now() - mountStart);
-          log(`${label}: controls`, await page.evaluate(() => ({
-            mounted: document.querySelectorAll('.lp-unit').length,
-            units: document.querySelectorAll(window.__lpSelector || 'p').length,
-            layoutShift: Math.round(window.__lpBlock.getBoundingClientRect().top - window.__lpTop),
-            innerTextChange: document.body.innerText.length - window.__lpText,
-            place: document.querySelector('.lp-unit')?.dataset.place
-          })));
-          await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-units.png`) });
-          const control = page.locator('.lp-unit').filter({ has: page.locator('button') }).nth(0);
-          const ownControl = await page.evaluateHandle(() => window.__lpBlock.querySelector('.lp-unit') || window.__lpBlock.previousElementSibling);
-          const copyWith = async (mode) => {
-            await page.evaluate(() => { const toast = document.getElementById('legal-pinpointer-status'); if (toast) toast.textContent = ''; });
-            const clickAt = Date.now();
-            const button = await ownControl.evaluateHandle((element, mode) => element.querySelector(`button[data-mode="${mode}"]`), mode);
-            await button.asElement().click();
-            await page.waitForFunction(() => /^Copied/.test(document.getElementById('legal-pinpointer-status')?.textContent || ''), null, { timeout: 5000 });
-            const elapsed = Date.now() - clickAt;
-            const clip = await page.evaluate(async () => {
-              const [item] = await navigator.clipboard.read();
-              const text = async (type) => item.types.includes(type) ? (await item.getType(type)).text() : '';
-              return { plain: await text('text/plain'), html: await text('text/html') };
-            });
-            const fragment = clip.html.replace(/^[\s\S]*?<body[^>]*>|<\/body>[\s\S]*$/gi, '').replace(/<!--(?:Start|End)Fragment-->/g, '');
-            return { ms: elapsed, toast: await page.locator('#legal-pinpointer-status').innerText(), plain: clip.plain.slice(0, 160),
-              plainBreaks: (clip.plain.match(/\n/g) || []).length, htmlBreaks: (fragment.match(/<(?:p|div|br|li|h\d)\b/gi) || []).length,
-              lpInHtml: /lp-unit|data-lp-ui/.test(fragment), html: fragment.slice(0, 200) };
-          };
-          for (const mode of ['pinpoint', 'quote']) log(`${label}: unit ${mode}`, await copyWith(mode));
-          // Select from this paragraph into the next: the same controls copy the range.
-          await page.evaluate(() => {
-            const block = window.__lpBlock, next = window.__lpNext;
-            const walk = (root, last) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let node, found = null;
-              while ((node = walker.nextNode())) if (node.data.trim().length > 20 && !node.parentElement.closest('[data-lp-ui]')) { found = node; if (!last) break; } return found; };
-            const start = walk(block, false), end = walk(next || block, true);
-            const range = document.createRange();
-            range.setStart(start, Math.min(5, start.length)); range.setEnd(end, Math.min(20, end.length));
-            getSelection().removeAllRanges(); getSelection().addRange(range);
-          });
-          for (const mode of ['pinpoint', 'quote']) log(`${label}: selection ${mode}`, await copyWith(mode));
-          void control;
-          await page.evaluate(() => getSelection().removeAllRanges());
-        } catch (error) { log(`${label}: controls`, `MISSING (${error.message.split('\n')[0]})`); }
-      } else log(`${label}: controls`, 'no paragraph markers');
+
+      // Paragraph controls: count, then both buttons on a paragraph in the middle, with and
+      // without a selection spanning into the next paragraph.
+      const units = await page.evaluate(() => {
+        const controls = [...document.querySelectorAll('.lp-unit')];
+        const control = controls[Math.min(4, controls.length - 1)];
+        if (!control) return { controls: 0 };
+        control.scrollIntoView({ block: 'center' });
+        window.__lpControl = control;
+        window.__lpNextControl = controls[Math.min(5, controls.length - 1)];
+        return { controls: controls.length, place: control.dataset.place, kind: control.dataset.kind, locator: control.lpLocator };
+      });
+      log(`${label}: paragraph controls`, units);
+      if (units.controls && !await page.evaluate(() => window.__lpControl.getClientRects().length)) {
+        log(`${label}: paragraph controls`, 'not shown: the saved page does not display its document');
+      } else if (units.controls) {
+        await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-units.png`) });
+        // As a reader does: the pointer moves onto the button, then presses it.
+        const press = async (mode) => {
+          const box = await (await page.evaluateHandle((mode) => window.__lpControl.querySelector(`button[data-mode="${mode}"]`), mode)).asElement().boundingBox();
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 3 });
+          await page.mouse.down();
+          await page.mouse.up();
+        };
+        for (const mode of ['pinpoint', 'quote']) log(`${label}: unit ${mode}`, await copied(page, () => press(mode)));
+        await page.evaluate(() => {
+          const block = window.__lpControl.parentElement, next = window.__lpNextControl?.parentElement;
+          const walk = (root, last) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let node, found = null;
+            while ((node = walker.nextNode())) if (node.data.trim().length > 20 && !node.parentElement.closest('[data-lp-ui]')) { found = node; if (!last) break; } return found; };
+          const start = walk(block, false), end = walk(next && next !== block ? next : block, true) || start;
+          const range = document.createRange();
+          range.setStart(start, Math.min(5, start.length)); range.setEnd(end, Math.min(20, end.length));
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+        });
+        for (const mode of ['pinpoint', 'quote']) log(`${label}: selection ${mode}`, await copied(page, () => press(mode)));
+        log(`${label}: selection Ctrl+X`, await copied(page, () => page.keyboard.press('Control+X')));
+        await page.evaluate(() => getSelection().removeAllRanges());
+      }
+
+      // Scrolling does no work: long tasks and frame times while scrolling the whole document.
+      log(`${label}: scroll`, await page.evaluate(async () => {
+        let long = 0;
+        const observer = new PerformanceObserver((list) => { for (const entry of list.getEntries()) long += entry.duration; });
+        observer.observe({ type: 'longtask' });
+        const times = [];
+        let last = performance.now();
+        scrollTo(0, 0);
+        for (let step = 0; step < 80; step += 1) {
+          document.scrollingElement.scrollTop += 200;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          const now = performance.now();
+          times.push(now - last);
+          last = now;
+        }
+        observer.disconnect();
+        times.sort((a, b) => a - b);
+        return { p50: Math.round(times[40]), p95: Math.round(times[76]), longTaskMs: Math.round(long) };
+      }));
       if (sample.provider !== 'canlii') {
-        log(`${label}: Case Marker circle in title block`, await page.locator('[data-lp-ui] .lpm-circle').count());
-        await page.evaluate(() => { scrollTo(0, 0); const toast = document.getElementById('legal-pinpointer-status'); if (toast) toast.textContent = ''; });
-        await page.locator('[data-lp-ui] >> .card .actions button').click();
-        await page.waitForFunction(() => /^Copied/.test(document.getElementById('legal-pinpointer-status')?.textContent || ''), null, { timeout: 5000 });
-        log(`${label}: title block Copy link`, await page.evaluate(async () => (await (await (await navigator.clipboard.read())[0].getType('text/html')).text()).replace(/^[\s\S]*?<body[^>]*>|<\/body>[\s\S]*$/gi, '').replace(/<!--(?:Start|End)Fragment-->/g, '')));
+        await sleep(200);
+        log(`${label}: floating CanLII button after scrolling`, await page.evaluate(() => {
+          const host = [...document.documentElement.children].find((element) => element.shadowRoot?.querySelector('a'));
+          const link = host?.shadowRoot.querySelector('a');
+          return link ? `${link.className} ${link.getAttribute('href') || ''}` : 'none';
+        }));
       }
       await page.evaluate(() => scrollTo(0, 0));
-      await sleep(200);
+      await sleep(150);
       await page.screenshot({ path: path.join(out, `${sample.provider}-${sample.name.slice(0, 40)}-top.png`) });
+      if (sample.provider === 'canlii' && await page.locator('h1.main-title .lpm-circle').count()) {
+        await page.locator('h1.main-title .lpm-circle').click();
+        log(`${label}: title circle opens picker`, await page.locator('.lpm-picker:not([hidden])').count());
+        await page.keyboard.press('Escape');
+      }
       if (errors.length) log(`${label}: page errors`, errors.slice(0, 3));
       log(`${label}: total ms`, Date.now() - started);
       await page.close();
@@ -192,9 +259,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     await popup.setViewportSize({ width: 360, height: 640 });
     const popupStart = Date.now();
     await popup.goto(`chrome-extension://${extensionId}/popup.html`);
-    await popup.waitForSelector('#doc-kind');
+    await popup.waitForSelector('.tabs [aria-selected="true"]');
     log('popup ms to first paint', Date.now() - popupStart);
-    for (const tab of ['copy', 'marker', 'settings']) {
+    log('popup tabs (first is the default)', await popup.evaluate(() => [...document.querySelectorAll('.tabs [data-tab]')].map((tab) => `${tab.dataset.tab}${tab.getAttribute('aria-selected') === 'true' ? '*' : ''}`)));
+    log('popup scrollbar space reserved', await popup.evaluate(() => getComputedStyle(document.documentElement).scrollbarGutter));
+    for (const tab of ['marker', 'copy', 'settings']) {
       await popup.click(`.tabs [data-tab="${tab}"]`);
       if (tab === 'marker') {
         await popup.click('#add-folder'); await popup.keyboard.type('Charter'); await popup.keyboard.press('Enter');

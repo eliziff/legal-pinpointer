@@ -35,30 +35,16 @@
     {
       "matches": [
         "https://www.canlii.org/*",
-        "https://canlii.org/*"
-      ],
-      "js": [
-        "marker.js"
-      ],
-      "css": [
-        "marker.css"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
+        "https://canlii.org/*",
         "https://advance.lexis.com/document/*",
         "https://advance.lexis.com/search/*",
         "https://nextcanada.westlaw.com/Document/*",
         "https://www.nextcanada.westlaw.com/Document/*"
       ],
       "js": [
-        "marker.js"
+        "early.js"
       ],
-      "css": [
-        "marker.css"
-      ],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     },
     {
       "matches": [
@@ -81,7 +67,7 @@
       "css": [
         "content.css"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_end"
     },
     {
       "matches": [

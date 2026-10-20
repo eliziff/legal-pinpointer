@@ -25,49 +25,81 @@
   display: none !important;
 }
 
-/* Copy controls on each paragraph and provision: out of flow at the unit's start (so the page's
-   layout and text never change), no text of their own (so nothing they hold is ever copied). */
+/* Copy controls on each paragraph and provision. Each is a zero-size float at the unit's start: it
+   takes no room, so no line of the page moves, and it is painted with the text it sits beside, with
+   no layer of its own (nothing here is positioned, translucent, masked or contained), so hundreds of
+   them cost scrolling nothing. They hold no text, so nothing they show is ever copied. */
 .lp-unit {
   all: initial !important;
-  position: absolute !important;
-  z-index: 3 !important;
-  display: inline-flex !important;
+  float: left !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: flex-start !important;
   gap: 1px !important;
-  margin: 0 0 0 -62px !important;
-  opacity: 0.42 !important;
-  transition: opacity 90ms ease-out !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: visible !important;
   user-select: none !important;
   -webkit-user-select: none !important;
-  contain: layout style !important;
+}
+
+/* The hovered unit's control rises above the page (a provider's positioned text can cover the
+   margin it sits in): one control at a time has a layer of its own, never hundreds. */
+:hover > .lp-unit,
+.lp-unit:hover {
+  position: relative !important;
+  z-index: 2147483000 !important;
+}
+
+/* In a flex or grid container a float is an item, so there the control is out of flow instead. */
+.lp-unit[data-flow="absolute"] {
+  float: none !important;
+  position: absolute !important;
+  z-index: 2147483000 !important;
 }
 
 .lp-unit[data-place="column"] {
   flex-direction: column !important;
-  margin: 0 0 0 -32px !important;
+  justify-content: flex-start !important;
+  align-items: flex-end !important;
 }
 
 .lp-unit[data-place="above"] {
-  margin: -27px 0 0 -2px !important;
-}
-
-:hover > .lp-unit,
-.lp-unit:hover,
-.lp-unit:focus-within {
-  opacity: 1 !important;
+  justify-content: flex-start !important;
+  margin-top: -27px !important;
 }
 
 .lp-unit > button {
   all: initial !important;
-  position: relative !important;
   display: grid !important;
+  flex: none !important;
   place-items: center !important;
   width: 25px !important;
   height: 25px !important;
   border-radius: 6px !important;
-  color: #6f7d76 !important;
+  color: #b3bdb8 !important;
   cursor: pointer !important;
   font: 600 16px/1 Georgia, "Times New Roman", serif !important;
-  transition: background-color 70ms, color 70ms !important;
+}
+
+.lp-unit > .lp-unit-quote {
+  margin-right: calc(10px + var(--lp-shift, 0px)) !important;
+  font-size: 20px !important;
+}
+
+.lp-unit[data-place="column"] > .lp-unit-quote,
+.lp-unit[data-place="column"] > .lp-unit-pin {
+  margin-right: calc(4px + var(--lp-shift, 0px)) !important;
+}
+
+.lp-unit[data-place="above"] > .lp-unit-quote {
+  margin-right: 0 !important;
+}
+
+:hover > .lp-unit > button,
+.lp-unit:hover > button,
+.lp-unit > button:focus-visible {
+  color: #66766e !important;
 }
 
 .lp-unit > button:hover {
@@ -85,22 +117,7 @@
 }
 
 .lp-unit > button::before {
-  display: block !important;
-  width: 15px !important;
-  height: 15px !important;
-  background: currentColor !important;
-  content: "" !important;
-  -webkit-mask: var(--lp-icon) center / contain no-repeat !important;
-  mask: var(--lp-icon) center / contain no-repeat !important;
-}
-
-.lp-unit > .lp-unit-pin::before {
-  width: auto !important;
-  height: auto !important;
-  background: none !important;
   content: "\00b6" !important;
-  -webkit-mask: none !important;
-  mask: none !important;
 }
 
 .lp-unit[data-kind="section"] > .lp-unit-pin::before,
@@ -115,27 +132,221 @@
   font-style: italic !important;
 }
 
-.lp-unit > .lp-unit-quote {
-  --lp-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 9.5h3.2V13H3zM3 9.5C3 6.2 4.2 4.4 6.4 3.6M9.8 9.5H13V13H9.8zM9.8 9.5c0-3.3 1.2-5.1 3.4-5.9'/%3E%3C/svg%3E") !important;
+.lp-unit > .lp-unit-quote::before {
+  content: "\201c" !important;
+  margin-top: 8px !important;
 }
 
-.lp-unit > button.done {
+.lp-unit > button.done,
+.lp-unit > button.done:hover {
   color: #177040 !important;
 }
 
 .lp-unit > button.done::before {
-  width: auto !important;
-  height: auto !important;
-  background: none !important;
   content: "\2713" !important;
-  -webkit-mask: none !important;
-  mask: none !important;
+  margin-top: 0 !important;
   font: 700 15px/1 system-ui, sans-serif !important;
 }
 
-.lp-unit > button::after {
+/* The one tooltip the controls share, in Pinpointer's fixed layer. */
+.lp-tip {
+  all: initial !important;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  padding: 5px 8px !important;
+  border-radius: 6px !important;
+  background: #17241e !important;
+  color: #ffffff !important;
+  font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  white-space: nowrap !important;
+  pointer-events: none !important;
+}
+
+.lp-tip[hidden] {
+  display: none !important;
+}
+
+/* CanLII: the breadcrumbs fill the header's free width from the first paint, on one line, so the
+   document's name can replace the last crumb without the header changing size or anything moving. */
+#canlii-breadcrumbs {
+  flex: 1 1 0 !important;
+  flex-wrap: nowrap !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+#canlii-breadcrumbs > span:last-of-type {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex: 0 1 auto !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+#canlii-breadcrumbs > span:last-of-type > [itemprop="name"] {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  user-select: text !important;
+}
+
+.lp-crumb-copy,
+.lp-tools > .lp-tool {
+  all: initial !important;
+  position: relative !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  flex: 0 0 auto !important;
+  box-sizing: border-box !important;
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 6px !important;
+  color: #5f6f68 !important;
+  cursor: pointer !important;
+  transition: background-color 70ms, color 70ms !important;
+}
+
+/* Taller than the breadcrumb line it sits in, so it takes no height of its own. */
+.lp-crumb-copy {
+  margin: -8px 0 !important;
+}
+
+.lp-crumb-copy:hover,
+.lp-tools > .lp-link:hover {
+  background: #e7f0eb !important;
+  color: #1a5139 !important;
+}
+
+.lp-crumb-copy::before,
+.lp-tools > .lp-link::before {
+  display: block !important;
+  width: 15px !important;
+  height: 15px !important;
+  background: currentColor !important;
+  content: "" !important;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.6 9.4a2.9 2.9 0 0 0 4.1 0l2.2-2.2a2.9 2.9 0 0 0-4.1-4.1l-.9.9M9.4 6.6a2.9 2.9 0 0 0-4.1 0L3.1 8.8a2.9 2.9 0 0 0 4.1 4.1l.9-.9'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.6 9.4a2.9 2.9 0 0 0 4.1 0l2.2-2.2a2.9 2.9 0 0 0-4.1-4.1l-.9.9M9.4 6.6a2.9 2.9 0 0 0-4.1 0L3.1 8.8a2.9 2.9 0 0 0 4.1 4.1l.9-.9'/%3E%3C/svg%3E") center / contain no-repeat !important;
+}
+
+.lp-crumb-copy.done,
+.lp-tools > .lp-link.done {
+  color: #177040 !important;
+}
+
+.lp-crumb-copy.done::before,
+.lp-tools > .lp-link.done::before {
+  width: auto !important;
+  height: auto !important;
+  background: none !important;
+  -webkit-mask: none !important;
+  mask: none !important;
+  content: "\2713" !important;
+  font: 700 14px/1 system-ui, sans-serif !important;
+}
+
+/* Westlaw and Lexis: the native title as plain, wrapping, selectable text (on by default, from the
+   first paint; early.js marks <html> with lp-raw-titles when the setting is off). */
+html:not(.lp-raw-titles) #co_docHeaderTitleLine,
+html:not(.lp-raw-titles) #co_docHeaderTitleLine *,
+html:not(.lp-raw-titles) #SS_DocumentTitle,
+html:not(.lp-raw-titles) .documentheadertitle h1 {
+  max-width: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  user-select: text !important;
+  -webkit-user-drag: none !important;
+}
+
+html:not(.lp-raw-titles) #co_docHeaderTitleLine a {
+  color: inherit !important;
+  text-decoration: none !important;
+  cursor: text !important;
+}
+
+html:not(.lp-raw-titles) #co_documentStatusIcons,
+html:not(.lp-raw-titles) #crsw_legalMemoIcon {
+  display: none !important;
+}
+
+/* The title's tools (CanLII or court site, Case Marker, copy link): out of flow at the end of the
+   title's text, so the title and everything after it stay exactly where they are. */
+.lp-tools {
+  all: initial !important;
   position: absolute !important;
-  bottom: calc(100% + 6px) !important;
+  z-index: 3 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 0 0 12px !important;
+  white-space: nowrap !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.lp-tools > .lp-canlii {
+  border: 1px solid #d5dee6 !important;
+  background: #fff !important;
+}
+
+.lp-tools > .lp-canlii[hidden] {
+  display: none !important;
+}
+
+.lp-tools > .lp-canlii::before {
+  display: block !important;
+  width: 16px !important;
+  height: 16px !important;
+  background: var(--lp-canlii) center / contain no-repeat !important;
+  content: "" !important;
+}
+
+.lp-tools > .lp-canlii.site::before {
+  background-image: var(--lp-court) !important;
+}
+
+.lp-tools > .lp-canlii.live:hover {
+  border-color: #e2a19c !important;
+  box-shadow: 0 2px 6px rgb(187 33 25 / 18%) !important;
+}
+
+.lp-tools > .lp-canlii.site:hover {
+  border-color: #9db3c6 !important;
+  box-shadow: 0 2px 6px rgb(61 90 115 / 18%) !important;
+}
+
+.lp-tools > .lp-canlii.dead {
+  filter: grayscale(1) !important;
+  opacity: 0.42 !important;
+  cursor: default !important;
+}
+
+.lp-tools > .lp-canlii.pending {
+  filter: grayscale(1) !important;
+  opacity: 0.25 !important;
+  cursor: default !important;
+}
+
+/* The circle's place is kept from the start, so nothing beside it moves when it arrives. */
+.lp-tools > .lp-tool-marker {
+  all: initial !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 22px !important;
+  height: 22px !important;
+}
+
+.lp-tools > .lp-tool-marker[hidden] {
+  display: none !important;
+}
+
+.lp-crumb-copy::after,
+.lp-tools > .lp-tool::after {
+  position: absolute !important;
+  top: calc(100% + 6px) !important;
   left: 50% !important;
   z-index: 4 !important;
   padding: 5px 8px !important;
@@ -151,89 +362,14 @@
   transition: opacity 80ms !important;
 }
 
-.lp-unit > button:hover::after {
+.lp-crumb-copy:hover::after,
+.lp-tools > .lp-tool:hover::after {
   opacity: 1 !important;
   transition-delay: 300ms !important;
 }
 
-/* CanLII: the document's name inside CanLII's own sticky header. */
-#canlii-header > .lp-banner {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  padding: 4px 0 6px;
-}
-
-#canlii-header > .lp-banner .lp-banner-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  color: inherit;
-  font-size: 16.5px;
-  font-weight: 600;
-  line-height: 1.35;
-  user-select: text;
-}
-
-#canlii-header > .lp-banner .lp-banner-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 6px;
-}
-
-#canlii-header > .lp-banner button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  margin: 0;
-  padding: 0 10px;
-  border: 1px solid var(--gray-300, #cdd3d0);
-  border-radius: 7px;
-  background: var(--gray-50, #ffffff);
-  color: var(--main-link-color, #0b4f8a);
-  font: 600 12.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif;
-  cursor: pointer;
-  transition: border-color 80ms, background 80ms;
-}
-
-#canlii-header > .lp-banner button:hover {
-  border-color: var(--main-link-color, #0b4f8a);
-}
-
-#canlii-header > .lp-banner button.done {
-  color: #187243;
-  border-color: #7fb597;
-}
-
-/* Westlaw and Lexis: the native title as plain, wrapping, selectable text. */
-html.lp-clean-titles #co_docHeaderTitleLine,
-html.lp-clean-titles #co_docHeaderTitleLine *,
-html.lp-clean-titles .documentheadertitle h1 {
-  max-width: none !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  user-select: text !important;
-  -webkit-user-drag: none !important;
-}
-
-html.lp-clean-titles #co_docHeaderTitleLine a {
-  color: inherit !important;
-  text-decoration: none !important;
-  cursor: text !important;
-}
-
-html.lp-clean-titles #co_documentStatusIcons,
-html.lp-clean-titles #crsw_legalMemoIcon {
-  display: none !important;
-}
-
 @media print {
-  #canlii-header > .lp-banner,
+  .lp-crumb-copy,
+  .lp-tools,
   .lp-unit { display: none !important; }
 }

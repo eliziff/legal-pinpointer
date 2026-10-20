@@ -2,6 +2,8 @@
 
 `canlii-legislation.tsv` contains legislation identifiers, titles, database identifiers, and document types derived from a local CanLII metadata snapshot. It contains no legislative text. CanLII is the source: <https://www.canlii.org/>.
 
+`canlii-case-aliases.tsv.gz` and `case-court-sites.tsv.gz` contain citation keys, citations and court-site document URLs derived from the A2AJ open Canadian case-law metadata (Access to Algorithmic Justice, <https://a2aj.ca/>), joined to CanLII case identifiers. They contain no decision text; the decisions remain on CanLII and the courts' own sites.
+
 `legal-structure.wasm` contains the `legal-structure` parser from <https://github.com/eliziff/legal-structure-parser>, used under the MIT License.
 
 ```text
@@ -28,16 +30,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-`vendor/rerank/` (fetched and SHA-256 verified by `npm run fetch:rerank`, not committed) contains
-`onnxruntime-web` 1.30.0 (<https://github.com/microsoft/onnxruntime>, MIT License, Copyright (c)
-Microsoft Corporation), the fp16 ONNX export (<https://huggingface.co/Xenova/ms-marco-MiniLM-L-4-v2>)
-of `cross-encoder/ms-marco-MiniLM-L4-v2` (<https://huggingface.co/cross-encoder/ms-marco-MiniLM-L4-v2>,
-Apache License 2.0) and the int8 ONNX export (<https://huggingface.co/Xenova/ms-marco-TinyBERT-L-2-v2>)
-of `cross-encoder/ms-marco-TinyBERT-L2-v2` (<https://huggingface.co/cross-encoder/ms-marco-TinyBERT-L2-v2>,
-Apache License 2.0).
-
 ## CanLII logo
 
-The CanLII button in `page-ui.js` shows the CanLII wordmark (from canlii.org's page header, with the
+The CanLII button in `page-ui.js` shows the maple leaf of the CanLII wordmark (from canlii.org's page header, with the
 anniversary numerals removed). CanLII and its logo are trademarks of the Federation of Law Societies
 of Canada; the logo is used only to identify links to CanLII.

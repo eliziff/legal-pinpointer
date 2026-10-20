@@ -6,42 +6,18 @@
   <title>Legal Pinpointer</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body data-tab="copy">
+<body data-tab="marker">
   <header class="top">
     <div class="brand"><span class="logo" aria-hidden="true">¶</span><span>Legal Pinpointer</span></div>
     <nav class="tabs" role="tablist" aria-label="Sections">
-      <button type="button" role="tab" data-tab="copy" aria-selected="true">Copy</button>
-      <button type="button" role="tab" data-tab="marker" aria-selected="false">Marker</button>
+      <button type="button" role="tab" data-tab="marker" aria-selected="true">Marker</button>
+      <button type="button" role="tab" data-tab="copy" aria-selected="false">Copy</button>
       <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
     </nav>
   </header>
 
   <main>
-    <section class="panel" data-panel="copy" role="tabpanel">
-      <div class="doc" id="doc">
-        <p class="doc-kind" id="doc-kind">Checking this page…</p>
-        <p class="doc-cite" id="doc-cite"></p>
-      </div>
-      <div class="grid">
-        <button type="button" class="action primary" data-copy="pinpoint" disabled><span>Pinpoint</span><kbd>Ctrl X</kbd></button>
-        <button type="button" class="action primary" data-copy="quote" disabled><span>Quote</span><kbd>Ctrl ⇧ X</kbd></button>
-        <button type="button" class="action" data-copy="citation" disabled><span>Citation</span><kbd>Alt X</kbd></button>
-        <button type="button" class="action canlii" id="open-canlii" disabled><span>Open in CanLII</span><kbd>Alt C</kbd></button>
-      </div>
-      <div class="segmented" role="radiogroup" aria-label="Pinpoint format">
-        <label><input type="radio" name="pinpointStyle" value="full"><span>at paras 12–14</span></label>
-        <label><input type="radio" name="pinpointStyle" value="bare"><span>12–14</span></label>
-      </div>
-      <h2 class="label">Search &amp; links</h2>
-      <div class="list">
-        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_FIND"><span>Tab Search — search this window</span><kbd>Ctrl ⇧ S</kbd></button>
-        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_CANLII_SEARCH"><span>CanLII text search</span><kbd>Alt ⇧ S</kbd></button>
-        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_PDF_LINK"><span>Link to copied text (PDFs)</span><kbd>Ctrl ⇧ F</kbd></button>
-      </div>
-      <p class="hint" id="shortcut-hint" hidden></p>
-    </section>
-
-    <section class="panel" data-panel="marker" role="tabpanel" hidden>
+    <section class="panel" data-panel="marker" role="tabpanel">
       <div class="project">
         <select id="project" aria-label="Project"></select>
         <button type="button" class="icon" data-project="add" title="New project">+</button>
@@ -64,6 +40,30 @@
         </div>
         <ol id="viewer-list"></ol>
       </div>
+    </section>
+
+    <section class="panel" data-panel="copy" role="tabpanel" hidden>
+      <div class="doc" id="doc">
+        <p class="doc-kind" id="doc-kind">Checking this page…</p>
+        <p class="doc-cite" id="doc-cite"></p>
+      </div>
+      <div class="grid">
+        <button type="button" class="action primary" data-copy="pinpoint" disabled><span>Pinpoint</span><kbd>Ctrl X</kbd></button>
+        <button type="button" class="action primary" data-copy="quote" disabled><span>Quote</span><kbd>Ctrl ⇧ X</kbd></button>
+        <button type="button" class="action" data-copy="citation" disabled><span>Citation</span><kbd>Alt X</kbd></button>
+        <button type="button" class="action canlii" id="open-canlii" disabled><span>Open in CanLII</span><kbd>Alt C</kbd></button>
+      </div>
+      <div class="segmented" role="radiogroup" aria-label="Pinpoint format">
+        <label><input type="radio" name="pinpointStyle" value="full"><span>at paras 12–14</span></label>
+        <label><input type="radio" name="pinpointStyle" value="bare"><span>12–14</span></label>
+      </div>
+      <h2 class="label">Search &amp; links</h2>
+      <div class="list">
+        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_FIND"><span>Tab Search — search this window</span><kbd>Ctrl ⇧ S</kbd></button>
+        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_CANLII_SEARCH"><span>CanLII text search</span><kbd>Alt ⇧ S</kbd></button>
+        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_PDF_LINK"><span>Link to copied text (PDFs)</span><kbd>Ctrl ⇧ F</kbd></button>
+      </div>
+      <p class="hint" id="shortcut-hint" hidden></p>
     </section>
 
     <section class="panel" data-panel="settings" role="tabpanel" hidden>
