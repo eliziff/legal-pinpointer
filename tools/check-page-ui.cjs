@@ -156,6 +156,28 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
           return title ? { text: title.innerText.trim().slice(0, 80), userSelect: getComputedStyle(title).userSelect, tools: Boolean(title.querySelector('.lp-tools')),
             toolsInFlow: getComputedStyle(title.querySelector('.lp-tools') || title).position !== 'absolute' } : 'no title';
         }));
+        // Selecting the title: a drag from its first character that overshoots past its end, and a
+        // triple-click, each select the title and nothing else, and the page stays where it is.
+        const titleBox = await page.evaluate(() => {
+          const title = document.querySelector('#co_docHeaderTitleLine, #SS_DocumentTitle');
+          if (!title || !title.getClientRects().length) return null;
+          title.scrollIntoView({ block: 'center' });
+          const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+          let first = null, last = null;
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.data.trim() && !node.parentElement.closest('[data-lp-ui]')) { first ||= node; last = node; }
+          const range = document.createRange(); range.setStart(first, 0); range.setEnd(last, last.length);
+          const rects = [...range.getClientRects()];
+          return { x1: rects[0].left + 2, y1: rects[0].top + rects[0].height / 2, x2: rects.at(-1).right, y2: rects.at(-1).top + rects.at(-1).height / 2, text: title.innerText.trim() };
+        });
+        if (titleBox) {
+          const selected = () => page.evaluate(() => getSelection().toString().replace(/\s+/g, ' ').trim());
+          await page.mouse.move(titleBox.x1, titleBox.y1); await page.mouse.down();
+          await page.mouse.move(titleBox.x2 + 250, titleBox.y2 + 70, { steps: 10 }); await page.mouse.up();
+          const drag = await selected();
+          await page.mouse.click(titleBox.x1 + 6, titleBox.y1, { clickCount: 3 });
+          log(`${label}: title selection`, { drag, triple: await selected(), stayed: page.url() === sample.url });
+          await page.evaluate(() => { getSelection().removeAllRanges(); scrollTo(0, 0); });
+        }
         log(`${label}: title Case Marker circle`, await page.locator('.lp-tools .lpm-circle').count());
         if (await page.locator('.lp-tools .lp-link').isVisible()) log(`${label}: title copy link`, await copied(page, () => page.locator('.lp-tools .lp-link').click()));
         else log(`${label}: title copy link`, 'not shown: the saved page does not display its document');

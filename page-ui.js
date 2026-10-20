@@ -343,17 +343,34 @@
     floatVisibility();
   }
 
-  // The title made inert as a link: Westlaw's is a draggable self-link, so a press starts a drag
-  // and a click reloads the document.
+  // Westlaw's title is a draggable link back to the same document: a press starts a drag. Its clicks
+  // are stopped by early.js; here it stops being draggable.
   function tameTitle() {
-    if (provider !== 'westlaw' || !settings.cleanTitles) return;
-    for (const link of document.querySelectorAll('#co_docHeaderTitleLine a, #titleInfo a')) {
-      if (link.lpTamed) continue;
-      link.lpTamed = true;
-      link.draggable = false;
-      link.addEventListener('click', (event) => { if (settings.cleanTitles && !getSelection().isCollapsed) event.preventDefault(); }, true);
-    }
+    if (provider !== 'westlaw') return;
+    for (const link of document.querySelectorAll('#co_docHeaderTitleLine a, #titleInfo a')) link.draggable = !settings.cleanTitles;
   }
+
+  // A drag that starts in the title stays in it: overshooting the end (or the start) selects up to
+  // the title's last (or first) character, not the citation line and toolbars beyond.
+  let titleDrag = null;
+  const titlePress = (event) => {
+    titleDrag = settings.cleanTitles && event.button === 0 && !event.shiftKey ? event.target.closest?.(TITLES.join(', ')) || null : null;
+  };
+  // early.js reports every press, ahead of the page's own listeners.
+  globalThis.LegalPinpointerTitlePress = titlePress;
+  window.addEventListener('mouseup', () => { titleDrag = null; }, { capture: true, passive: true });
+  document.addEventListener('selectionchange', () => {
+    if (!titleDrag) return;
+    const selection = getSelection();
+    if (!selection.anchorNode || !titleDrag.contains(selection.anchorNode) || titleDrag.contains(selection.focusNode)) return;
+    const end = document.createRange();
+    end.selectNodeContents(titleDrag);
+    const tools = titleDrag.querySelector('.lp-tools');
+    if (tools) end.setEndBefore(tools);
+    const after = selection.anchorNode.compareDocumentPosition(selection.focusNode) & Node.DOCUMENT_POSITION_FOLLOWING;
+    if (after) selection.setBaseAndExtent(selection.anchorNode, selection.anchorOffset, end.endContainer, end.endOffset);
+    else selection.setBaseAndExtent(selection.anchorNode, selection.anchorOffset, end.startContainer, end.startOffset);
+  });
 
   function paintLink(link, current) {
     const url = current.canliiUrl || current.siteUrl || '';

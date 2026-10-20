@@ -49,4 +49,24 @@
       if (handler && handler(element, event) !== false) event.preventDefault();
     }, true);
   }
+
+  // Westlaw's title is a link back to the same document: the first click of a drag or a triple-click
+  // reloads the page, and its drag code takes the press. While titles are clean it is plain text:
+  // presses on it reach only the browser's own text selection.
+  // Presses reach page-ui.js (which keeps a drag that starts in the title inside it) before any
+  // page listener can swallow them.
+  if (top && !/canlii\.org$/.test(hostname)) {
+    window.addEventListener('mousedown', (event) => globalThis.LegalPinpointerTitlePress?.(event), { capture: true, passive: true });
+  }
+
+  if (top && /westlaw\.com$/.test(hostname)) {
+    const TITLE_LINK = '#co_docHeaderTitleLine a, #titleInfo a';
+    for (const type of ['mousedown', 'pointerdown', 'click', 'dblclick', 'auxclick', 'dragstart']) {
+      window.addEventListener(type, (event) => {
+        if (document.documentElement.classList.contains('lp-raw-titles') || !event.target.closest?.(TITLE_LINK)) return;
+        event.stopImmediatePropagation();
+        if (type === 'click' || type === 'dblclick' || type === 'auxclick' || type === 'dragstart') event.preventDefault();
+      }, true);
+    }
+  }
 })();
