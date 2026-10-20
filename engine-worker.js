@@ -12,6 +12,7 @@ let creating = null, hostKnown = false;
 
 async function ensureHost() {
   if (hostKnown) return;
+  if (creating) return creating;
   if (await chrome.offscreen.hasDocument()) { hostKnown = true; return; }
   creating ||= chrome.offscreen.createDocument({
     url: 'engine-host.html',
@@ -22,6 +23,8 @@ async function ensureHost() {
   await creating;
 }
 
+// A host that exists may still be loading its scripts (another request opened it a moment ago):
+// until it listens, a message has no receiver, so the request waits briefly and tries again.
 async function host(op, input) {
   for (let attempt = 0; ; attempt += 1) {
     await ensureHost();
@@ -31,10 +34,17 @@ async function host(op, input) {
       if (!reply.ok) throw Object.assign(new Error(reply.message), { fromHost: true });
       return reply.value;
     } catch (error) {
-      if (error.fromHost || attempt) throw error;
+      if (error.fromHost || attempt >= 40) throw error;
       hostKnown = false;
+      if (attempt) await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
+}
+
+// A decision page on a court's Lexum/Decisia site (Case Marker files it under its CanLII identity).
+function courtSiteSender(sender) {
+  return Boolean(sender && sender.id === chrome.runtime.id && sender.tab && sender.url
+    && LegalPinpointerCore.isCourtSiteUrl(String(sender.url).split(/[?#]/)[0]));
 }
 
 function validSender(sender) {
@@ -74,22 +84,46 @@ function legislationInput(input) {
   return input;
 }
 
+function clipboardInput(message) {
+  if (typeof message.plain !== 'string' || typeof message.html !== 'string' || message.plain.length + message.html.length > 4_000_000) {
+    throw new Error('The clipboard request is invalid or too large.');
+  }
+  return { op: 'write', plain: message.plain, html: message.html };
+}
+
 function caseInput(input) {
   const keys = input && Array.isArray(input.keys) ? input.keys : null;
   if (!keys || keys.length > 50 || keys.some((key) => typeof key !== 'string' || key.length > 200)) {
     throw new Error('The CanLII case request is invalid or too large.');
   }
-  return { keys };
+  return { keys, sites: input.sites === true };
 }
 
 const ROUTES = {
   LEGAL_PINPOINTER_CITATION_CALL: (message) => host('citation', citationInput(message)).then((result) => ({ ok: true, result })),
   LEGAL_PINPOINTER_DERIVE_STRUCTURE: (message) => host('derive', structureInput(message.input)),
   LEGAL_PINPOINTER_RESOLVE_LEGISLATION: (message) => host('legislation', legislationInput(message.input)).then((url) => ({ ok: true, url })),
-  LEGAL_PINPOINTER_RESOLVE_CASE: (message) => host('case', caseInput(message.input)).then((targets) => ({ ok: true, targets }))
+  LEGAL_PINPOINTER_RESOLVE_CASE: (message) => host('case', caseInput(message.input)).then(({ targets, sites }) => ({ ok: true, targets, sites })),
+  LEGAL_PINPOINTER_CLIPBOARD: (message) => host('clipboard', clipboardInput(message)).then(() => ({ ok: true })),
+  // A legal page started loading: open the engine host now, so its first answer is ready sooner.
+  LEGAL_PINPOINTER_WARM: () => host('ping').then(() => ({ ok: true }))
+};
+
+const SITE_ROUTES = {
+  LEGAL_PINPOINTER_CASE_IDENTITY: (message) => {
+    if (typeof message.text !== 'string' || message.text.length > 4000) throw new Error('The identity request is invalid.');
+    return host('identity', { text: message.text }).then((canliiUrl) => ({ ok: true, canliiUrl }));
+  }
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const siteRoute = message && SITE_ROUTES[message.type];
+  if (siteRoute) {
+    if (!courtSiteSender(sender)) return false;
+    Promise.resolve().then(() => siteRoute(message)).then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, message: error.message || 'Legal Pinpointer request failed.' }));
+    return true;
+  }
   const route = message && ROUTES[message.type];
   if (!route) return false;
   if (!validSender(sender)) {
@@ -172,6 +206,33 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.commands.onCommand.addListener((command, tab) => { if (command === 'pdf-fragment-link') pdfFragmentLink(tab); });
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.pdfFragments) syncMenus(); });
 chrome.runtime.onInstalled.addListener(syncMenus);
+
+// Case Marker is registered only while it is on, so a page never draws circles and then removes
+// them: they are placed as the page is parsed, before its first paint.
+const CASE_MARKER = {
+  id: 'legal-pinpointer-case-marker',
+  matches: [
+    'https://www.canlii.org/*', 'https://canlii.org/*',
+    'https://advance.lexis.com/document/*', 'https://advance.lexis.com/search/*',
+    'https://nextcanada.westlaw.com/Document/*', 'https://www.nextcanada.westlaw.com/Document/*',
+    'https://*.gc.ca/*/item/*', 'https://decisia.lexum.com/*/item/*', 'https://decisions.scc-csc.ca/*/item/*',
+    'https://coadecisions.ontariocourts.ca/*/item/*', 'https://decisions.cmac-cacm.ca/*/item/*', 'https://decisions.sct-trp.ca/*/item/*'
+  ],
+  js: ['marker.js'],
+  css: ['marker.css'],
+  runAt: 'document_start',
+  allFrames: true
+};
+
+async function syncCaseMarker() {
+  const { caseMarker } = await chrome.storage.local.get({ caseMarker: true });
+  const registered = (await chrome.scripting.getRegisteredContentScripts({ ids: [CASE_MARKER.id] })).length > 0;
+  if (caseMarker === false) { if (registered) await chrome.scripting.unregisterContentScripts({ ids: [CASE_MARKER.id] }); return; }
+  await (registered ? chrome.scripting.updateContentScripts([CASE_MARKER]) : chrome.scripting.registerContentScripts([CASE_MARKER]));
+}
+chrome.runtime.onInstalled.addListener(() => syncCaseMarker().catch(() => {}));
+chrome.runtime.onStartup.addListener(() => syncCaseMarker().catch(() => {}));
+chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.caseMarker) syncCaseMarker().catch(() => {}); });
 
 // The engine host asks to be closed once idle; the next request opens it again.
 chrome.runtime.onMessage.addListener((message, sender) => {

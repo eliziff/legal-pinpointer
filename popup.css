@@ -17,6 +17,9 @@
 
 * { box-sizing: border-box; }
 
+/* The scrollbar's space is always reserved, so a long tab never shifts or narrows the layout. */
+html { scrollbar-gutter: stable; }
+
 body { width: 360px; margin: 0; }
 
 button, input, select { font: inherit; color: inherit; }

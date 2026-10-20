@@ -53,9 +53,10 @@
   }
 
   // Document identity and structure live in the document root, <head> and the provider's title
-  // block. Toolbars, tooltips and menus elsewhere change constantly and must not force a re-parse.
-  const IDENTITY = 'h1, h2, title, meta, #co_docHeader, #citeInfo, .co_cites, #titleInfo, .crsw_prelim, .SS_DocumentHeader, '
-    + '#SS_DocumentTitle, .documentheadertitle, #title-container, .documentMeta, #metas-container';
+  // block. Toolbars, tooltips, menus and panels elsewhere (Lexis redraws headings in its side panels
+  // all the time) change constantly and must not force a re-parse.
+  const IDENTITY = 'title, meta, #co_docHeader, #citeInfo, .co_cites, #titleInfo, .crsw_prelim, .SS_DocumentHeader, '
+    + '#SS_DocumentTitle, .documentheadertitle, #title-container, h1.main-title, .documentMeta, #metas-container';
   const modelRoots = new Set(), invalidationListeners = new Set();
   function affectsModel(node) {
     if (!node || ownOverlay(node)) return false;
@@ -96,7 +97,19 @@
     }
   }
 
+  // Metadata (the citation, the CanLII link) is read again if the page changes while it is being
+  // read, and after three tries is used as read: a busy page must not make Alt+X fail.
   async function inspectPage(metadataOnly = false) {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await inspectOnce(metadataOnly, metadataOnly && attempt >= 3);
+      } catch (error) {
+        if (!metadataOnly || !error.documentChanged || attempt >= 3) throw error;
+      }
+    }
+  }
+
+  async function inspectOnce(metadataOnly, acceptChanged) {
     flushModels();
     const url = window.location.href, revision = documentRevision;
     const level = metadataOnly ? 'metadata' : 'structure';
@@ -111,10 +124,10 @@
         throw new Error('This page does not expose a supported legal document.');
       }
       flushModels();
-      if (revision !== documentRevision || url !== window.location.href) {
-        throw new Error('The document changed during this operation. Please try again.');
+      if (url !== window.location.href || (revision !== documentRevision && !acceptChanged)) {
+        throw Object.assign(new Error('The document changed during this operation. Please try again.'), { documentChanged: true });
       }
-      modelStamps.set(model, { revision, url });
+      modelStamps.set(model, { revision: documentRevision, url });
       modelRoots.add(model.root);
       return model;
     } catch (error) {
@@ -559,6 +572,8 @@
     return quote;
   }
 
+  // The async clipboard first; then the engine host's clipboard, which no page script can reach
+  // (Lexis and Westlaw intercept copy events on their pages); then a copy event here.
   async function clipboardWrite(payload) {
     if (navigator.clipboard && typeof navigator.clipboard.write === 'function' && typeof ClipboardItem === 'function') {
       try {
@@ -571,6 +586,9 @@
         // Some provider frames reject this API even with extension clipboard permission.
       }
     }
+    const hosted = await chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_CLIPBOARD', plain: payload.plain, html: payload.html })
+      .catch(() => null);
+    if (hosted && hosted.ok) return;
 
     let copied = false;
     const onCopy = (event) => {
@@ -657,7 +675,7 @@
       payload = { plain: target, html: anchorHtml(target, target) };
       message = 'Copied passage link';
     } else if (mode === 'citation') {
-      const target = model.canliiUrl || model.cleanUrl;
+      const target = model.canliiUrl || model.siteUrl || model.cleanUrl;
       payload = core.outputCitationLink(model.citation, target);
       message = `Copied citation: ${model.citation.plain}`;
     } else if (!model.structure || !model.structure.nodes.length) {
@@ -680,7 +698,7 @@
             : 'Copied passage with the page link: its opening words recur elsewhere on the page, so no link can single it out';
         fragmentSource = fragment;
       } else {
-        const target = model.canliiUrl || model.cleanUrl;
+        const target = model.canliiUrl || model.siteUrl || model.cleanUrl;
         payload = core.outputCitationLink(model.citation, target);
         message = `Copied page: ${model.citation.plain}`;
       }
@@ -711,7 +729,8 @@
       }
     }
 
-    assertCurrentModel(model);
+    // A citation is the document's, whatever else on the page changed meanwhile.
+    if (mode !== 'citation') assertCurrentModel(model);
     if (passage) return { ok: true, message, payload };
     await clipboardWrite(payload);
     rememberedFragment = fragmentSource
@@ -733,6 +752,7 @@
       documentType: model.documentType,
       citation: model.citation.plain,
       canliiAvailable: Boolean(model.canliiUrl),
+      siteUrl: model.siteUrl || '',
       structureKind: model.structure ? model.structure.kind : '',
       structureSource: model.structure ? model.structure.source : metadataOnly ? 'not-inspected' : 'none',
       structureCount: model.structure ? model.structure.nodes.length : metadataOnly ? null : 0,
@@ -830,12 +850,12 @@
     const pin=await pinpointMarkup(model,sourceInfo,[node],options.wording||settings.pinpointStyle,settings.linkFullTextFragmentPinpoint);
     let payload;
     if(mode==='link')payload={plain:target,html:anchorHtml(target,target)};
-    else if(mode==='citation')payload=core.outputCitationLink(model.citation,model.canliiUrl||model.cleanUrl);
+    else if(mode==='citation')payload=core.outputCitationLink(model.citation,model.canliiUrl||model.siteUrl||model.cleanUrl);
     else if(mode==='pinpoint')payload=pin;
     else if(mode==='quote'||mode==='source'){
       const quote=quoteMarkup(model,sourceInfo,range,[node]);
       if(mode==='quote')payload=quote;
-      else{const citation=core.outputCitationLink(model.citation,model.canliiUrl||model.cleanUrl);
+      else{const citation=core.outputCitationLink(model.citation,model.canliiUrl||model.siteUrl||model.cleanUrl);
         payload={plain:`${citation.plain} ${pin.plain}\n${quote.plain}`,html:`${citation.html} ${pin.html}<br>${quote.html}`};}
     }else throw new Error('Invalid copy action.');
     assertCurrentModel(model); return payload;
@@ -881,6 +901,17 @@
     return payload;
   }
 
+  // A copy control knows its element and locator; the full model maps it to the unit.
+  async function copyControl(element, locator, mode) {
+    const model = await inspectPage(false);
+    const nodes = model.structure?.nodes || [];
+    const node = nodes.find((candidate) => candidate.element === element)
+      || nodes.find((candidate) => candidate.locator === locator && candidate.element && (candidate.element.contains(element) || element.contains(candidate.element)))
+      || nodes.find((candidate) => candidate.locator === locator);
+    if (!node) throw new Error('This passage is no longer on the page.');
+    return copyUnit(model, node, mode);
+  }
+
   async function copyUnit(model, node, mode) {
     const selected = selectionIn(model);
     if (selected) return copyRange(model, selected, mode, null);
@@ -904,6 +935,7 @@
     unitAt: (model, target) => nodeForTarget(model, target),
     onInvalidate: (listener) => invalidationListeners.add(listener),
     copyUnit,
+    copyControl,
     copyPayload,
     copyCitation: () => copy('citation'),
     openCanlii,
@@ -930,13 +962,16 @@
     task.catch((error) => showToast(error.message || 'Legal Pinpointer could not complete the request.', true));
   }
 
+  // CanLII, else the court's own Lexum/Decisia page for the decision.
   async function openCanlii() {
     const model = await inspectPage(true);
-    if (!model.canliiUrl) throw new Error('No reliable CanLII version was detected.');
-    const target = new URL(model.canliiUrl);
-    if (target.protocol !== 'https:' || !['canlii.org', 'www.canlii.org'].includes(target.hostname.toLowerCase())) {
-      throw new Error('Legal Pinpointer refused an invalid CanLII navigation target.');
-    }
+    const url = model.canliiUrl || model.siteUrl;
+    if (!url) throw new Error('No reliable CanLII version was detected.');
+    const target = new URL(url);
+    const valid = target.protocol === 'https:' && (model.canliiUrl
+      ? ['canlii.org', 'www.canlii.org'].includes(target.hostname.toLowerCase())
+      : core.isCourtSiteUrl(target.href));
+    if (!valid) throw new Error('Legal Pinpointer refused an invalid navigation target.');
     window.location.assign(target.href);
   }
 

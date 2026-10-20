@@ -228,6 +228,11 @@
     return citationCall('canliiAliasTarget', { target: String(target || ''), language: language || 'en' });
   }
 
+  // A decision page on a court's Lexum/Decisia site (the CanLII fallback, from A2AJ metadata).
+  function isCourtSiteUrl(value) {
+    return /^https:\/\/(?:decisia\.lexum\.com|coadecisions\.ontariocourts\.ca|decisions?\.[a-z0-9-]+\.(?:gc\.)?ca)\/[a-z0-9-]+\/[a-z0-9-]+\/(?:en|fr)\/item\/\d+\/index\.do$/.test(String(value || ''));
+  }
+
   function canliiAnchorForLocator(kind, locator, canliiUrl) {
     const value = normalizeSpace(locator);
     if (kind === 'page') return makeTextFragment(`[page ${value}]`);
@@ -272,6 +277,7 @@
     canliiUrlForAliasTarget,
     canliiAnchorForLocator,
     canliiUrlForCitation,
+    isCourtSiteUrl,
     chooseCaseCitation,
     cleanPlatformTitle,
     cleanProviderUrl,

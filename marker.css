@@ -1,7 +1,8 @@
+/* A circle's box never depends on what is filed: the badge floats above it. */
 .lpm-wrap {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   margin-right: 8px;
   vertical-align: middle;
   user-select: none;
@@ -48,6 +49,10 @@
 }
 
 .lpm-badge {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 0;
+  z-index: 3;
   max-width: 160px;
   padding: 3px 8px;
   overflow: hidden;
@@ -64,6 +69,16 @@
 
 .lpm-title .lpm-circle {
   vertical-align: -6px;
+}
+
+/* In the title tools on Westlaw and Lexis: the size of the tools beside it. */
+.lp-tools .lpm-wrap {
+  margin: 0;
+}
+
+.lp-tools .lpm-circle {
+  width: 22px;
+  height: 22px;
 }
 
 .lpm-picker {

@@ -31,13 +31,13 @@ A current-page text-fragment URL in the clipboard has precedence over both selec
 
 ## On the page
 
-- **Copy buttons on every paragraph and section.** Each numbered paragraph or provision on CanLII, Westlaw and Lexis carries two small buttons in its margin: the pinpoint (`at para 12`, linked; Ctrl+X) and the pinpoint with its text (Ctrl+Shift+X). With text selected, they copy the selection instead, exactly as the hotkeys do (a range such as `at paras 12-14`, or a quote across paragraphs). Where the page has no margin, they sit in the space above the paragraph's first line. They hold no text and sit outside the page's layout, so selecting and copying the page itself is unaffected, and they exist only for paragraphs near the screen.
-- **CanLII's sticky header names the document.** The style of cause or statute name, as Pinpointer cites it, stays visible while scrolling, with a **Copy link** button (the same as Alt+X).
-- **Clean titles on Westlaw and Lexis.** A roomy, selectable title block (name, citation, and a **Copy link** button, the same as Alt+X) sits above the document, clear of the provider's toolbars. Westlaw's own title stops being a draggable link, so a press selects text instead of starting a drag, and it wraps instead of truncating.
-- **CanLII button.** A small square CanLII button (its maple leaf) at the left of the title block: in colour when a reliable CanLII version is known, greyed out when none is. It opens CanLII in a new tab; once the title scrolls away it rides in the bottom-left corner.
+- **Copy buttons on every paragraph and section.** Each numbered paragraph or provision on CanLII, Westlaw and Lexis carries two small buttons in its margin: the pinpoint (`at para 12`, linked; Ctrl+X) and the pinpoint with its text (Ctrl+Shift+X). With text selected, they copy the selection instead, exactly as the hotkeys do (a range such as `at paras 12-14`, or a quote across paragraphs). Where the page has no margin, they sit in the space above the paragraph's first line. They hold no text and take no room (zero-size floats beside the text, with no paint layer of their own), so nothing on the page moves, selecting and copying the page is unaffected, and scrolling costs nothing extra. They attach to the provider's own paragraph and section anchors as soon as the page has them, without waiting for the citation engine: the ones in view in the first frame, the rest in idle batches.
+- **CanLII's sticky header names the document.** The last breadcrumb in CanLII's header becomes the document's title (as CanLII prints it), with a **Copy link** button (the same as Alt+X), so it stays visible while scrolling. The breadcrumbs take the header's free width from the first paint, so the header never changes size.
+- **Clean titles on Westlaw and Lexis.** The provider's own title is made plain, wrapping, selectable text (Westlaw's stops being a draggable link, and its status icons are hidden); no second copy of it is added. At the end of the title, out of the page's flow, sit the CanLII button, the Case Marker circle and a **Copy link** button (the same as Alt+X). These styles are in place before the first paint.
+- **CanLII button.** A small square CanLII button (its maple leaf): in colour when a reliable CanLII version is known, greyed out when none is. When CanLII has no version but the decision is on its court's own Lexum/Decisia site (from packaged A2AJ metadata, never a live query), it shows a courthouse and opens that page instead; Alt+C and copied citation links fall back the same way. It opens in a new tab; once the title scrolls away it rides in the bottom-left corner.
 - **No selection menus.** Westlaw, Lexis and Practical Law stop opening their highlight/annotate/copy-with-reference menus when text is selected. Clicks on links, buttons and fields are untouched.
 
-The page controls reuse the content script's document model, built in idle time once the tab is shown (background tabs wait until they are opened). The citation engine runs in an offscreen document that opens on first use and closes after ten idle minutes.
+Nothing Pinpointer adds to a page moves it: every control is out of flow or fills space reserved before the first paint. Presses on its controls are taken by a window listener registered at `document_start`, before any provider script, so a provider's click, drag or copy handlers never swallow them; copies that a page blocks go through the engine document's clipboard. The full document model a copy needs is built only when a copy looks likely (the pointer on a Pinpointer control, a modifier key, or a selection), so a page that is only read never pays for it. The citation engine runs in an offscreen document that opens when a Westlaw or Lexis document starts loading (for the title's CanLII button) or on CanLII when a copy looks likely, and closes after ten idle minutes.
 
 ## Case Marker
 
@@ -74,8 +74,9 @@ Each window's panel searches that window; an ungrouped origin's Group scope is
 empty, not all ungrouped tabs. Chrome freezes and discards background tabs to
 save memory: a tab that has been read keeps its last reading and stays searchable
 while it sleeps, and opening one of its results wakes the tab, reads it again and
-then opens the same passage. A sleeping tab that was never read is reloaded in the
-background so it can be read (Settings → *Wake sleeping tabs*; at most 24 per panel).
+then opens the same passage. A sleeping tab that was never read is listed, not read;
+with Settings → *Wake sleeping tabs* (off by default) it is reloaded in the background
+so it can be read (at most 24 per panel).
 Restricted/unavailable pages and partial results are reported, not silently counted
 as zero-hit documents.
 
@@ -123,7 +124,9 @@ The manifest requests only:
 - `contextMenus`, for the right-click PDF link item;
 - HTTP/HTTPS host access, to search other open tabs without activating them;
 - content scripts on CanLII (documents, plus Case Marker on search pages), Lexis and
-  Westlaw document pages, and a selection-menu guard on Westlaw, Lexis and Practical Law.
+  Westlaw document pages, and a selection-menu guard on Westlaw, Lexis and Practical Law;
+  Case Marker is registered with `scripting` only while it is on, and also runs on courts'
+  Lexum/Decisia decision pages.
 
 Local search queries are not written to disk or sync. Navigation handles use
 Chrome's private RAM session storage. A deliberate cross-window handoff also
@@ -154,6 +157,12 @@ After refreshing the engine, audit the packaged CanLII legislation index:
 
 ```powershell
 npm run audit:legislation
+```
+
+Extend the reporter-alias to CanLII case index from A2AJ's citation table (every parallel citation of a decision whose neutral citation CanLII routes, such as the SCR citation of a neutral-era SCC decision) and rebuild `case-court-sites.tsv.gz`, the Lexum/Decisia fallback for decisions CanLII lacks:
+
+```powershell
+node .\tools\build-a2aj-case-index.cjs 'C:\path\to\a2aj.sqlite'
 ```
 
 Run focused tests:
