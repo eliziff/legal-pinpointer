@@ -21,7 +21,7 @@ for (const [key, rows] of byKey) {
     const resolved = legislation.resolve(index, row.title, key, 'en', { keys: [key], candidates: [] });
     if (resolved === legislation.rowUrl(row, 'en')) exact += 1;
     else if (!resolved) { ambiguous += 1; if (samples.length < 12) samples.push(`abstained: ${key} ${row.id} ${row.title}`); }
-    else if (resolved.includes(`/${row.id}/latest/`) || rows.some((other) => legislation.rowUrl(other, 'en') === resolved && other.title === row.title)) consolidated += 1;
+    else if (resolved.includes(`/${row.id}/latest/`) || rows.some((other) => legislation.rowUrl(other, 'en') === resolved && legislation.looseTitle(other.title) === legislation.looseTitle(row.title))) consolidated += 1;
     else { wrong += 1; if (samples.length < 12) samples.push(`other: ${key} ${row.id} -> ${resolved}`); }
   }
 }

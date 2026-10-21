@@ -1,4 +1,5 @@
 node_modules/
+/dist/
 lens-dist/
 lens/dist/
 runtime-validation.json

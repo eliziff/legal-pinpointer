@@ -7,7 +7,7 @@ const http = require('node:http');
 const path = require('node:path');
 const fs = require('node:fs');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const root = path.resolve(__dirname, '..');
+const root = path.resolve(process.env.PINPOINTER_EXTENSION_ROOT || path.join(__dirname, '..'));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('installed extension recovers stale sources and searches the tabs of its window', { timeout: 150_000 }, async () => {
