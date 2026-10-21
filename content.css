@@ -39,6 +39,9 @@
   width: 0 !important;
   height: 0 !important;
   contain: layout style size !important;
+  /* Its own compositing layer: placing controls repaints only the overlay, never the page's layer
+     (on a long document, re-recording the page's paint costs a whole frame). */
+  will-change: transform !important;
   user-select: none !important;
   -webkit-user-select: none !important;
 }
@@ -50,10 +53,12 @@
   contain: none !important;
 }
 
+/* Stacked in the overlay in page order, moved to their units by margins (page-ui.js): in normal
+   flow, so no control has a paint layer of its own. */
 .lp-unit {
   all: initial !important;
-  position: absolute !important;
   display: flex !important;
+  width: max-content !important;
   gap: 1px !important;
   user-select: none !important;
   -webkit-user-select: none !important;
