@@ -76,17 +76,29 @@
   });
 
   // ---------------------------------------------------------------------------
-  // Copy controls. One per unit element, inserted once; each holds two buttons (pinpoint, and
-  // pinpoint with text) that copy the selection when there is one, as the hotkeys do.
+  // Copy controls: two buttons beside each paragraph or provision (the pinpoint, and the pinpoint
+  // with its text), which copy the selection when there is one, as the hotkeys do.
+  //
+  // They live in one overlay: a zero-size, layout-contained box inserted once beside the document's
+  // text, so it scrolls with the text natively and nothing inside it can change the page's layout.
+  // Every unit's position is measured once, in a frame's own layout (and again only when the
+  // document changes size); only the units near the viewport have controls, recycled from a pool as
+  // the reader scrolls. A 5,000-section statute costs the same per frame as a short judgment, and
+  // scrolling never lays the document out again.
 
   const BLOCKS = new Set(['P', 'LI', 'DIV', 'BLOCKQUOTE', 'DD', 'DT', 'TD', 'TH', 'SECTION', 'ARTICLE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
   const KIND_LABEL = { paragraph: 'para', page: 'page', section: 's', rule: 'r', article: 'art', pilcrow: '¶', silcrow: '§' };
-  const controls = new Map(); // unit element -> control
-  let template = null, place = '', shift = 0, syncQueued = 0, unitObserver = null;
+  const NEAR = 1.5; // viewports above and below the screen whose units have controls
+  const WIDTH = { row: 61, column: 29, above: 0 }; // a control's width plus its gap to the text
+  const view = {
+    units: [], index: new WeakMap(), order: null, sortedTops: null, tops: null, lefts: null,
+    overlay: null, live: new Map(), pool: [], hot: null, place: '', shift: 0,
+    frame: 0, syncFrame: 0, syncTimer: 0, measureTimer: 0, resize: null, mutations: null
+  };
+  let template = null;
 
   // The room left of the text inside the nearest ancestor that clips it decides where controls sit:
   // a row in the margin, a narrow column, or a row in the space above the unit's first line.
-  // Read once per page, in the first frame, before any control is inserted.
   function placement(element, overhanging) {
     const left = element.getBoundingClientRect().left - overhanging;
     let edge = 0;
@@ -98,8 +110,8 @@
     return room >= 66 ? 'row' : room >= 34 ? 'column' : 'above';
   }
 
-  // How far a unit's first text starts left of the line start a control sits at (Westlaw hangs the
-  // paragraph number into the margin): the controls move left by as much. Read once, with placement.
+  // How far a unit's first text starts left of its box (Westlaw hangs the paragraph number into the
+  // margin): the controls move left by as much.
   function overhang(element) {
     const parent = BLOCKS.has(element.tagName) ? element : element.parentElement;
     if (!parent) return 0;
@@ -118,91 +130,193 @@
     return Number.isFinite(left) ? Math.min(80, Math.max(0, Math.round(lineStart - left))) : 0;
   }
 
-  function controlTemplate() {
-    if (template) return template;
-    template = document.createElement('span');
-    template.className = 'lp-unit';
-    template.setAttribute('data-lp-ui', '');
-    template.setAttribute('role', 'group');
-    template.contentEditable = 'false';
-    template.innerHTML = '<button type="button" class="lp-unit-pin" data-lp-action="unit" data-mode="pinpoint"></button>'
-      + '<button type="button" class="lp-unit-quote" data-lp-action="unit" data-mode="quote" data-tip="Copy with text (Ctrl+Shift+X)" aria-label="Copy pinpoint with text"></button>';
-    return template;
+  function control() {
+    if (!template) {
+      template = document.createElement('span');
+      template.className = 'lp-unit';
+      template.setAttribute('role', 'group');
+      template.innerHTML = '<button type="button" class="lp-unit-pin" data-lp-action="unit" data-mode="pinpoint"></button>'
+        + '<button type="button" class="lp-unit-quote" data-lp-action="unit" data-mode="quote" data-tip="Copy with text (Ctrl+Shift+X)" aria-label="Copy pinpoint with text"></button>';
+    }
+    return view.pool.pop() || template.cloneNode(true);
   }
 
-  // Reads the provider's anchors and inserts controls for new units. It runs in an animation frame,
-  // so its one layout read (where the text starts, which units are in view) is that frame's own
-  // layout, not an extra one. Each batch reads everything first and then writes, so a batch costs one
-  // style and layout pass: the units in view go in before this frame is painted, the rest in idle
-  // batches behind it.
-  const BATCH = 150;
-  let backlog = [], backlogTask = 0;
-
-  function syncUnits() {
-    syncQueued = 0;
-    if (!settings.unitCopyButtons) return;
-    let units;
-    try { units = providers.quickUnits(document, location); } catch (_) { return; }
-    for (const [element, control] of controls) if (!element.isConnected) { control.remove(); controls.delete(element); }
-    const queued = new Set(backlog.map((unit) => unit.element));
-    const fresh = units.filter((unit) => unit.element && unit.element.isConnected && !controls.has(unit.element) && !queued.has(unit.element));
-    if (!fresh.length) return;
-    if (!place) {
-      shift = overhang(fresh[0].element);
-      place = placement(fresh[0].element, shift);
-      if (place === 'above') shift = 0;
+  // Where the overlay goes so that it scrolls with the text and changes nothing on the page. When the
+  // page itself scrolls (CanLII, Westlaw): out of flow on <html>, in document coordinates, with its
+  // layout contained. When the text scrolls inside a box (an app's document pane): as the box's first
+  // child, a zero-size block (a scroll box starts a new formatting context, and margins collapse
+  // through an empty block, so nothing moves) that the box clips and scrolls like the text.
+  function scrollBox(element) {
+    for (let node = element.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) return node;
     }
-    // The first unit whose bottom is in or below the viewport (units are in document order).
-    let low = 0, high = fresh.length;
+    return null;
+  }
+
+  function mountOverlay(first) {
+    const box = scrollBox(first);
+    const overlay = document.createElement('div');
+    overlay.className = 'lp-units';
+    overlay.setAttribute('data-lp-ui', '');
+    overlay.contentEditable = 'false';
+    if (box) {
+      overlay.dataset.in = 'box';
+      box.insertBefore(overlay, box.firstChild);
+    } else document.documentElement.appendChild(overlay);
+    view.overlay = overlay;
+    view.resize?.disconnect();
+    view.resize = new ResizeObserver(() => scheduleMeasure());
+    view.resize.observe(first.closest('p, li, div, section, article')?.parentElement || document.body);
+    view.resize.observe(document.body);
+    return true;
+  }
+
+  // Reads the provider's anchors; when they changed, measures them all. Runs in an animation frame,
+  // so the reads use that frame's own layout.
+  function syncUnits() {
+    view.syncFrame = 0;
+    if (!settings.unitCopyButtons) return;
+    let found;
+    try { found = providers.quickUnits(document, location); } catch (_) { return; }
+    const units = [], seen = new Set();
+    for (const unit of found) {
+      if (!unit.element?.isConnected || seen.has(unit.element)) continue; // two units on one element: the first keeps it
+      seen.add(unit.element);
+      units.push(unit);
+    }
+    const same = units.length === view.units.length && units.every((unit, i) => unit.element === view.units[i].element);
+    if (same && view.overlay?.isConnected) return;
+    for (const node of view.live.values()) node.remove();
+    view.pool.push(...view.live.values());
+    view.live.clear();
+    view.units = units;
+    view.index = new WeakMap(units.map((unit, i) => [unit.element, i]));
+    if (!units.length) return;
+    if (!view.overlay?.isConnected && !mountOverlay(units[0].element)) return;
+    if (!view.place) {
+      view.shift = overhang(units[0].element);
+      view.place = placement(units[0].element, view.shift);
+      if (view.place === 'above') view.shift = 0;
+    }
+    measure();
+  }
+
+  // Every unit's position relative to the overlay, read in one pass (layout is clean, so each read is
+  // a lookup), and the order they stand in down the page.
+  function measure() {
+    view.measureTimer = 0;
+    const { units, overlay } = view;
+    if (!units.length || !overlay?.isConnected) return;
+    const origin = overlay.getBoundingClientRect();
+    const count = units.length, tops = new Float64Array(count), lefts = new Float64Array(count), shown = [];
+    // A unit in a list item with a visible bullet keeps clear of the bullet (one style read per list).
+    const bullets = new Map();
+    const bullet = (element) => {
+      const item = element.closest('li');
+      const list = item?.parentElement;
+      if (!list) return 0;
+      if (!bullets.has(list)) {
+        const style = getComputedStyle(item);
+        bullets.set(list, style.listStyleType !== 'none' && style.listStylePosition === 'outside' ? 18 : 0);
+      }
+      return bullets.get(list);
+    };
+    for (let i = 0; i < count; i += 1) {
+      // Hidden (a collapsed section) has no place; an empty anchor (CanLII's <a name>) has a
+      // zero-size box, but its position is the provision's.
+      const element = units[i].element;
+      if (element.checkVisibility ? !element.checkVisibility() : !element.getClientRects().length) continue;
+      const rect = element.getBoundingClientRect();
+      tops[i] = rect.top - origin.top;
+      lefts[i] = rect.left - origin.left - bullet(element);
+      // Provisions that start on the same line (s 2 and s 2(1)) share one control: the first's.
+      const previous = shown[shown.length - 1];
+      if (previous !== undefined && Math.abs(tops[previous] - tops[i]) < 2 && Math.abs(lefts[previous] - lefts[i]) < 2) continue;
+      shown.push(i);
+    }
+    shown.sort((a, b) => tops[a] - tops[b]);
+    view.tops = tops;
+    view.lefts = lefts;
+    view.order = Int32Array.from(shown);
+    view.sortedTops = Float64Array.from(shown, (i) => tops[i]);
+    update(true);
+  }
+
+  // The document changed size (images, fonts, an opened section, a narrower window): measure again,
+  // at most a few times a second.
+  function scheduleMeasure() {
+    if (view.measureTimer || !view.units.length) return;
+    view.measureTimer = setTimeout(() => requestAnimationFrame(measure), 120);
+  }
+
+  function lowerBound(values, target) {
+    let low = 0, high = values.length;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (fresh[middle].element.getBoundingClientRect().bottom < 0) low = middle + 1; else high = middle;
+      if (values[middle] < target) low = middle + 1; else high = middle;
     }
-    const first = Math.max(0, low - 8), last = Math.min(fresh.length, low + 40);
-    insertUnits(fresh.slice(first, last));
-    backlog.push(...fresh.slice(last), ...fresh.slice(0, first));
-    drainBacklog();
+    return low;
   }
 
-  function drainBacklog() {
-    if (backlogTask || !backlog.length) return;
-    backlogTask = idle(() => {
-      backlogTask = 0;
-      insertUnits(backlog.splice(0, BATCH).filter((unit) => unit.element.isConnected));
-      drainBacklog();
-    }, 400);
+  // Important, like the stylesheet's `all: initial`, which would otherwise win.
+  function position(node, i) {
+    node.style.setProperty('left', `${Math.round(view.lefts[i] - view.shift - WIDTH[view.place])}px`, 'important');
+    node.style.setProperty('top', `${Math.round(view.tops[i] - (view.place === 'above' ? 27 : 0))}px`, 'important');
   }
 
-  function insertUnits(units) {
-    const base = controlTemplate();
-    // Read: where each control goes, and whether that parent lays its children out as flex or grid
-    // items (a float there would be an item, so the control is positioned out of flow instead).
-    const plan = [];
-    const seen = new Set();
-    for (const unit of units) {
-      if (controls.has(unit.element) || seen.has(unit.element)) continue; // two units on one element: the first keeps it
-      seen.add(unit.element);
-      const parent = BLOCKS.has(unit.element.tagName) ? unit.element : unit.element.parentElement;
-      if (!parent) continue;
-      const display = getComputedStyle(parent).display;
-      plan.push({ unit, parent, absolute: /flex|grid/.test(display) });
+  // Controls for the units within NEAR viewports of the screen; the rest go back to the pool. Only
+  // controls that come or go are touched, and only once the reader has moved half a screen from
+  // where they were last placed (the margin holds a screen and a half either way). All writes are
+  // inside the overlay, whose layout is contained.
+  function update(remeasured = false) {
+    view.frame = 0;
+    const { overlay, order, sortedTops } = view;
+    if (!order || !overlay?.isConnected) return;
+    const offset = -overlay.getBoundingClientRect().top, height = innerHeight;
+    if (remeasured !== true && view.placedAt !== undefined && Math.abs(offset - view.placedAt) < height / 2) return;
+    view.placedAt = offset;
+    if (remeasured === true) for (const [i, node] of view.live) position(node, i);
+    const from = lowerBound(sortedTops, offset - height * NEAR), to = lowerBound(sortedTops, offset + height * (1 + NEAR));
+    const wanted = new Set();
+    for (let k = from; k < to; k += 1) wanted.add(order[k]);
+    for (const [i, node] of view.live) {
+      if (wanted.has(i)) continue;
+      node.remove();
+      view.live.delete(i);
+      view.pool.push(node);
     }
-    // Write.
-    for (const { unit, parent, absolute } of plan) {
-      const control = base.cloneNode(true);
-      control.dataset.place = place;
-      control.dataset.kind = unit.kind;
-      if (shift) control.style.setProperty('--lp-shift', `${shift}px`);
-      if (absolute) control.dataset.flow = 'absolute';
-      control.lpElement = unit.element;
-      control.lpLocator = unit.locator;
+    for (const i of wanted) {
+      if (view.live.has(i)) continue;
+      const unit = view.units[i], node = control();
+      node.dataset.place = view.place;
+      node.dataset.kind = unit.kind;
+      node.classList.remove('hot');
+      node.lpElement = unit.element;
+      node.lpLocator = unit.locator;
       const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[unit.kind] || unit.kind} ${unit.locator}`;
-      control.firstChild.dataset.tip = label;
-      control.firstChild.setAttribute('aria-label', label);
-      if (parent === unit.element) parent.insertBefore(control, parent.firstChild);
-      else unit.element.before(control);
-      controls.set(unit.element, control);
+      node.firstChild.dataset.tip = label;
+      node.firstChild.setAttribute('aria-label', label);
+      position(node, i);
+      overlay.appendChild(node);
+      view.live.set(i, node);
     }
+  }
+
+  document.addEventListener('scroll', () => {
+    if (view.order && !view.frame) view.frame = requestAnimationFrame(update);
+  }, { capture: true, passive: true });
+  addEventListener('resize', scheduleMeasure, { passive: true });
+  document.fonts?.addEventListener?.('loadingdone', scheduleMeasure);
+
+  // The paragraph under the pointer shows its controls in full.
+  function hoverUnit(target) {
+    let i;
+    for (let node = target, depth = 0; node && depth < 12 && i === undefined; node = node.parentElement, depth += 1) i = view.index.get(node);
+    const node = i === undefined ? null : view.live.get(i) || null;
+    if (node === view.hot) return;
+    view.hot?.classList.remove('hot');
+    node?.classList.add('hot');
+    view.hot = node;
   }
 
   // One tooltip for every control, shown after a short hover.
@@ -213,6 +327,7 @@
   }
   document.addEventListener('pointerover', (event) => {
     const button = event.target;
+    if (view.units.length && !button.closest?.('.lp-units')) hoverUnit(button);
     if (!button.parentElement?.classList?.contains('lp-unit') || !button.dataset.tip) return hideTip();
     clearTimeout(tipTimer);
     tipTimer = setTimeout(() => {
@@ -233,35 +348,41 @@
   document.addEventListener('pointerdown', hideTip, { capture: true, passive: true });
   addEventListener('scroll', hideTip, { capture: true, passive: true });
 
-  // Pages that render the document after load (Lexis) or swap it in place: new anchors get their
-  // controls in the same frame they are painted in. Only added elements wake this; Pinpointer's own
-  // insertions do not.
+  // Pages that render or replace the document after load (Lexis): new anchors are read in the next
+  // frame, and no more than every quarter second. Pinpointer's own insertions do not count.
   function watchUnits() {
-    if (unitObserver) return;
-    unitObserver = new MutationObserver((records) => {
-      if (syncQueued || !settings.unitCopyButtons) return;
+    if (view.mutations) return;
+    view.mutations = new MutationObserver((records) => {
+      if (view.syncTimer || !settings.unitCopyButtons) return;
       for (const record of records) {
         for (const node of record.addedNodes) {
-          if (node.nodeType === 1 && !node.hasAttribute('data-lp-ui')) { syncQueued = requestAnimationFrame(syncUnits); return; }
+          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui')) continue;
+          view.syncTimer = setTimeout(() => { view.syncTimer = 0; queueSync(); }, view.units.length ? 250 : 0);
+          return;
         }
       }
     });
-    unitObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    view.mutations.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  }
+
+  function queueSync() {
+    if (!view.syncFrame) view.syncFrame = requestAnimationFrame(syncUnits);
   }
 
   function removeUnits() {
-    unitObserver?.disconnect();
-    unitObserver = null;
-    cancelAnimationFrame(syncQueued);
-    syncQueued = 0;
-    (window.cancelIdleCallback || clearTimeout)(backlogTask);
-    backlogTask = 0;
-    backlog = [];
+    view.mutations?.disconnect();
+    view.resize?.disconnect();
+    cancelAnimationFrame(view.frame);
+    cancelAnimationFrame(view.syncFrame);
+    clearTimeout(view.syncTimer);
+    clearTimeout(view.measureTimer);
+    view.overlay?.remove();
+    Object.assign(view, {
+      units: [], index: new WeakMap(), order: null, sortedTops: null, tops: null, lefts: null,
+      overlay: null, live: new Map(), pool: [], hot: null, place: '', shift: 0,
+      frame: 0, syncFrame: 0, syncTimer: 0, measureTimer: 0, resize: null, mutations: null
+    });
     hideTip();
-    for (const control of controls.values()) control.remove();
-    controls.clear();
-    place = '';
-    shift = 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -461,7 +582,7 @@
   let applying = 0;
   async function apply() {
     const ticket = ++applying;
-    if (settings.unitCopyButtons) { if (!syncQueued) syncQueued = requestAnimationFrame(syncUnits); watchUnits(); } else removeUnits();
+    if (settings.unitCopyButtons) { queueSync(); watchUnits(); } else removeUnits();
     if (provider === 'canlii') {
       if (settings.canliiHeader) mountCrumb(); else unmountCrumb();
     } else {
