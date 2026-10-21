@@ -25,48 +25,42 @@
   display: none !important;
 }
 
-/* Copy controls on each paragraph and provision. Each is a zero-size float at the unit's start: it
-   takes no room, so no line of the page moves, and it is painted with the text it sits beside, with
-   no layer of its own (nothing here is positioned, translucent, masked or contained), so hundreds of
-   them cost scrolling nothing. They hold no text, so nothing they show is ever copied. */
-.lp-unit {
+/* Copy controls on each paragraph and provision, in one overlay: a zero-size box whose layout is
+   contained, so placing, recycling or moving controls inside it never lays out the page. It sits
+   above the text (a provider's positioned text cannot cover the margin) but below sticky headers.
+   Controls hold no text, so nothing they show is ever copied. */
+.lp-units {
   all: initial !important;
-  float: left !important;
-  display: flex !important;
-  justify-content: flex-end !important;
-  align-items: flex-start !important;
-  gap: 1px !important;
+  display: block !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  z-index: 1 !important;
   width: 0 !important;
   height: 0 !important;
-  overflow: visible !important;
+  contain: layout style size !important;
   user-select: none !important;
   -webkit-user-select: none !important;
 }
 
-/* The hovered unit's control rises above the page (a provider's positioned text can cover the
-   margin it sits in): one control at a time has a layer of its own, never hundreds. */
-:hover > .lp-unit,
-.lp-unit:hover {
+/* Inside an app's scrolling document pane: in flow at its start, zero-size and uncontained, so
+   margins collapse through it and the pane clips and scrolls it with the text. */
+.lp-units[data-in="box"] {
   position: relative !important;
-  z-index: 2147483000 !important;
+  contain: none !important;
 }
 
-/* In a flex or grid container a float is an item, so there the control is out of flow instead. */
-.lp-unit[data-flow="absolute"] {
-  float: none !important;
+.lp-unit {
+  all: initial !important;
   position: absolute !important;
-  z-index: 2147483000 !important;
+  display: flex !important;
+  gap: 1px !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 .lp-unit[data-place="column"] {
   flex-direction: column !important;
-  justify-content: flex-start !important;
-  align-items: flex-end !important;
-}
-
-.lp-unit[data-place="above"] {
-  justify-content: flex-start !important;
-  margin-top: -27px !important;
 }
 
 .lp-unit > button {
@@ -83,20 +77,10 @@
 }
 
 .lp-unit > .lp-unit-quote {
-  margin-right: calc(10px + var(--lp-shift, 0px)) !important;
   font-size: 20px !important;
 }
 
-.lp-unit[data-place="column"] > .lp-unit-quote,
-.lp-unit[data-place="column"] > .lp-unit-pin {
-  margin-right: calc(4px + var(--lp-shift, 0px)) !important;
-}
-
-.lp-unit[data-place="above"] > .lp-unit-quote {
-  margin-right: 0 !important;
-}
-
-:hover > .lp-unit > button,
+.lp-unit.hot > button,
 .lp-unit:hover > button,
 .lp-unit > button:focus-visible {
   color: #66766e !important;
@@ -168,14 +152,20 @@
 
 /* CanLII: the breadcrumbs fill the header's free width from the first paint, on one line, so the
    document's name can replace the last crumb without the header changing size or anything moving. */
-#canlii-breadcrumbs {
+#canlii-header #canlii-breadcrumbs {
   flex: 1 1 0 !important;
   flex-wrap: nowrap !important;
   min-width: 0 !important;
   overflow: hidden !important;
 }
 
-#canlii-breadcrumbs > span:last-of-type {
+/* The other crumbs keep their width on one line; only the document's name gives way. */
+#canlii-header #canlii-breadcrumbs > * {
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+}
+
+#canlii-header #canlii-breadcrumbs > span:last-of-type {
   display: inline-flex !important;
   align-items: center !important;
   flex: 0 1 auto !important;
@@ -184,7 +174,7 @@
   overflow: hidden !important;
 }
 
-#canlii-breadcrumbs > span:last-of-type > [itemprop="name"] {
+#canlii-header #canlii-breadcrumbs > span:last-of-type > [itemprop="name"] {
   min-width: 0 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
@@ -371,5 +361,5 @@ html:not(.lp-raw-titles) #crsw_legalMemoIcon {
 @media print {
   .lp-crumb-copy,
   .lp-tools,
-  .lp-unit { display: none !important; }
+  .lp-units { display: none !important; }
 }

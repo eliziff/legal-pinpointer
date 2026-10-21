@@ -3,7 +3,9 @@
 // Main-thread cost of the in-page UI on saved CanLII, Westlaw and Lexis pages, with the extension
 // loaded and without it, under CPU throttling: long tasks in the first seconds after load, time
 // until the paragraph controls appear, frame times while scrolling, and JS heap.
-// Usage: node tools/benchmark-page-ui.cjs <corpus-dir> [throttle=4] [settings-json] [provider:name,...]
+// Usage: node tools/benchmark-page-ui.cjs <corpus-dir> [throttle=4] [settings-json|-] [page,...] (or page;page)
+// A page is provider:name (a corpus folder) or saved|<page.html>|<url>, a page saved by the browser
+// with its <page>_files folder (stylesheets and images are served from it, scripts are not).
 // (corpus layout as for tools/check-page-ui.cjs; set PLAYWRIGHT_MODULE / CHROME_PATH as needed)
 const fs = require('node:fs');
 const path = require('node:path');
@@ -13,10 +15,16 @@ const root = path.resolve(__dirname, '..');
 const [corpus, throttleArg, settingsArg, pagesArg] = process.argv.slice(2);
 const overrides = settingsArg && settingsArg !== '-' ? JSON.parse(settingsArg) : null;
 const throttle = Number(throttleArg || 4);
-const PAGES = pagesArg ? pagesArg.split(',').map((item) => item.split(':'))
+const PAGES = pagesArg ? pagesArg.split(pagesArg.includes(';') ? ';' : ',').map((item) => item.startsWith('saved|') ? item.split('|') : item.split(':'))
   : [['canlii', 'Chouhan'], ['canlii', 'Competition-Act'], ['westlaw', 'Sommerer'], ['westlaw', 'Superior-Propane-Inc-Westlaw'], ['lexis', 'Royes']];
 
-function sample(provider, match) {
+const TYPES = { '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.gif': 'image/gif', '.jpg': 'image/jpeg', '.woff2': 'font/woff2', '.woff': 'font/woff' };
+
+function sample(provider, match, url) {
+  if (provider === 'saved') {
+    const files = match.replace(/\.html?$/i, '_files');
+    return { provider: 'saved', name: path.basename(match), url, html: fs.readFileSync(match, 'utf8'), files, filesName: path.basename(files) };
+  }
   const base = path.join(corpus, provider);
   const dir = fs.readdirSync(base).find((name) => name.includes(match));
   const folder = path.join(base, dir);
@@ -57,6 +65,13 @@ async function measure(withExtension, page) {
     const request = route.request();
     if (!/^https?:/.test(request.url())) return route.continue();
     if (request.resourceType() === 'document') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: page.html });
+    if (page.files) {
+      const parts = new URL(request.url()).pathname.split('/').map(decodeURIComponent);
+      const at = parts.indexOf(page.filesName);
+      const file = at >= 0 ? path.join(page.files, ...parts.slice(at + 1)) : '';
+      const type = TYPES[path.extname(file).toLowerCase()];
+      if (type && fs.existsSync(file)) return route.fulfill({ contentType: type, body: fs.readFileSync(file) });
+    }
     return route.abort();
   });
   if (withExtension) {
@@ -94,17 +109,32 @@ async function measure(withExtension, page) {
     const long = window.__long.slice(before);
     return { p50: Math.round(times[60]), p95: Math.round(times[114]), max: Math.round(times[119]), over50: times.filter((t) => t > 50).length, longTotal: Math.round(long.reduce((a, b) => a + b, 0)) };
   });
+  // Jump through the whole document (a table of contents, find in page): 25 jumps, frame after each.
+  const jumps = await tab.evaluate(async () => {
+    const before = window.__long.length;
+    const scroller = document.scrollingElement;
+    const times = [];
+    for (let step = 1; step <= 25; step += 1) {
+      const start = performance.now();
+      scroller.scrollTop = (scroller.scrollHeight - innerHeight) * step / 25;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      times.push(performance.now() - start);
+    }
+    times.sort((a, b) => a - b);
+    const long = window.__long.slice(before);
+    return { p50: Math.round(times[12]), max: Math.round(times[24]), longTotal: Math.round(long.reduce((a, b) => a + b, 0)) };
+  });
   const metrics = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
-  const result = { timeline, longTasks: settle, scrollFrames: frames, heapMB: +(metrics.JSHeapUsedSize / 1e6).toFixed(1), nodes: metrics.Nodes, mounted: await tab.locator('.lp-unit').count() };
+  const result = { timeline, longTasks: settle, scrollFrames: frames, jumps, heapMB: +(metrics.JSHeapUsedSize / 1e6).toFixed(1), nodes: metrics.Nodes, mounted: await tab.locator('.lp-unit').count() };
   await context.close();
   return result;
 }
 
 (async () => {
-  for (const [provider, match] of PAGES) {
-    const page = sample(provider, match);
+  for (const [provider, match, url] of PAGES) {
+    const page = sample(provider, match, url);
     const off = await measure(false, page);
     const on = await measure(true, page);
-    console.log(JSON.stringify({ page: `${provider} ${match}`, throttle, off, on }));
+    console.log(JSON.stringify({ page: `${provider} ${page.name}`, throttle, off, on }));
   }
 })().catch((error) => { console.error(error); process.exit(1); });

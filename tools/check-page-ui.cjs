@@ -186,13 +186,19 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
       // Paragraph controls: count, then both buttons on a paragraph in the middle, with and
       // without a selection spanning into the next paragraph.
-      const units = await page.evaluate(() => {
-        const controls = [...document.querySelectorAll('.lp-unit')];
-        const control = controls[Math.min(4, controls.length - 1)];
+      // Controls exist only near the screen: bring the fifth paragraph or provision into view first.
+      const units = await page.evaluate(async () => {
+        const anchors = document.querySelectorAll('[id^="crsw_paragraph_num_"], a[name^="par"], a[name^="sec"], [id^="PARA_"], [id^="SECTION_"]');
+        anchors[Math.min(4, anchors.length - 1)]?.scrollIntoView({ block: 'center' });
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const controls = [...document.querySelectorAll('.lp-unit')].sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top))
+          .filter((control) => control.getBoundingClientRect().top > 80);
+        const control = controls[0];
         if (!control) return { controls: 0 };
         control.scrollIntoView({ block: 'center' });
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         window.__lpControl = control;
-        window.__lpNextControl = controls[Math.min(5, controls.length - 1)];
+        window.__lpNextControl = controls[1];
         return { controls: controls.length, place: control.dataset.place, kind: control.dataset.kind, locator: control.lpLocator };
       });
       log(`${label}: paragraph controls`, units);
@@ -209,10 +215,22 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         };
         for (const mode of ['pinpoint', 'quote']) log(`${label}: unit ${mode}`, await copied(page, () => press(mode)));
         await page.evaluate(() => {
-          const block = window.__lpControl.parentElement, next = window.__lpNextControl?.parentElement;
+          // The unit a control belongs to: the provider anchor level with it (the control's own
+          // reference lives in the extension's isolated world).
+          const anchors = [...document.querySelectorAll('[id^="crsw_paragraph_num_"], a[name^="par"], a[name^="sec"], [id^="PARA_"], [id^="SECTION_"]')];
+          const unitBlock = (control) => {
+            if (!control) return null;
+            const top = control.getBoundingClientRect().top + (control.dataset.place === 'above' ? 27 : 0);
+            const anchor = anchors.reduce((best, item) => Math.abs(item.getBoundingClientRect().top - top) < Math.abs(best.getBoundingClientRect().top - top) ? item : best);
+            return anchor.closest('p, li, div') || anchor;
+          };
+          const block = unitBlock(window.__lpControl), next = unitBlock(window.__lpNextControl);
           const walk = (root, last) => { const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let node, found = null;
             while ((node = walker.nextNode())) if (node.data.trim().length > 20 && !node.parentElement.closest('[data-lp-ui]')) { found = node; if (!last) break; } return found; };
-          const start = walk(block, false), end = walk(next && next !== block ? next : block, true) || start;
+          // A statute's anchor block can hold only a number: then the next text after it.
+          const after = (anchor) => { const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); walker.currentNode = anchor;
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.data.trim().length > 20 && !node.parentElement.closest('[data-lp-ui]')) return node; return null; };
+          const start = walk(block, false) || after(block), end = (next && next !== block ? walk(next, true) || after(next) : null) || start;
           const range = document.createRange();
           range.setStart(start, Math.min(5, start.length)); range.setEnd(end, Math.min(20, end.length));
           getSelection().removeAllRanges(); getSelection().addRange(range);
