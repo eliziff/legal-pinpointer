@@ -1,9 +1,10 @@
 {
   "name": "legal-pinpointer",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Dependency-free source and tests for the Legal Pinpointer browser extension.",
   "scripts": {
+    "package:extension": "python tools/package-extension.py",
     "audit:legislation": "node tools/audit-canlii-legislation-index.cjs",
     "build:legislation": "node tools/build-canlii-legislation-index.cjs",
     "check:page-ui": "node tools/check-page-ui.cjs",

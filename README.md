@@ -4,9 +4,10 @@ A local-first Manifest V3 extension for structure-aware Canadian legal citations
 
 ## Install
 
-1. Open `chrome://extensions` in Chrome 116 or newer.
-2. Turn on Developer mode.
-3. Choose **Load unpacked** and select this folder.
+1. Download `legal-pinpointer.zip` from the [extension release](https://github.com/eliziff/legal-pinpointer/releases/tag/v0.3.1) and extract it to a permanent folder, or use this source checkout.
+2. Open `chrome://extensions` in Chrome 116 or newer.
+3. Turn on Developer mode.
+4. Choose **Load unpacked** and select the folder containing `manifest.json`.
 
 No build or package installation is required to use the extension. After updating, reload the extension and previously injected pages. Shortcut conflicts can be resolved at `chrome://extensions/shortcuts`; the popup reports unassigned search bindings.
 
@@ -140,6 +141,8 @@ delay timers. There is no background crawling, polling or worker keepalive.
 Popup actions report once in the popup. Keyboard copy/navigation actions report once through the single in-page success/error toast; search feedback stays in the native workspace.
 
 ## Maintenance
+
+`npm run package:extension` creates `dist/legal-pinpointer.zip` and `dist/SHA256SUMS` from the tracked extension files, including the compressed engine and metadata. The archive contains the browser extension alone. `PINPOINTER_EXTENSION_ROOT` can point the installed-extension check at an extracted package.
 
 Refresh the exact parser after changing `legal-structure`:
 
