@@ -88,7 +88,7 @@
 
   const BLOCKS = new Set(['P', 'LI', 'DIV', 'BLOCKQUOTE', 'DD', 'DT', 'TD', 'TH', 'SECTION', 'ARTICLE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
   const KIND_LABEL = { paragraph: 'para', page: 'page', section: 's', rule: 'r', article: 'art', pilcrow: '¶', silcrow: '§' };
-  const NEAR = 1.5; // viewports above and below the screen whose units have controls
+  const NEAR = 1; // viewports above and below the screen whose units have controls
   const WIDTH = { row: 61, column: 29, above: 0 }; // a control's width plus its gap to the text
   const view = {
     units: [], index: new WeakMap(), order: null, sortedTops: null, tops: null, lefts: null,
@@ -258,10 +258,21 @@
     return low;
   }
 
-  // Important, like the stylesheet's `all: initial`, which would otherwise win.
-  function position(node, i) {
-    node.style.setProperty('left', `${Math.round(view.lefts[i] - view.shift - WIDTH[view.place])}px`, 'important');
-    node.style.setProperty('top', `${Math.round(view.tops[i] - (view.place === 'above' ? 27 : 0))}px`, 'important');
+  // The live controls stack in the overlay in page order, each moved to its unit by margins: in
+  // normal flow, so none has a paint layer of its own (a positioned element would). Rebuilt only when
+  // the set changes. Margins are important, like the stylesheet's `all: initial`, which would win.
+  function stack(from, to) {
+    const above = view.place === 'above', height = view.place === 'column' ? 51 : 25, nodes = [];
+    let bottom = 0;
+    for (let k = from; k < to; k += 1) {
+      const i = view.order[k], node = view.live.get(i);
+      if (!node) continue;
+      const top = Math.round(view.tops[i] - (above ? 27 : 0));
+      node.style.setProperty('margin', `${top - bottom}px 0 0 ${Math.round(view.lefts[i] - view.shift - WIDTH[view.place])}px`, 'important');
+      bottom = top + height;
+      nodes.push(node);
+    }
+    view.overlay.replaceChildren(...nodes);
   }
 
   // Controls for the units within NEAR viewports of the screen; the rest go back to the pool. Only
@@ -275,15 +286,15 @@
     const offset = -overlay.getBoundingClientRect().top, height = innerHeight;
     if (remeasured !== true && view.placedAt !== undefined && Math.abs(offset - view.placedAt) < height / 2) return;
     view.placedAt = offset;
-    if (remeasured === true) for (const [i, node] of view.live) position(node, i);
     const from = lowerBound(sortedTops, offset - height * NEAR), to = lowerBound(sortedTops, offset + height * (1 + NEAR));
     const wanted = new Set();
     for (let k = from; k < to; k += 1) wanted.add(order[k]);
+    let changed = remeasured === true;
     for (const [i, node] of view.live) {
       if (wanted.has(i)) continue;
-      node.remove();
       view.live.delete(i);
       view.pool.push(node);
+      changed = true;
     }
     for (const i of wanted) {
       if (view.live.has(i)) continue;
@@ -296,10 +307,10 @@
       const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[unit.kind] || unit.kind} ${unit.locator}`;
       node.firstChild.dataset.tip = label;
       node.firstChild.setAttribute('aria-label', label);
-      position(node, i);
-      overlay.appendChild(node);
       view.live.set(i, node);
+      changed = true;
     }
+    if (changed) stack(from, to);
   }
 
   document.addEventListener('scroll', () => {
