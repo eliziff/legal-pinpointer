@@ -64,8 +64,22 @@
   -webkit-user-select: none !important;
 }
 
-.lp-unit[data-place="column"] {
+/* Two buttons stacked where the unit has room below; side by side where it has less; and, for a unit
+   too close to the next, shown only while the pointer is on it. */
+.lp-unit[data-place="stack"] {
   flex-direction: column !important;
+}
+
+.lp-unit[data-place="peek"] {
+  visibility: hidden !important;
+  border-radius: 7px !important;
+  background: #ffffff !important;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 18%) !important;
+}
+
+.lp-unit[data-place="peek"].hot,
+.lp-unit[data-place="peek"]:focus-within {
+  visibility: visible !important;
 }
 
 .lp-unit > button {
@@ -155,36 +169,49 @@
   display: none !important;
 }
 
-/* CanLII: the breadcrumbs fill the header's free width from the first paint, on one line, so the
-   document's name can replace the last crumb without the header changing size or anything moving. */
-#canlii-header #canlii-breadcrumbs {
+/* CanLII: the document's name, as CanLII titles it, in place of the breadcrumbs in CanLII's sticky
+   header. The crumbs before it (Home, the jurisdiction, the court or collection) are hidden: the
+   name says as much, and gets the header's whole free width, wrapping onto a second line (two
+   lines at this line height fit the header's existing height) instead of being cut off. In place
+   from the first paint, so nothing moves when the name fills in; early.js marks <html> with
+   lp-no-canlii-name before the first paint when the setting is off. */
+html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs {
   flex: 1 1 0 !important;
   flex-wrap: nowrap !important;
   min-width: 0 !important;
+  max-height: 36px !important;
   overflow: hidden !important;
 }
 
-/* The other crumbs keep their width on one line; only the document's name gives way. */
-#canlii-header #canlii-breadcrumbs > * {
-  flex-shrink: 0 !important;
-  white-space: nowrap !important;
+html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > :not(:last-child) {
+  display: none !important;
 }
 
-#canlii-header #canlii-breadcrumbs > span:last-of-type {
-  display: inline-flex !important;
+html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-type {
+  display: flex !important;
   align-items: center !important;
-  flex: 0 1 auto !important;
+  flex: 1 1 auto !important;
   gap: 6px !important;
   min-width: 0 !important;
-  overflow: hidden !important;
+  white-space: normal !important;
 }
 
-#canlii-header #canlii-breadcrumbs > span:last-of-type > [itemprop="name"] {
+html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-type > [itemprop="name"] {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  flex: 0 1 auto !important;
   min-width: 0 !important;
   overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
+  white-space: normal !important;
+  line-height: 17px !important;
   user-select: text !important;
+}
+
+html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-type > [itemprop="name"].lp-dense {
+  -webkit-line-clamp: 3 !important;
+  font-size: 12px !important;
+  line-height: 12px !important;
 }
 
 .lp-crumb-copy,
@@ -253,6 +280,28 @@ html:not(.lp-raw-titles) .documentheadertitle h1 {
   white-space: normal !important;
   user-select: text !important;
   -webkit-user-drag: none !important;
+}
+
+/* While a drag that started in the title is under way, nothing else on the page can be selected. */
+html.lp-title-drag body * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+html.lp-title-drag #co_docHeaderTitleLine,
+html.lp-title-drag #co_docHeaderTitleLine *,
+html.lp-title-drag #SS_DocumentTitle,
+html.lp-title-drag #SS_DocumentTitle *,
+html.lp-title-drag .documentheadertitle h1,
+html.lp-title-drag .documentheadertitle h1 * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+html.lp-title-drag .lp-tools,
+html.lp-title-drag .lp-tools * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 html:not(.lp-raw-titles) #co_docHeaderTitleLine a {

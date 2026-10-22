@@ -7,8 +7,8 @@
 // - routes presses on Pinpointer's own controls (any element with data-lp-action, in the light DOM
 //   or an open shadow root) from a window capture listener registered before any page listener, so
 //   a provider's click handlers, drag code or selection menus never see or swallow them;
-// - marks <html> when titles are to be left as the provider draws them, before the first paint, so
-//   the default clean-title styles (content.css) never switch on or off under the reader.
+// - marks <html> when titles (or CanLII's breadcrumbs) are to be left as the provider draws them,
+//   before the first paint, so the default styles (content.css) never switch on or off under the reader.
 (function startEarly() {
   if (globalThis.LegalPinpointerActions) return;
   const actions = globalThis.LegalPinpointerActions = new Map();
@@ -24,6 +24,7 @@
   const PAGE_SETTINGS = { unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   globalThis.LegalPinpointerEarlySettings = new Promise((resolve) => chrome.storage.local.get(PAGE_SETTINGS, (stored) => {
     if (top && !/canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-raw-titles', stored.cleanTitles === false);
+    if (top && /canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-no-canlii-name', stored.canliiHeader === false);
     globalThis.LegalPinpointerEarlySettingsValue = stored;
     resolve(stored);
   }));
@@ -53,10 +54,14 @@
   // Westlaw's title is a link back to the same document: the first click of a drag or a triple-click
   // reloads the page, and its drag code takes the press. While titles are clean it is plain text:
   // presses on it reach only the browser's own text selection.
-  // Presses reach page-ui.js (which keeps a drag that starts in the title inside it) before any
-  // page listener can swallow them.
+  // Presses and selection changes reach page-ui.js (which keeps a drag that starts in the title
+  // inside it, and gets ready to copy once text is selected) before any page listener, or the
+  // selection-menu guard, which hides them from the page, can stop them.
+  const selectionHooks = globalThis.LegalPinpointerSelectionHooks = new Set();
+  window.addEventListener('selectionchange', () => { for (const hook of selectionHooks) hook(); }, { capture: true, passive: true });
   if (top && !/canlii\.org$/.test(hostname)) {
     window.addEventListener('mousedown', (event) => globalThis.LegalPinpointerTitlePress?.(event), { capture: true, passive: true });
+    window.addEventListener('mouseup', () => globalThis.LegalPinpointerTitlePress?.(null), { capture: true, passive: true });
   }
 
   if (top && /westlaw\.com$/.test(hostname)) {
