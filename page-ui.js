@@ -61,7 +61,6 @@
   function warm() {
     if (warmed) return;
     warmed = true;
-    if (provider === 'canlii') chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_WARM' }).catch(() => {});
     idle(() => page.model(false).catch(() => { warmed = false; }), 150);
   }
   page.onInvalidate?.(() => { warmed = false; });
@@ -437,6 +436,9 @@
     }
     if (name.textContent !== text) name.textContent = text;
     name.title = text;
+    // The tab, too, is titled with the full style of cause or statute name.
+    crumb.tabTitle ??= document.title;
+    if (document.title !== text) document.title = text;
     fitCrumb();
   }
 
@@ -455,6 +457,7 @@
     crumb.name.textContent = crumb.original;
     crumb.name.removeAttribute('title');
     crumb.name.classList.remove('lp-dense');
+    if (crumb.tabTitle !== undefined) document.title = crumb.tabTitle;
     crumb = null;
   }
 
