@@ -71,7 +71,7 @@
   document.addEventListener('keydown', (event) => {
     if (!warmed && (event.key === 'Control' || event.key === 'Alt' || event.key === 'Meta')) warm();
   }, { capture: true, passive: true });
-  document.addEventListener('selectionchange', () => {
+  (globalThis.LegalPinpointerSelectionHooks || { add: (hook) => document.addEventListener('selectionchange', hook) }).add(() => {
     if (!warmed && !getSelection().isCollapsed) warm();
   });
 
@@ -86,49 +86,15 @@
   // the reader scrolls. A 5,000-section statute costs the same per frame as a short judgment, and
   // scrolling never lays the document out again.
 
-  const BLOCKS = new Set(['P', 'LI', 'DIV', 'BLOCKQUOTE', 'DD', 'DT', 'TD', 'TH', 'SECTION', 'ARTICLE', 'PRE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
   const KIND_LABEL = { paragraph: 'para', page: 'page', section: 's', rule: 'r', article: 'art', pilcrow: '¶', silcrow: '§' };
   const NEAR = 1; // viewports above and below the screen whose units have controls
-  const WIDTH = { row: 61, column: 29, above: 0 }; // a control's width plus its gap to the text
+  const SIZE = 25, GAP = 2; // a button, and the space between controls
   const view = {
-    units: [], index: new WeakMap(), order: null, sortedTops: null, tops: null, lefts: null,
-    overlay: null, live: new Map(), pool: [], hot: null, place: '', shift: 0,
+    units: [], order: null, sortedTops: null, xs: null, ys: null, modes: null,
+    overlay: null, live: new Map(), pool: [], hot: null,
     frame: 0, syncFrame: 0, syncTimer: 0, measureTimer: 0, resize: null, mutations: null
   };
   let template = null;
-
-  // The room left of the text inside the nearest ancestor that clips it decides where controls sit:
-  // a row in the margin, a narrow column, or a row in the space above the unit's first line.
-  function placement(element, overhanging) {
-    const left = element.getBoundingClientRect().left - overhanging;
-    let edge = 0;
-    for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-      const style = getComputedStyle(parent);
-      if (style.overflowX !== 'visible') { edge = parent.getBoundingClientRect().left + (parseFloat(style.borderLeftWidth) || 0); break; }
-    }
-    const room = left - edge;
-    return room >= 66 ? 'row' : room >= 34 ? 'column' : 'above';
-  }
-
-  // How far a unit's first text starts left of its box (Westlaw hangs the paragraph number into the
-  // margin): the controls move left by as much.
-  function overhang(element) {
-    const parent = BLOCKS.has(element.tagName) ? element : element.parentElement;
-    if (!parent) return 0;
-    const style = getComputedStyle(parent);
-    const lineStart = parent.getBoundingClientRect().left + (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.paddingLeft) || 0);
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    let left = Infinity;
-    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
-      if (!text.data.trim()) continue;
-      const range = document.createRange();
-      range.selectNodeContents(text);
-      left = range.getClientRects()[0]?.left ?? Infinity;
-      break;
-    }
-    for (const rect of element.getClientRects()) left = Math.min(left, rect.left);
-    return Number.isFinite(left) ? Math.min(80, Math.max(0, Math.round(lineStart - left))) : 0;
-  }
 
   function control() {
     if (!template) {
@@ -190,55 +156,94 @@
     view.pool.push(...view.live.values());
     view.live.clear();
     view.units = units;
-    view.index = new WeakMap(units.map((unit, i) => [unit.element, i]));
     if (!units.length) return;
     if (!view.overlay?.isConnected && !mountOverlay(units[0].element)) return;
-    if (!view.place) {
-      view.shift = overhang(units[0].element);
-      view.place = placement(units[0].element, view.shift);
-      if (view.place === 'above') view.shift = 0;
-    }
     measure();
   }
 
-  // Every unit's position relative to the overlay, read in one pass (layout is clean, so each read is
-  // a lookup), and the order they stand in down the page.
+  // Where every control goes, decided in one pass over the page's layout:
+  // - On CanLII, a paragraph or provision with CanLII's own tools button (the icon in the right
+  //   margin) gets its controls right under that button.
+  // - Everything else lines up in one column: CanLII's button column where the page has one;
+  //   otherwise just right of the text column, or just left of it when the right has no room
+  //   (a narrow window, or a provider's panel over the margin), or in the text column's edge.
+  // - Controls never pile up: a unit with room below it (before the next control) gets its two
+  //   buttons stacked, one with less room gets them side by side, and one too close to the next
+  //   shows them only while the pointer is on that unit.
+  // Every read is a lookup in the frame's own layout; nothing is written until all are done.
   function measure() {
     view.measureTimer = 0;
     const { units, overlay } = view;
     if (!units.length || !overlay?.isConnected) return;
     const origin = overlay.getBoundingClientRect();
-    const count = units.length, tops = new Float64Array(count), lefts = new Float64Array(count), shown = [];
-    // A unit in a list item with a visible bullet keeps clear of the bullet (one style read per list).
-    const bullets = new Map();
-    const bullet = (element) => {
-      const item = element.closest('li');
-      const list = item?.parentElement;
-      if (!list) return 0;
-      if (!bullets.has(list)) {
-        const style = getComputedStyle(item);
-        bullets.set(list, style.listStyleType !== 'none' && style.listStylePosition === 'outside' ? 18 : 0);
-      }
-      return bullets.get(list);
-    };
+    const count = units.length, xs = new Float64Array(count), ys = new Float64Array(count), modes = new Array(count);
+    const shown = [], rights = [], lefts = [], blockRects = new Map();
     for (let i = 0; i < count; i += 1) {
       // Hidden (a collapsed section) has no place; an empty anchor (CanLII's <a name>) has a
       // zero-size box, but its position is the provision's.
       const element = units[i].element;
       if (element.checkVisibility ? !element.checkVisibility() : !element.getClientRects().length) continue;
       const rect = element.getBoundingClientRect();
-      tops[i] = rect.top - origin.top;
-      lefts[i] = rect.left - origin.left - bullet(element);
+      ys[i] = rect.top - origin.top;
       // Provisions that start on the same line (s 2 and s 2(1)) share one control: the first's.
       const previous = shown[shown.length - 1];
-      if (previous !== undefined && Math.abs(tops[previous] - tops[i]) < 2 && Math.abs(lefts[previous] - lefts[i]) < 2) continue;
+      if (previous !== undefined && Math.abs(ys[previous] - ys[i]) < 3) continue;
       shown.push(i);
+      const block = element.closest('p, li, dd, blockquote, td, div') || element;
+      let box = blockRects.get(block);
+      if (!box) blockRects.set(block, box = block.getBoundingClientRect());
+      if (box.width > 0) { rights.push(box.right - origin.left); lefts.push(Math.min(box.left, rect.left) - origin.left); }
     }
-    shown.sort((a, b) => tops[a] - tops[b]);
-    view.tops = tops;
-    view.lefts = lefts;
+    if (!shown.length) { view.order = null; return; }
+    const median = (values) => { const sorted = values.slice().sort((a, b) => a - b); return sorted[sorted.length >> 1] ?? 0; };
+    const colRight = median(rights), colLeft = median(lefts);
+
+    // CanLII's own tools buttons, top to bottom.
+    const tools = [];
+    for (const button of document.querySelectorAll('.viibes-marker-toolbox')) {
+      const rect = button.getBoundingClientRect();
+      if (rect.width && rect.height) tools.push({ top: rect.top - origin.top, bottom: rect.bottom - origin.top, center: (rect.left + rect.right) / 2 - origin.left, used: false });
+    }
+    tools.sort((a, b) => a.top - b.top);
+    const toolTops = tools.map((tool) => tool.top);
+
+    // The column: CanLII's button column, else right of the text if that margin is clear, else left.
+    const box = view.overlay.dataset.in === 'box' ? view.overlay.parentElement.getBoundingClientRect() : null;
+    const clipRight = (box ? box.right : document.documentElement.clientWidth) - origin.left - 4;
+    const clipLeft = (box ? box.left : 0) - origin.left + 4;
+    const clear = (x) => {
+      // A provider's fixed panel over the margin (Westlaw's right rail) covers the spot.
+      const hit = document.elementFromPoint(x + origin.left + SIZE / 2, Math.min(innerHeight - 10, Math.max(10, innerHeight / 2)));
+      return !hit || hit === document.documentElement || hit === document.body || hit.closest('[data-lp-ui]')
+        || !['fixed', 'sticky'].includes(getComputedStyle(hit.closest('*:not(span):not(a):not(i):not(img)') || hit).position);
+    };
+    let column, side = 'right';
+    if (tools.length) column = median(tools.map((tool) => tool.center)) - SIZE / 2;
+    else if (colRight + 12 + 2 * SIZE + GAP <= clipRight && clear(colRight + 12)) column = colRight + 12;
+    else if (colLeft - 12 - 2 * SIZE - GAP >= clipLeft) { column = colLeft - 12 - SIZE; side = 'left'; }
+    else { column = colRight - 2 * SIZE - GAP; side = 'inside'; }
+
+    for (const i of shown) {
+      // The nearest unused CanLII button level with the unit's start.
+      let tool = null;
+      if (tools.length) {
+        let k = lowerBound(toolTops, ys[i] - 20);
+        for (; k < tools.length && tools[k].top < ys[i] + 70; k += 1) if (!tools[k].used) { tool = tools[k]; break; }
+      }
+      if (tool) { tool.used = true; xs[i] = tool.center - SIZE / 2; ys[i] = tool.bottom + GAP; } else xs[i] = column;
+    }
+    shown.sort((a, b) => ys[a] - ys[b]);
+    for (let k = 0; k < shown.length; k += 1) {
+      const i = shown[k], room = k + 1 < shown.length ? ys[shown[k + 1]] - ys[i] : Infinity;
+      modes[i] = side === 'inside' ? 'peek' : room >= 2 * SIZE + 2 * GAP ? 'stack' : room >= SIZE + GAP ? 'pair' : 'peek';
+      // Side by side, a pair centred under a CanLII button stays centred; on the left it grows leftward.
+      if (modes[i] !== 'stack' && (tools.length || side === 'left')) xs[i] -= tools.length ? (SIZE + GAP) / 2 : SIZE + GAP;
+    }
+    view.xs = xs;
+    view.ys = ys;
+    view.modes = modes;
     view.order = Int32Array.from(shown);
-    view.sortedTops = Float64Array.from(shown, (i) => tops[i]);
+    view.sortedTops = Float64Array.from(shown, (i) => ys[i]);
     update(true);
   }
 
@@ -258,18 +263,19 @@
     return low;
   }
 
-  // The live controls stack in the overlay in page order, each moved to its unit by margins: in
+  // The live controls stack in the overlay in page order, each moved to its place by margins: in
   // normal flow, so none has a paint layer of its own (a positioned element would). Rebuilt only when
   // the set changes. Margins are important, like the stylesheet's `all: initial`, which would win.
   function stack(from, to) {
-    const above = view.place === 'above', height = view.place === 'column' ? 51 : 25, nodes = [];
+    const nodes = [];
     let bottom = 0;
     for (let k = from; k < to; k += 1) {
       const i = view.order[k], node = view.live.get(i);
       if (!node) continue;
-      const top = Math.round(view.tops[i] - (above ? 27 : 0));
-      node.style.setProperty('margin', `${top - bottom}px 0 0 ${Math.round(view.lefts[i] - view.shift - WIDTH[view.place])}px`, 'important');
-      bottom = top + height;
+      const top = Math.round(view.ys[i]);
+      node.style.setProperty('margin', `${top - bottom}px 0 0 ${Math.round(view.xs[i])}px`, 'important');
+      node.dataset.place = view.modes[i];
+      bottom = top + (view.modes[i] === 'stack' ? 2 * SIZE + 1 : SIZE);
       nodes.push(node);
     }
     view.overlay.replaceChildren(...nodes);
@@ -299,7 +305,7 @@
     for (const i of wanted) {
       if (view.live.has(i)) continue;
       const unit = view.units[i], node = control();
-      node.dataset.place = view.place;
+      node.dataset.place = view.modes[i];
       node.dataset.kind = unit.kind;
       node.classList.remove('hot');
       node.lpElement = unit.element;
@@ -319,16 +325,26 @@
   addEventListener('resize', scheduleMeasure, { passive: true });
   document.fonts?.addEventListener?.('loadingdone', scheduleMeasure);
 
-  // The paragraph under the pointer shows its controls in full.
-  function hoverUnit(target) {
-    let i;
-    for (let node = target, depth = 0; node && depth < 12 && i === undefined; node = node.parentElement, depth += 1) i = view.index.get(node);
-    const node = i === undefined ? null : view.live.get(i) || null;
+  // The unit under the pointer (the last control at or above it, by position, so a provision whose
+  // anchor is an empty <a name> counts too) shows its controls in full, and a crowded unit's hidden
+  // pair appears. Off the document's units, the last one stays lit so the pointer can reach it.
+  let pointerY = 0, hoverFrame = 0;
+  function hoverUnit() {
+    hoverFrame = 0;
+    if (!view.order || !view.overlay?.isConnected) return;
+    const y = pointerY - view.overlay.getBoundingClientRect().top;
+    const k = lowerBound(view.sortedTops, y + 4) - 1;
+    const node = k >= 0 ? view.live.get(view.order[k]) || null : null;
     if (node === view.hot) return;
     view.hot?.classList.remove('hot');
     node?.classList.add('hot');
     view.hot = node;
   }
+  document.addEventListener('pointermove', (event) => {
+    if (!view.order || event.target.closest?.('.lp-units')) return;
+    pointerY = event.clientY;
+    if (!hoverFrame) hoverFrame = requestAnimationFrame(hoverUnit);
+  }, { capture: true, passive: true });
 
   // One tooltip for every control, shown after a short hover.
   let tip = null, tipTimer = 0;
@@ -338,7 +354,6 @@
   }
   document.addEventListener('pointerover', (event) => {
     const button = event.target;
-    if (view.units.length && !button.closest?.('.lp-units')) hoverUnit(button);
     if (!button.parentElement?.classList?.contains('lp-unit') || !button.dataset.tip) return hideTip();
     clearTimeout(tipTimer);
     tipTimer = setTimeout(() => {
@@ -389,8 +404,8 @@
     clearTimeout(view.measureTimer);
     view.overlay?.remove();
     Object.assign(view, {
-      units: [], index: new WeakMap(), order: null, sortedTops: null, tops: null, lefts: null,
-      overlay: null, live: new Map(), pool: [], hot: null, place: '', shift: 0,
+      units: [], order: null, sortedTops: null, xs: null, ys: null, modes: null,
+      overlay: null, live: new Map(), pool: [], hot: null, placedAt: undefined,
       frame: 0, syncFrame: 0, syncTimer: 0, measureTimer: 0, resize: null, mutations: null
     });
     hideTip();
@@ -422,13 +437,24 @@
     }
     if (name.textContent !== text) name.textContent = text;
     name.title = text;
+    fitCrumb();
   }
+
+  // A name too long for two lines in a narrow window gets three smaller ones, in the same height.
+  function fitCrumb() {
+    if (!crumb) return;
+    crumb.name.classList.remove('lp-dense');
+    if (crumb.name.scrollHeight > crumb.name.clientHeight + 1) crumb.name.classList.add('lp-dense');
+  }
+  let fitTimer = 0;
+  addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => requestAnimationFrame(fitCrumb), 150); }, { passive: true });
 
   function unmountCrumb() {
     if (!crumb) return;
     crumb.button.remove();
     crumb.name.textContent = crumb.original;
     crumb.name.removeAttribute('title');
+    crumb.name.classList.remove('lp-dense');
     crumb = null;
   }
 
@@ -482,16 +508,21 @@
     for (const link of document.querySelectorAll('#co_docHeaderTitleLine a, #titleInfo a')) link.draggable = !settings.cleanTitles;
   }
 
-  // A drag that starts in the title stays in it: overshooting the end (or the start) selects up to
-  // the title's last (or first) character, not the citation line and toolbars beyond.
+  // A drag that starts in the title stays in it: while the button is down, the rest of the page
+  // cannot be selected (lp-title-drag, content.css), so the browser itself stops the selection at
+  // the title's last (or first) character instead of running into the citation line and the text
+  // below; the selection is also corrected should anything slip past.
   let titleDrag = null;
   const titlePress = (event) => {
-    titleDrag = settings.cleanTitles && event.button === 0 && !event.shiftKey ? event.target.closest?.(TITLES.join(', ')) || null : null;
+    titleDrag = event && settings.cleanTitles && event.button === 0 && !event.shiftKey ? event.target.closest?.(TITLES.join(', ')) || null : null;
+    // The rest of the page stays locked until the next press (the browser settles the selection
+    // after the release), which unlocks it before its own selection starts.
+    if (event) document.documentElement.classList.toggle('lp-title-drag', Boolean(titleDrag));
   };
-  // early.js reports every press, ahead of the page's own listeners.
+  // early.js reports every press and release, ahead of the page's own listeners.
   globalThis.LegalPinpointerTitlePress = titlePress;
-  window.addEventListener('mouseup', () => { titleDrag = null; }, { capture: true, passive: true });
-  document.addEventListener('selectionchange', () => {
+  window.addEventListener('mouseup', () => titlePress(null), { capture: true, passive: true });
+  (globalThis.LegalPinpointerSelectionHooks || { add: (hook) => document.addEventListener('selectionchange', hook) }).add(() => {
     if (!titleDrag) return;
     const selection = getSelection();
     if (!selection.anchorNode || !titleDrag.contains(selection.anchorNode) || titleDrag.contains(selection.focusNode)) return;
@@ -595,6 +626,7 @@
     const ticket = ++applying;
     if (settings.unitCopyButtons) { queueSync(); watchUnits(); } else removeUnits();
     if (provider === 'canlii') {
+      document.documentElement.classList.toggle('lp-no-canlii-name', !settings.canliiHeader);
       if (settings.canliiHeader) mountCrumb(); else unmountCrumb();
     } else {
       document.documentElement.classList.toggle('lp-raw-titles', !settings.cleanTitles);
