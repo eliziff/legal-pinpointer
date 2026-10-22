@@ -1,9 +1,8 @@
 'use strict';
 
 // First thing on the pages Pinpointer decorates (document_start, before the page's own scripts):
-// - on Westlaw and Lexis, warms the citation engine while the page is still loading, so the title's
-//   CanLII button does not wait for it (CanLII pages need it only for a copy: page-ui.js warms it
-//   when one looks likely);
+// - warms the citation engine (in the extension's own background document, not this page) while
+//   the page is still loading, so the title's CanLII button and the first copy do not wait for it;
 // - routes presses on Pinpointer's own controls (any element with data-lp-action, in the light DOM
 //   or an open shadow root) from a window capture listener registered before any page listener, so
 //   a provider's click handlers, drag code or selection menus never see or swallow them;
@@ -17,7 +16,7 @@
   const documentPage = /canlii\.org$/.test(hostname) ? /\/(?:doc|laws)\//.test(pathname)
     : hostname === 'advance.lexis.com' ? /^\/(?:document|search)\//.test(pathname)
       : /^\/Document\//.test(pathname);
-  if (top && documentPage && !/canlii\.org$/.test(hostname)) chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_WARM' }).catch(() => {});
+  if (top && documentPage) chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_WARM' }).catch(() => {});
 
   // The page UI's settings, read now so they are in hand by the time page-ui.js runs (at
   // document_end, when a storage read would wait behind the page's own start-up scripts).
