@@ -261,7 +261,7 @@
     const documentType = canliiDocumentType(document, location);
     const title = semanticTitle(document, ['h1.main-title', 'h1'], documentType);
     const headerText = [meta(document, 'lbh-citation'), meta(document, 'citation_reference'), document.title, textOf(first(document, ['h1.main-title', '.documentMeta']))].filter(Boolean).join(' | ');
-    const citation = documentType === 'case'
+    const citation = options.cached ? options.cached.citation : documentType === 'case'
       ? await caseMetadata(document, title, headerText, meta(document, 'lbh-citation'), 'canlii')
       : documentType === 'legislation'
         ? await legislationMetadata(document, title, meta(document, 'lbh-citation'))
@@ -428,11 +428,12 @@
     const firstParagraph = document.querySelector('[id^="PARA_"]');
     const header = first(document, ['.SS_DocumentHeader', '[data-testid="document-header"]']);
     const boundary = firstParagraph || root.querySelector('.SS_Heading, .SS_Heading2, [id^="SECTION_"]');
-    const aliasText = await lexisAliasText(root);
+    const cached = options.cached;
+    const aliasText = cached ? '' : await lexisAliasText(root);
     const headerText = [meta(document, 'citation_reference'), title, document.title, aliasText,
       header ? textOf(header) : boundary ? boundedTextBefore(root, boundary, 14000) : ''].filter(Boolean).join(' | ');
-    const heading = await core.splitCaseHeading(title);
-    const citation = documentType === 'case'
+    const heading = cached ? null : await core.splitCaseHeading(title);
+    const citation = cached ? cached.citation : documentType === 'case'
       ? await caseMetadata(document, title, headerText, heading.citation, 'lexis')
       : documentType === 'secondary'
         ? await lexisSecondaryCitation(document, title)
@@ -446,7 +447,7 @@
     return {
       provider: 'lexis', documentType, citation, headerText,
       sectionMap: !options.metadataOnly && documentType === 'legislation' ? lexisSectionMap(document, root) : [],
-      canliiUrl: documentType === 'case'
+      canliiUrl: cached ? cached.canliiUrl : documentType === 'case'
         ? await detectedCanliiUrl(document, root, firstParagraph, citation, location.href, aliasText)
         : '',
       cleanUrl, documentUrls: acceptedDocumentUrls(document, location, cleanUrl), root, nativeNodes
@@ -488,7 +489,8 @@
     const prelim = textOf(prelimElement);
     const toolbarCitation = textOf(first(document, ['#citeInfo', '.co_cites']));
     const headerText = `${prelim} | ${toolbarCitation} | ${document.title}`;
-    const citation = documentType === 'case'
+    const cached = options.cached;
+    const citation = cached ? cached.citation : documentType === 'case'
       ? await caseMetadata(document, title, headerText, toolbarCitation, 'westlaw')
       : documentType === 'legislation'
         ? await legislationMetadata(document, title, toolbarCitation)
@@ -499,7 +501,7 @@
     const cleanUrl = core.cleanProviderUrl('westlaw', location.href);
     return {
       provider: 'westlaw', documentType, citation, headerText,
-      canliiUrl: documentType === 'case'
+      canliiUrl: cached ? cached.canliiUrl : documentType === 'case'
         ? await detectedCanliiUrl(document, prelimElement || root, null, citation, location.href,
           `${textOf(first(document, ['.co_parallelCites'])) || prelim} | ${toolbarCitation}`)
         : '',
@@ -862,15 +864,46 @@ ${base.headerText || ''}`), read(own)]);
     };
   }
 
+  // A document's citation and its CanLII (or court-site) link, kept for the browser session by the
+  // service worker, keyed by the page's address and its title as the page shows it: a revisit, a
+  // reload or another tab on the same document has them at once, with no engine read.
+  function metadataKey(document, location) {
+    const title = first(document, ['#co_docHeaderTitleLine', '#SS_DocumentTitle', 'h1.main-title', 'h1']);
+    const text = textOf(title).slice(0, 300);
+    return text ? `${String(location.href).split('#')[0]}\n${text}` : '';
+  }
+
+  function cachedMetadata(key) {
+    if (!key || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_METADATA', key }, (response) => {
+        resolve(chrome.runtime.lastError || !response?.ok || !response.value?.citation?.plain ? null : response.value);
+      });
+    });
+  }
+
+  function rememberMetadata(key, value) {
+    if (!key || typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
+    chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_METADATA', key, value }, () => void chrome.runtime.lastError);
+  }
+
   async function inspect(document, location, deriveEngine, options = {}) {
-    const base = await inspectBase(document, location, options);
+    const key = deriveEngine ? '' : metadataKey(document, location);
+    const cached = await cachedMetadata(key);
+    const base = await inspectBase(document, location, { ...options, cached });
     if (!base) return null;
 
-    if (base.documentType === 'legislation' && base.provider !== 'canlii') {
-      base.canliiUrl = await requestLegislationUrl(base.citation, document.documentElement.lang || 'en');
-    }
-    if (base.documentType === 'case' && base.provider !== 'canlii' && !base.canliiUrl) {
-      Object.assign(base, await requestCaseUrl(base, document.documentElement.lang || 'en'));
+    if (cached) {
+      base.canliiUrl = cached.canliiUrl || base.canliiUrl;
+      base.siteUrl = cached.siteUrl || '';
+    } else {
+      if (base.documentType === 'legislation' && base.provider !== 'canlii') {
+        base.canliiUrl = await requestLegislationUrl(base.citation, document.documentElement.lang || 'en');
+      }
+      if (base.documentType === 'case' && base.provider !== 'canlii' && !base.canliiUrl) {
+        Object.assign(base, await requestCaseUrl(base, document.documentElement.lang || 'en'));
+      }
+      if (base.citation?.plain) rememberMetadata(key, { citation: base.citation, canliiUrl: base.canliiUrl || '', siteUrl: base.siteUrl || '' });
     }
 
     // Citation copying/navigation and an unselected popup need metadata, not
