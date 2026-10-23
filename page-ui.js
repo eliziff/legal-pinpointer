@@ -373,15 +373,21 @@
   document.addEventListener('pointerdown', hideTip, { capture: true, passive: true });
   addEventListener('scroll', hideTip, { capture: true, passive: true });
 
-  // Pages that render or replace the document after load (Lexis): new anchors are read in the next
-  // frame, and no more than every quarter second. Pinpointer's own insertions do not count.
+  // Pages that render or replace the document after load (Lexis): the page is read again only when
+  // something added carries a paragraph or section anchor (checked on the added content alone, so a
+  // provider redrawing its panels and menus all the time costs nothing), in the next frame and no
+  // more than every quarter second. Pinpointer's own insertions do not count.
+  const ANCHORS = provider === 'canlii'
+    ? 'a[name^="par"], a.reflex-paragAnchor, [id^="par"], a[name^="sec"], a[id^="sec"], a[name^="art"], a[id^="art"], a[name^="rule"], a[id^="rule"], [id^="se:"]'
+    : provider === 'lexis' ? '[id^="PARA_"], [id^="SECTION_"], [id^="RULE_"], [id^="ARTICLE_"]'
+      : '[id^="crsw_paragraph_num_"], [data-section-number], [data-rule-number], [data-article-number]';
   function watchUnits() {
     if (view.mutations) return;
     view.mutations = new MutationObserver((records) => {
       if (view.syncTimer || !settings.unitCopyButtons) return;
       for (const record of records) {
         for (const node of record.addedNodes) {
-          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui')) continue;
+          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui') || !(node.matches(ANCHORS) || node.querySelector(ANCHORS))) continue;
           view.syncTimer = setTimeout(() => { view.syncTimer = 0; queueSync(); }, view.units.length ? 250 : 0);
           return;
         }

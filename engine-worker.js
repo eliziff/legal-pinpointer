@@ -105,9 +105,27 @@ const ROUTES = {
   LEGAL_PINPOINTER_RESOLVE_LEGISLATION: (message) => host('legislation', legislationInput(message.input)).then((url) => ({ ok: true, url })),
   LEGAL_PINPOINTER_RESOLVE_CASE: (message) => host('case', caseInput(message.input)).then(({ targets, sites }) => ({ ok: true, targets, sites })),
   LEGAL_PINPOINTER_CLIPBOARD: (message) => host('clipboard', clipboardInput(message)).then(() => ({ ok: true })),
+  LEGAL_PINPOINTER_METADATA: metadata,
   // A legal page started loading: open the engine host now, so its first answer is ready sooner.
   LEGAL_PINPOINTER_WARM: () => host('ping').then(() => ({ ok: true }))
 };
+
+// Document metadata (citation, CanLII or court-site link) by page address and title, for the
+// browser session (chrome.storage.session, in memory): the most recent 400 documents.
+const METADATA_LIMIT = 400;
+async function metadata(message) {
+  if (typeof message.key !== 'string' || message.key.length > 2500) throw new Error('The metadata request is invalid.');
+  const { lpMetadata = {} } = await chrome.storage.session.get('lpMetadata');
+  if (message.value === undefined) return { ok: true, value: lpMetadata[message.key] || null };
+  const value = message.value;
+  if (!value?.citation?.plain || JSON.stringify(value).length > 20_000) throw new Error('The metadata is invalid.');
+  delete lpMetadata[message.key];
+  lpMetadata[message.key] = { citation: value.citation, canliiUrl: String(value.canliiUrl || ''), siteUrl: String(value.siteUrl || '') };
+  const keys = Object.keys(lpMetadata);
+  for (const old of keys.slice(0, Math.max(0, keys.length - METADATA_LIMIT))) delete lpMetadata[old];
+  await chrome.storage.session.set({ lpMetadata });
+  return { ok: true };
+}
 
 const SITE_ROUTES = {
   LEGAL_PINPOINTER_CASE_IDENTITY: (message) => {
