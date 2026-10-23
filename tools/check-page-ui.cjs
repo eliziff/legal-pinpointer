@@ -119,7 +119,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const toast = await page.locator('#legal-pinpointer-status').innerText();
       const clip = await readClipboard(page);
       return { ms, toast: toast.slice(0, 120), plain: clip.plain.slice(0, 140), html: clip.html.slice(0, 160),
-        plainBreaks: (clip.plain.match(/\n/g) || []).length, ownMarkup: /lp-unit|data-lp-ui|lp-tools/.test(clip.html) };
+        plainBreaks: (clip.plain.match(/\n/g) || []).length, ownMarkup: /lp-unit|data-lp-ui|lp-tools/.test(clip.html),
+        menuText: /View Options|Add To (?:Folder|Outline)/i.test(clip.plain + clip.html) };
     };
 
     for (const sample of pages) {
@@ -238,6 +239,27 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         for (const mode of ['pinpoint', 'quote']) log(`${label}: selection ${mode}`, await copied(page, () => press(mode)));
         log(`${label}: selection Ctrl+X`, await copied(page, () => page.keyboard.press('Control+X')));
         await page.evaluate(() => getSelection().removeAllRanges());
+      }
+
+      // Westlaw puts a hidden "View Options / Add To Folder / Add To Outline" menu after every
+      // document link: a paragraph holding a link copies none of it.
+      if (sample.provider === 'westlaw' && units.controls) {
+        const linked = await page.evaluate(async () => {
+          const anchor = [...document.querySelectorAll('[id^="crsw_paragraph_num_"]')]
+            .find((item) => item.closest('.co_paragraph, p, div')?.querySelector('.a11yDropdown') && item.getClientRects().length);
+          if (!anchor) return false;
+          const block = anchor.closest('.co_paragraph, p, div');
+          block.scrollIntoView({ block: 'center' });
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const range = document.createRange();
+          range.selectNodeContents(block);
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+          return true;
+        });
+        if (linked) {
+          for (const shortcut of ['Control+Shift+X']) log(`${label}: linked paragraph ${shortcut}`, await copied(page, () => page.keyboard.press(shortcut)));
+          await page.evaluate(() => getSelection().removeAllRanges());
+        } else log(`${label}: linked paragraph`, 'no displayed paragraph with a document link');
       }
 
       // Scrolling does no work: long tasks and frame times while scrolling the whole document.

@@ -20,6 +20,8 @@
       ['U', 'u'], ['S', 's'], ['STRIKE', 's'], ['SUB', 'sub'], ['SUP', 'sup'],
       ['Q', 'q'], ['CODE', 'code']
     ]);
+  const QUOTE_SKIP = 'script, style, noscript, template, [hidden], [aria-hidden="true"], [data-lp-ui], '
+    + '[style*="display: none"], [style*="display:none"], [role="menu"], .a11yDropdown';
   const QUOTE_BLOCK = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DIV', 'DT', 'FIGCAPTION', 'FIGURE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'P', 'PRE', 'SECTION', 'TD', 'TH', 'TR']);
 
   document.addEventListener('pointerover', (event) => {
@@ -487,8 +489,10 @@
       if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
         return { plain: '', html: '' };
       }
+      // A cloned fragment has no computed style, so hidden provider chrome is recognised by its
+      // markup: Westlaw's "View Options / Add To Folder / Add To Outline" menu after every link.
       if (node.nodeType === Node.ELEMENT_NODE && (
-        node.matches('script, style, noscript, template, [hidden], [aria-hidden="true"], [data-lp-ui]')
+        node.matches(QUOTE_SKIP)
       )) return { plain: '', html: '' };
       // A unit's quote is one run of text: line breaks and nested blocks inside it
       // (converted PDFs, wrapper divs) separate words, never lines, when pasted.
