@@ -39,7 +39,7 @@
     }
     function onCommand(command, tab) {
       if (command !== 'find-in-page' && command !== 'canlii-text-search') return;
-      launch(tab, 'canlii').catch(error => report(error, tab));
+      launch(tab, command === 'canlii-text-search' ? 'canlii' : 'tabs').catch(error => report(error, tab));
     }
     function onMessage(message, sender, respond) {
       if (sender?.id !== api.runtime.id) return false;
