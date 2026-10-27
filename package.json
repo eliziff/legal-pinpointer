@@ -1,8 +1,8 @@
 {
   "name": "legal-pinpointer",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
-  "description": "Dependency-free source and tests for the Legal Pinpointer browser extension.",
+  "description": "Source and tests for the Legal Pinpointer browser extension (Tailwind builds ui.css; the extension itself has no runtime dependencies).",
   "scripts": {
     "package:extension": "python tools/package-extension.py",
     "audit:legislation": "node tools/audit-canlii-legislation-index.cjs",
@@ -10,6 +10,11 @@
     "check:page-ui": "node tools/check-page-ui.cjs",
     "benchmark:sonar": "node tools/benchmark-sonar.cjs",
     "benchmark:pinpointer": "node tools/benchmark-pinpointer.cjs",
-    "benchmark:text": "node tools/benchmark-text-hotpaths.cjs"
+    "benchmark:text": "node tools/benchmark-text-hotpaths.cjs",
+    "build:ui": "tailwindcss -i ui/extension.css -o ui.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.2.2",
+    "tailwindcss": "4.2.2"
   }
 }
