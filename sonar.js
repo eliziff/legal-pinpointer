@@ -376,13 +376,14 @@
     return { workspace, origin, query, canliiQuery, scope, sequence, result: transfer, current, scrollTop: list.viewport.scrollTop };
   }
   // A result in a sleeping tab: wake the tab, read it again, then open the same passage.
-  async function wakeAndOpen(item) {
+  async function wakeAndOpen(item, tab) {
     opening = true;
     try {
       tell('Waking the tab\u2026');
       await chrome.tabs.update(item.tabId, { active: true });
-      // Edge does not always load a discarded or frozen tab it activates; reload it then.
-      if (!await awake(item.tabId, 2000)) { await chrome.tabs.reload(item.tabId); await awake(item.tabId); }
+      // Edge does not load a discarded tab it activates: a discarded tab has no state to keep,
+      // so reload it at once. A frozen one gets a moment to wake on activation first.
+      if (tab.discarded || !await awake(item.tabId, 500)) { await chrome.tabs.reload(item.tabId); await awake(item.tabId); }
       await want(item.tabId, true, true);
       pendingOpen = { tabId: item.tabId, hash: item.hash };
     } catch (error) { tell(error.message, true); }
@@ -394,7 +395,7 @@
     const item = result.results[current];
     if (item.asleep) {
       const tab = await chrome.tabs.get(item.tabId).catch(() => null);
-      if (tab && (tab.discarded || tab.frozen)) return wakeAndOpen(item);
+      if (tab && (tab.discarded || tab.frozen)) return wakeAndOpen(item, tab);
     }
     const destination = item.windowId;
     // Cross-window sidePanel.open must remain in this click/key gesture; never
