@@ -414,20 +414,26 @@
     } catch (error) { if (token === sequence) tell(error.message, true); }
     finally { opening = false; refreshWhenIdle(); }
   }
-  // The clipboard write starts inside the click/key gesture; its contents resolve
-  // once the source tab has built them with Pinpointer's formatting.
+  // The source tab builds the passage with Pinpointer's formatting; the panel then copies it with a
+  // copy event (its clipboard permission needs no gesture). Chrome's async write wraps the HTML in a
+  // document of its own, which Word pastes as a paragraph of its own: it is only the last resort.
+  function copyEvent(plain, html) {
+    let copied = false;
+    const onCopy = (event) => { event.preventDefault(); event.clipboardData.setData('text/plain', plain); event.clipboardData.setData('text/html', html); copied = true; };
+    document.addEventListener('copy', onCopy, { once: true, capture: true });
+    try { return document.execCommand('copy') && copied; } finally { document.removeEventListener('copy', onCopy, true); }
+  }
   async function copyPassage(mode) {
     if (busy || result?.stale || route !== 'tabs' || current < 0 || !result) return;
     const token = sequence, target = result, id = result.results[current].id, sourceWorkspace = workspace;
-    const request = Promise.resolve(target.issued).then(() => send('SONAR_COPY', { workspace: sourceWorkspace, session: target.session, ticket: target.ticket, id, mode }));
-    const blob = type => request.then(reply => new Blob([type === 'text/html' ? reply.html : reply.plain], { type }));
     try {
-      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': blob('text/plain'), 'text/html': blob('text/html') })]);
-      const { plain } = await request;
+      await target.issued;
+      const { plain, html } = await send('SONAR_COPY', { workspace: sourceWorkspace, session: target.session, ticket: target.ticket, id, mode });
+      if (!copyEvent(plain, html)) await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]);
       if (token === sequence) tell(`Copied: ${plain.length > 90 ? `${plain.slice(0, 90)}…` : plain}`);
     } catch (error) {
-      const reason = await request.then(() => error, failure => failure);
-      if (token === sequence) tell(reason.message || 'Could not copy.', true);
+      if (token === sequence) tell(error.message || 'Could not copy.', true);
     }
   }
   // CanLII's three boxes: document text, case name or title, noteup. Enter searches the focused one.

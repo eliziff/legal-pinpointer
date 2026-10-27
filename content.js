@@ -576,20 +576,11 @@
     return quote;
   }
 
-  // The async clipboard first; then the engine host's clipboard, which no page script can reach
-  // (Lexis and Westlaw intercept copy events on their pages); then a copy event here.
+  // A copy event, never the async clipboard first: Chrome's async write wraps the HTML in a document
+  // of its own, and Word pastes that as a paragraph of its own (a line break after every paste).
+  // The engine host's copy event first, which no page script can reach (Lexis and Westlaw intercept
+  // copy events on their pages); then a copy event here; the async clipboard only as a last resort.
   async function clipboardWrite(payload) {
-    if (navigator.clipboard && typeof navigator.clipboard.write === 'function' && typeof ClipboardItem === 'function') {
-      try {
-        await navigator.clipboard.write([new ClipboardItem({
-          'text/plain': new Blob([payload.plain], { type: 'text/plain' }),
-          'text/html': new Blob([payload.html], { type: 'text/html' })
-        })]);
-        return;
-      } catch (_) {
-        // Some provider frames reject this API even with extension clipboard permission.
-      }
-    }
     const hosted = await chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_CLIPBOARD', plain: payload.plain, html: payload.html })
       .catch(() => null);
     if (hosted && hosted.ok) return;
@@ -606,7 +597,15 @@
     let executed;
     try { executed = document.execCommand('copy'); }
     finally { document.removeEventListener('copy', onCopy, true); }
-    if (!executed || !copied) throw new Error('The browser denied clipboard access.');
+    if (executed && copied) return;
+    if (navigator.clipboard && typeof navigator.clipboard.write === 'function' && typeof ClipboardItem === 'function') {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([payload.plain], { type: 'text/plain' }),
+        'text/html': new Blob([payload.html], { type: 'text/html' })
+      })]);
+      return;
+    }
+    throw new Error('The browser denied clipboard access.');
   }
 
   function showToast(message, error) {
