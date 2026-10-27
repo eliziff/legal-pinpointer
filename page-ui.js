@@ -617,7 +617,7 @@
     .bar { position: fixed; top: 0; left: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 38px;
       padding: 0 8px; border-bottom: 1px solid #e5e7eb; background: #fff; color: #111827;
       box-shadow: 0 1px 3px rgb(0 0 0 / 6%), 0 6px 16px -10px rgb(0 0 0 / 18%);
-      font: 600 13px/1.3 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+      font: 600 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
       opacity: 0; transform: translateY(-100%); pointer-events: none; transition: opacity 120ms, transform 140ms ease-out; }
     .bar.ready { opacity: 1; transform: none; pointer-events: auto; }
     .cite { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; }
