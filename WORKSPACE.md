@@ -69,7 +69,7 @@ longer called by the browser commands or popup.
   before IPC or storage awaits; a one-shot private RAM handoff transfers the list,
   selected passage and query without moving the source tab. Stale shared searches
   are explicitly disabled rather than navigating obsolete handles.
-- Alt+Shift+S is dispatched by chrome.commands, including on chrome://newtab and
+- Alt+Shift+C is dispatched by chrome.commands, including on chrome://newtab and
   about:blank. It opens the native CanLII query form with **zero source injections**.
   Only submitting the form creates a CanLII /#search/text= URL in a new tab.
 - Sender identity is checked against the packaged panel/popup URL. Page senders
@@ -128,7 +128,7 @@ visible in release/PR notes.
 Load/update the branch as an unpacked extension in Chrome 116+, reload the
 extension and previously injected source pages, then check:
 
-- Ctrl+T followed by Alt+Shift+S opens/focuses CanLII document-text search while
+- Ctrl+T followed by Alt+Shift+C opens/focuses CanLII document-text search while
   the new tab remains open. Enter submits a Unicode/operator query in a new
   CanLII results tab. Repeat from about:blank and a normal webpage.
 - Ctrl+Shift+S opens the same native workspace. Choose This window, This group
