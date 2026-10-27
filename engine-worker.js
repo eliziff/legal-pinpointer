@@ -4,7 +4,7 @@
 // an offscreen document that stays loaded while this worker is suspended and restarted.
 globalThis.LegalPinpointerCitationCall = (method, request) => host('citation', { method, request });
 
-importScripts('core.js', 'find-core.js', 'find-worker.js', 'sonar-launcher.js');
+importScripts('core.js', 'find-core.js', 'find-worker.js', 'sonar-launcher.js', 'marker-core.js');
 
 const MAX_TEXT_LENGTH = 12_000_000;
 const ALLOWED_HOSTS = new Set(['canlii.org', 'www.canlii.org', 'advance.lexis.com', 'nextcanada.westlaw.com', 'www.nextcanada.westlaw.com']);
@@ -250,6 +250,10 @@ async function syncCaseMarker() {
 }
 chrome.runtime.onInstalled.addListener(() => syncCaseMarker().catch(() => {}));
 chrome.runtime.onStartup.addListener(() => syncCaseMarker().catch(() => {}));
+// Case Marker stores each document under its own key: a single canliiMarkers object from before is
+// split once, when the extension is installed, updated or the browser starts.
+chrome.runtime.onInstalled.addListener(() => LegalPinpointerMarkerCore.splitLegacy().catch(() => {}));
+chrome.runtime.onStartup.addListener(() => LegalPinpointerMarkerCore.splitLegacy().catch(() => {}));
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.caseMarker) syncCaseMarker().catch(() => {}); });
 
 // The engine host asks to be closed once idle; the next request opens it again.

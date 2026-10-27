@@ -7,7 +7,9 @@
 // providers: a document's CanLII path ("ca/scc/doc/2016/2016scc27/2016scc27.html"), which Westlaw,
 // Lexis and court pages resolve to, so a case filed on one shows as filed on the others; a decision
 // with no CanLII version is keyed by its court page ("site:...") or else its citation ("cite:...").
-// The data format is the original Case Marker's (canliiFolders, canliiMarkers, canliiProjects).
+// Folders and projects are the original Case Marker's (canliiFolders, canliiProjects); each document
+// is stored under its own key (marker-core.js), so the page reads only the documents it shows and a
+// change writes that one document.
 //
 // Registered only while Case Marker is on (engine-worker.js), at document_start: circles are placed
 // as the page is parsed, before its first paint, and never inserted or removed under the reader.
@@ -21,12 +23,12 @@
   if (window !== window.top && !onCourtSite) return;
 
   const core = globalThis.LegalPinpointerMarkerCore;
-  const KEYS = ['caseMarker', 'canliiFolders', 'canliiMarkers', 'canliiProjects', 'canliiCurrentProject', 'canliiHotkeySlot1', 'canliiHotkeySlot2'];
+  const KEYS = ['caseMarker', 'canliiFolders', 'canliiProjects', 'canliiCurrentProject', 'canliiHotkeySlot1', 'canliiHotkeySlot2'];
   const state = { enabled: true, folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
   const wraps = new Map(); // key -> Set of circle wraps on this page
   const labels = new Map(); // key -> the name and citation shown on this page
-  let editor = null, editorKey = null, hoveredKey = null, saveHandle = 0;
-  const ownWrites = new Set(); // tokens of this page's own writes, so their echoes are skipped
+  const fetched = new Map(); // key -> the read of its stored document (one read per batch of keys)
+  let editor = null, editorKey = null, hoveredKey = null, batch = null;
 
   const docKey = (href) => {
     try { return new URL(href, location.origin).pathname.replace(/^\/(?:en|fr)\//, ''); } catch (_) { return ''; }
@@ -42,7 +44,6 @@
   function load(stored) {
     state.enabled = stored.caseMarker !== false;
     state.folders = stored.canliiFolders || {};
-    state.markers = stored.canliiMarkers || {};
     state.projects = stored.canliiProjects || {};
     if (!Object.keys(state.projects).length) state.projects = { default: { name: 'Default project', order: 0 } };
     state.project = state.projects[stored.canliiCurrentProject] ? stored.canliiCurrentProject
@@ -51,22 +52,33 @@
     state.slot2 = stored.canliiHotkeySlot2 || null;
   }
 
-  // Writing the markers copies every filed document (tens of milliseconds for thousands), so it
-  // waits until the page is idle, after the change has painted; quick changes share one write, and
-  // one still pending is flushed when the tab is hidden or left.
-  function flush() {
-    if (!saveHandle) return;
-    cancelIdleCallback(saveHandle);
-    saveHandle = 0;
-    const token = crypto.randomUUID();
-    ownWrites.add(token);
-    chrome.storage.local.set({ canliiMarkers: state.markers, caseMarkerWrite: token });
+  // One document's write: its own storage key, nothing else. Each write's echo is skipped, so an
+  // older echo never overwrites a newer edit made while it was on its way.
+  const inflight = new Map();
+  function save(key) {
+    inflight.set(key, (inflight.get(key) || 0) + 1);
+    core.writeDocuments({ [key]: state.markers[key] || null });
   }
-  function save() {
-    if (!saveHandle) saveHandle = requestIdleCallback(() => { saveHandle = -1; flush(); }, { timeout: 800 });
+
+  // The stored documents of the circles on this page, read together: keys asked for in the same
+  // turn share one storage read. Resolves once the key's document (if any) is in state.markers.
+  function want(key) {
+    if (fetched.has(key)) return fetched.get(key);
+    if (!batch) {
+      const keys = [];
+      const read = Promise.resolve().then(() => { batch = null; return core.readDocuments(keys); }).then((documents) => {
+        for (const key of keys) {
+          if (documents[key]) state.markers[key] = documents[key];
+          if (state.markers[key] && labels.has(key)) remember(key, labels.get(key).text, labels.get(key).meta);
+          refresh(key);
+        }
+      });
+      batch = { keys, read };
+    }
+    batch.keys.push(key);
+    fetched.set(key, batch.read);
+    return batch.read;
   }
-  addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
-  addEventListener('pagehide', flush);
 
   function entry(key, create) {
     const marker = state.markers[key];
@@ -145,6 +157,7 @@
     let set = wraps.get(key);
     if (!set) wraps.set(key, set = new Set());
     set.add(wrap);
+    want(key);
   }
 
   function refresh(key) {
@@ -220,6 +233,7 @@
           render(wrap);
         }
         wraps.delete(key);
+        want(canliiKey);
       }, () => {});
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', resolve, { once: true }); else resolve();
@@ -264,9 +278,12 @@
     editor?.close();
   }
 
-  function showPicker(key, anchor) {
+  async function showPicker(key, anchor) {
     hidePicker();
     editorKey = key;
+    // Its stored document is normally read long before a click; never edit ahead of it.
+    await want(key);
+    if (editorKey !== key) return;
     editor = core.openEditor({
       anchor, folders: state.folders, project: state.project, data: entry(key) || {},
       // A press on a circle is the circle's own: it toggles this editor or opens another.
@@ -277,7 +294,7 @@
         if (note) data.note = note; else delete data.note;
         if (badge) data.badge = badge; else delete data.badge;
         prune(key);
-        save();
+        save(key);
         refresh(key);
       },
       onClose() { editor = editorKey = null; }
@@ -315,18 +332,28 @@
     if (event.code !== 'KeyN' && !folder) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    core.setFilings(entry(hoveredKey, true), folder && state.folders[folder]?.projectId === state.project ? [folder] : [], state.folders);
-    prune(hoveredKey);
-    save();
-    refresh(hoveredKey);
+    const key = hoveredKey;
+    want(key).then(() => {
+      core.setFilings(entry(key, true), folder && state.folders[folder]?.projectId === state.project ? [folder] : [], state.folders);
+      prune(key);
+      save(key);
+      refresh(key);
+    });
   }, true);
 
+  // Changes carry their new values, so nothing is read back. A document change matters only for a
+  // circle on this page, and this page's own writes are already in hand.
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !KEYS.some((key) => changes[key])) return;
-    // This page's own write: already in hand.
-    if (changes.caseMarkerWrite && ownWrites.delete(changes.caseMarkerWrite.newValue)) return;
-    // Another page's or the popup's: the change carries the new values, so nothing is read back.
-    const stored = { caseMarker: state.enabled, canliiFolders: state.folders, canliiMarkers: state.markers, canliiProjects: state.projects,
+    if (area !== 'local') return;
+    for (const [key, value] of Object.entries(core.documentChanges(changes))) {
+      const own = inflight.get(key);
+      if (own) { if (own > 1) inflight.set(key, own - 1); else inflight.delete(key); continue; }
+      if (!wraps.has(key)) continue;
+      if (value) state.markers[key] = value; else delete state.markers[key];
+      refresh(key);
+    }
+    if (!KEYS.some((key) => changes[key])) return;
+    const stored = { caseMarker: state.enabled, canliiFolders: state.folders, canliiProjects: state.projects,
       canliiCurrentProject: state.project, canliiHotkeySlot1: state.slot1, canliiHotkeySlot2: state.slot2 };
     for (const key of KEYS) if (changes[key]) stored[key] = changes[key].newValue;
     const wasEnabled = state.enabled;
