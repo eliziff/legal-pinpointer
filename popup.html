@@ -5,105 +5,112 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Legal Pinpointer</title>
   <link rel="stylesheet" href="marker.css">
-  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="ui.css">
 </head>
-<body data-tab="marker">
-  <header class="top">
-    <div class="brand"><span class="logo" aria-hidden="true">¶</span><span>Legal Pinpointer</span></div>
-    <nav class="tabs" role="tablist" aria-label="Sections">
+<!-- One width for every tab; only the middle scrolls, its scrollbar space always reserved. -->
+<body data-tab="marker" class="m-0 flex max-h-[600px] w-[376px] flex-col overflow-hidden">
+  <header class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-3">
+    <div class="flex min-w-0 items-center gap-2">
+      <span class="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-white" aria-hidden="true"><svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4v16"/><path d="M17 4v16"/><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/></svg></span>
+      <span class="truncate text-[13px] font-semibold tracking-tight">Legal Pinpointer</span>
+    </div>
+    <nav class="tabs seg" role="tablist" aria-label="Sections">
       <button type="button" role="tab" data-tab="marker" aria-selected="true">Marker</button>
       <button type="button" role="tab" data-tab="copy" aria-selected="false">Copy</button>
       <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
     </nav>
   </header>
 
-  <main>
+  <main class="min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-gutter:stable]">
     <section class="panel" data-panel="marker" role="tabpanel">
-      <div class="project">
-        <select id="project" aria-label="Project"></select>
-        <button type="button" class="icon" data-project="add" title="New project">+</button>
-        <button type="button" class="icon" data-project="rename" title="Rename project">✎</button>
-        <button type="button" class="icon" data-project="delete" title="Delete project">🗑</button>
+      <div class="project flex items-center gap-1">
+        <select id="project" class="field min-w-0 flex-1 font-medium" aria-label="Project"></select>
+        <button type="button" class="btn btn-ghost btn-icon" data-project="add" title="New project" aria-label="New project"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+        <button type="button" class="btn btn-ghost btn-icon" data-project="rename" title="Rename project" aria-label="Rename project"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.4 3.6a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button type="button" class="btn btn-ghost btn-icon" data-project="delete" title="Delete project" aria-label="Delete project"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+        <button type="button" class="btn btn-ghost btn-icon aria-expanded:bg-active aria-expanded:text-ink" id="marker-settings-toggle" title="Case Marker settings" aria-label="Case Marker settings" aria-expanded="false" aria-controls="marker-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg></button>
       </div>
-      <form class="inline" id="name-form" hidden>
-        <input id="name-input" maxlength="80" autocomplete="off" spellcheck="false">
-        <button type="submit">Save</button><button type="button" id="name-cancel" class="ghost">Cancel</button>
+      <form id="name-form" class="mt-2 flex gap-1.5" hidden>
+        <input id="name-input" class="field min-w-0 flex-1" maxlength="80" autocomplete="off" spellcheck="false">
+        <button type="submit" class="btn btn-primary">Save</button><button type="button" id="name-cancel" class="btn btn-ghost">Cancel</button>
       </form>
-      <div class="folders-head">
-        <h2 class="label">Folders</h2>
-        <select id="viewer-sort" aria-label="Sort documents">
+      <div id="marker-settings" class="card mt-2" hidden>
+        <label class="setting"><span><b>Circles on pages</b><small>On CanLII search results and titles, and the Westlaw, Lexis and court titles</small></span><input type="checkbox" class="switch" data-setting="caseMarker"></label>
+        <label class="setting-field"><span>Hover + C files into</span><select class="field h-7 max-w-44 text-xs" data-slot="canliiHotkeySlot1"></select></label>
+        <label class="setting-field"><span>Hover + V files into</span><select class="field h-7 max-w-44 text-xs" data-slot="canliiHotkeySlot2"></select></label>
+        <div class="setting-field"><span>Data</span><span class="flex gap-1"><button type="button" class="btn btn-outline btn-sm" id="export">Export</button><button type="button" class="btn btn-outline btn-sm" id="import">Import</button></span></div>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+      <div class="mt-3.5 mb-1 flex items-center gap-1.5">
+        <h2 class="eyebrow m-0 flex-1">Folders</h2>
+        <select id="viewer-sort" class="field h-7 px-1.5 text-xs" aria-label="Sort documents">
           <option value="saved">Saved order</option><option value="alpha">A–Z</option><option value="newest">Newest</option>
         </select>
-        <button type="button" class="link" id="copy-links">Copy links</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="copy-links"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>Copy links</button>
       </div>
-      <div id="tree" class="tree" role="tree" aria-label="Folders"></div>
-      <button type="button" class="new-folder" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
+      <div id="tree" class="relative min-w-0" role="tree" aria-label="Folders"></div>
+      <p id="tree-empty" class="tempty" hidden>No folders yet. Add one, then click a circle on CanLII to file a case.</p>
+      <button type="button" class="btn btn-outline btn-sm mt-1.5" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
       <div id="menu" class="menu" role="menu" hidden></div>
     </section>
 
     <section class="panel" data-panel="copy" role="tabpanel" hidden>
-      <div class="doc" id="doc">
-        <p class="doc-kind" id="doc-kind">Checking this page…</p>
-        <p class="doc-cite" id="doc-cite"></p>
+      <div class="card px-3 py-2.5" id="doc">
+        <p class="m-0 text-xs text-muted" id="doc-kind">Checking this page…</p>
+        <p class="m-0 mt-0.5 font-semibold [overflow-wrap:anywhere] empty:hidden" id="doc-cite"></p>
       </div>
-      <div class="grid">
-        <button type="button" class="action primary" data-copy="pinpoint" disabled><span>Pinpoint</span><kbd>Ctrl X</kbd></button>
-        <button type="button" class="action primary" data-copy="quote" disabled><span>Quote</span><kbd>Ctrl ⇧ X</kbd></button>
-        <button type="button" class="action" data-copy="citation" disabled><span>Citation</span><kbd>Alt X</kbd></button>
-        <button type="button" class="action canlii" id="open-canlii" disabled><span>Open in CanLII</span><kbd>Alt C</kbd></button>
+      <div class="grid mt-2 grid-cols-2 gap-1.5">
+        <button type="button" class="btn btn-primary h-10 justify-between" data-copy="pinpoint" disabled><span>Pinpoint</span><kbd class="kbd">Ctrl X</kbd></button>
+        <button type="button" class="btn btn-primary h-10 justify-between" data-copy="quote" disabled><span>Quote</span><kbd class="kbd">Ctrl ⇧ X</kbd></button>
+        <button type="button" class="btn btn-outline h-10 justify-between" data-copy="citation" disabled><span>Citation</span><kbd class="kbd">Alt X</kbd></button>
+        <button type="button" class="btn btn-outline h-10 justify-between enabled:text-brand-text" id="open-canlii" disabled><span>Open in CanLII</span><kbd class="kbd">Alt C</kbd></button>
       </div>
-      <div class="segmented" role="radiogroup" aria-label="Pinpoint format">
+      <div class="seg mt-2 flex w-full" role="radiogroup" aria-label="Pinpoint format">
         <label><input type="radio" name="pinpointStyle" value="full"><span>at paras 12–14</span></label>
         <label><input type="radio" name="pinpointStyle" value="bare"><span>12–14</span></label>
       </div>
-      <h2 class="label">Search &amp; links</h2>
-      <div class="list">
-        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_FIND"><span>Tab Search — search this window</span><kbd>Ctrl ⇧ S</kbd></button>
-        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_OPEN_CANLII_SEARCH"><span>CanLII text search</span><kbd>Alt ⇧ S</kbd></button>
-        <button type="button" class="row" data-launch="LEGAL_PINPOINTER_PDF_LINK"><span>Link to copied text (PDFs)</span><kbd>Ctrl ⇧ F</kbd></button>
+      <h2 class="eyebrow">Search &amp; links</h2>
+      <div class="list card">
+        <button type="button" class="list-row" data-launch="LEGAL_PINPOINTER_OPEN_FIND"><span>Tab Search — this window</span><kbd class="kbd">Ctrl ⇧ S</kbd></button>
+        <button type="button" class="list-row" data-launch="LEGAL_PINPOINTER_OPEN_CANLII_SEARCH"><span>CanLII text search</span><kbd class="kbd">Alt ⇧ S</kbd></button>
+        <button type="button" class="list-row" data-launch="LEGAL_PINPOINTER_PDF_LINK"><span>Link to copied text (PDFs)</span><kbd class="kbd">Ctrl ⇧ F</kbd></button>
       </div>
-      <p class="hint" id="shortcut-hint" hidden></p>
+      <p class="m-0 mt-2 text-xs text-amber-700 dark:text-amber-300" id="shortcut-hint" hidden></p>
     </section>
 
     <section class="panel" data-panel="settings" role="tabpanel" hidden>
-      <h2 class="label">Copying</h2>
+      <h2 class="eyebrow">Copying</h2>
       <div class="card">
-        <label class="toggle"><span><b>Keyboard shortcuts</b><small>Ctrl+X, Ctrl+Shift+X, Alt+X and Alt+C on legal pages</small></span><input type="checkbox" data-setting="copyShortcuts"></label>
-        <label class="toggle"><span><b>Link the whole pinpoint</b><small>For text-fragment sources, link “at para” too</small></span><input type="checkbox" data-setting="linkFullTextFragmentPinpoint"></label>
-        <label class="toggle"><span><b>Link passages without structure</b><small>Text-fragment links on pages with no paragraphs or provisions</small></span><input type="checkbox" data-setting="buildTextFragmentWithoutStructure"></label>
+        <label class="setting"><span><b>Keyboard shortcuts</b><small>Ctrl+X, Ctrl+Shift+X, Alt+X and Alt+C on legal pages</small></span><input type="checkbox" class="switch" data-setting="copyShortcuts"></label>
+        <label class="setting"><span><b>Link the whole pinpoint</b><small>For text-fragment sources, link “at para” too</small></span><input type="checkbox" class="switch" data-setting="linkFullTextFragmentPinpoint"></label>
+        <label class="setting"><span><b>Link passages without structure</b><small>Text-fragment links on pages with no paragraphs or provisions</small></span><input type="checkbox" class="switch" data-setting="buildTextFragmentWithoutStructure"></label>
       </div>
-      <h2 class="label">On the page</h2>
+      <h2 class="eyebrow">On the page</h2>
       <div class="card">
-        <label class="toggle"><span><b>Copy buttons on paragraphs</b><small>Pinpoint and pinpoint-with-text beside each paragraph or section, like Ctrl+X and Ctrl+Shift+X; with text selected, they copy the selection</small></span><input type="checkbox" data-setting="unitCopyButtons"></label>
-        <label class="toggle"><span><b>Name in CanLII’s header</b><small>The full style of cause stays visible as you scroll, with a copy-link button, and titles the tab</small></span><input type="checkbox" data-setting="canliiHeader"></label>
-        <label class="toggle"><span><b>Clean titles on Westlaw &amp; Lexis</b><small>A roomy, selectable title block with a copy-link button</small></span><input type="checkbox" data-setting="cleanTitles"></label>
-        <label class="toggle"><span><b>CanLII button on Westlaw &amp; Lexis</b><small>Lit when a CanLII version is found</small></span><input type="checkbox" data-setting="canliiButton"></label>
-        <label class="toggle"><span><b>Hide selection menus</b><small>Westlaw, Lexis and Practical Law’s highlight/annotate pop-ups</small></span><input type="checkbox" data-setting="suppressSelectionMenus"></label>
+        <label class="setting"><span><b>Copy buttons on paragraphs</b><small>Pinpoint and pinpoint-with-text beside each paragraph or section, like Ctrl+X and Ctrl+Shift+X; with text selected, they copy the selection</small></span><input type="checkbox" class="switch" data-setting="unitCopyButtons"></label>
+        <label class="setting"><span><b>Name in CanLII’s header</b><small>The full style of cause stays visible as you scroll, with a copy-link button, and titles the tab</small></span><input type="checkbox" class="switch" data-setting="canliiHeader"></label>
+        <label class="setting"><span><b>Citation bar on Westlaw &amp; Lexis</b><small>A bar frozen at the top with the citation, Copy link and the CanLII button</small></span><input type="checkbox" class="switch" data-setting="providerHeader"></label>
+        <label class="setting"><span><b>Clean titles on Westlaw &amp; Lexis</b><small>A roomy, selectable title block with a copy-link button</small></span><input type="checkbox" class="switch" data-setting="cleanTitles"></label>
+        <label class="setting"><span><b>CanLII button on Westlaw &amp; Lexis</b><small>Lit when a CanLII version is found</small></span><input type="checkbox" class="switch" data-setting="canliiButton"></label>
+        <label class="setting"><span><b>Hide selection menus</b><small>Westlaw, Lexis and Practical Law’s highlight/annotate pop-ups</small></span><input type="checkbox" class="switch" data-setting="suppressSelectionMenus"></label>
       </div>
-      <h2 class="label">Tab Search</h2>
+      <h2 class="eyebrow">Tab Search</h2>
       <div class="card">
-        <label class="toggle"><span><b>Wake sleeping tabs</b><small>Reload tabs Chrome discarded so they can be searched</small></span><input type="checkbox" data-setting="sonarWakeTabs"></label>
+        <label class="setting"><span><b>Wake sleeping tabs</b><small>When the panel opens, reload sleeping tabs it has never read so they can be searched</small></span><input type="checkbox" class="switch" data-setting="sonarWakeTabs"></label>
       </div>
-      <h2 class="label">Case Marker</h2>
+      <h2 class="eyebrow">PDF links</h2>
       <div class="card">
-        <label class="toggle"><span><b>Circles on CanLII</b><small>On search results and document titles</small></span><input type="checkbox" data-setting="caseMarker"></label>
-        <label class="field"><span>Hover + C files into</span><select data-slot="canliiHotkeySlot1"></select></label>
-        <label class="field"><span>Hover + V files into</span><select data-slot="canliiHotkeySlot2"></select></label>
-        <div class="field"><span>Data</span><span class="pair"><button type="button" class="ghost" id="export">Export</button><button type="button" class="ghost" id="import">Import</button></span></div>
-        <input type="file" id="import-file" accept="application/json,.json" hidden>
-      </div>
-      <h2 class="label">PDF links</h2>
-      <div class="card">
-        <label class="toggle"><span><b>Link to copied text</b><small>Ctrl+Shift+F and the right-click menu</small></span><input type="checkbox" data-setting="pdfFragments"></label>
-        <label class="field"><span>Copy as</span><select data-setting-select="pdfLinkFormat">
+        <label class="setting"><span><b>Link to copied text</b><small>Ctrl+Shift+F and the right-click menu</small></span><input type="checkbox" class="switch" data-setting="pdfFragments"></label>
+        <label class="setting-field"><span>Copy as</span><select class="field h-7 text-xs" data-setting-select="pdfLinkFormat">
           <option value="url">The link</option><option value="text">The text, linked</option><option value="tag">The text + [Link]</option>
         </select></label>
       </div>
-      <button type="button" class="link shortcuts" id="shortcuts">Change keyboard shortcuts…</button>
+      <p class="m-0 mt-3 text-xs text-muted">Case Marker settings are in the Marker tab.</p>
+      <button type="button" class="btn-link mt-2" id="shortcuts">Change keyboard shortcuts…</button>
     </section>
   </main>
 
-  <footer><p id="status" role="status" aria-live="polite"></p></footer>
+  <footer class="shrink-0 border-t border-line bg-surface px-3"><p id="status" class="m-0 h-7 truncate text-xs leading-7 text-muted [&.error]:text-brand-text" role="status" aria-live="polite"></p></footer>
   <script src="marker-core.js"></script>
   <script src="popup.js"></script>
 </body>

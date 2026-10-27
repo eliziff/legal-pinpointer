@@ -7,7 +7,7 @@
   const SETTINGS = {
     pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
     unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
-    sonarWakeTabs: true, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
+    sonarWakeTabs: true, providerHeader: true, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
   const MARKER = { canliiFolders: {}, canliiMarkers: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
   // Folders take the next unused colour of this palette instead of all starting the same.
@@ -150,7 +150,8 @@
     if (style) style.checked = true;
   }
 
-  document.querySelector('[data-panel="settings"]').addEventListener('change', (event) => {
+  // Settings live in the Settings tab and, for Case Marker, in the Marker tab's own settings.
+  const onSettingChange = (event) => {
     const target = event.target;
     if (target.dataset.setting) {
       settings[target.dataset.setting] = target.checked;
@@ -163,6 +164,14 @@
       marker[key === 'canliiHotkeySlot1' ? 'slot1' : 'slot2'] = target.value || null;
       chrome.storage.local.set({ [key]: target.value || null });
     }
+  };
+  document.querySelector('[data-panel="settings"]').addEventListener('change', onSettingChange);
+  $('marker-settings').addEventListener('change', onSettingChange);
+  $('marker-settings-toggle').addEventListener('click', () => {
+    const open = $('marker-settings').hidden;
+    $('marker-settings').hidden = !open;
+    $('marker-settings-toggle').setAttribute('aria-expanded', open);
+    if (open) renderSlots();
   });
 
   $('shortcuts').addEventListener('click', () => chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }));
@@ -247,15 +256,29 @@
     return keys;
   }
   const projectDocuments = () => Object.keys(marker.markers).filter((key) => projectData(key));
-  /** Under a folder: filed there and not also deeper inside it. Under the root: filed nowhere. */
-  function under(folderId) {
-    return sortDocuments(projectDocuments().filter((key) => {
-      const ids = documentFilings(key);
-      return folderId ? ids.includes(folderId) && !ids.some((id) => id !== folderId && inside(id, folderId)) : !ids.length;
-    }));
-  }
-  /** In a folder or anywhere below it (all documents for the root): counts and Copy links. */
+  /** In a folder or anywhere below it (all documents for the root): Copy links. */
   const within = (folderId) => sortDocuments(projectDocuments().filter((key) => !folderId || documentFilings(key).some((id) => inside(id, folderId))));
+  /** One pass over the documents per render: the documents shown under each folder (filed there and
+   *  not also deeper inside it; the root holds the unfiled ones) and each folder's count (filed in it
+   *  or below). A render costs documents x depth, never folders x documents. */
+  function treeIndex() {
+    const paths = new Map(), shown = new Map(), counts = new Map(), unfiled = [];
+    const path = (id) => { let value = paths.get(id); if (!value) paths.set(id, value = core.folderPath(marker.folders, id)); return value; };
+    const documents = sortDocuments(projectDocuments());
+    for (const key of documents) {
+      const ids = documentFilings(key);
+      if (!ids.length) { unfiled.push(key); continue; }
+      const reached = new Set();
+      for (const id of ids) {
+        for (const ancestor of path(id)) reached.add(ancestor);
+        if (ids.some((other) => other !== id && path(other).includes(id))) continue;
+        if (!shown.has(id)) shown.set(id, []);
+        shown.get(id).push(key);
+      }
+      for (const id of reached) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    return { folders: tree(), shown, counts, unfiled, total: documents.length };
+  }
 
   function saveDocuments() {
     return chrome.storage.local.set({ canliiMarkers: marker.markers });
@@ -266,48 +289,111 @@
       `<option value="${escapeHtml(projectId)}"${projectId === marker.project ? ' selected' : ''}>${escapeHtml(project.name)}</option>`).join('');
   }
 
-  const addField = (parentId) => adding === parentId
-    ? '<div class="tadd"><input class="tname-input" data-add maxlength="80" placeholder="Folder name" aria-label="Folder name"></div>' : '';
+  // The tree is virtualized: every row is ROW px tall, the tree is one flat list of rows (a folder,
+  // the folders and documents under it, an add field), and only the rows in or near the visible part
+  // of the popup are in the page. Screen readers get the flat-tree attributes (aria-level, set size,
+  // position). 3,000 documents in 300 folders render as fast as ten.
+  const ROW = 28, OVERSCAN = 8, scroller = document.querySelector('main');
+  let rows = [], drawn = '', drawFrame = 0;
 
-  function documentNode(key) {
-    const title = documentTitle(key), note = projectData(key)?.note || '', url = documentUrl(key);
-    const glyph = key.includes('/laws/') ? 'scroll' : key.startsWith('commentary/') ? 'file' : 'gavel';
-    return `<div role="treeitem" aria-label="${escapeHtml(title)}"><div class="trow" data-document="${escapeHtml(key)}" draggable="true" title="${escapeHtml([title, note].filter(Boolean).join('\n'))}">`
-      + `<span class="tspace"></span><span class="tglyph">${core.icon(glyph, 'ticon')}</span>`
-      + (url ? `<a class="tname" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>` : `<span class="tname">${escapeHtml(title)}</span>`)
-      + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(title)} options">${core.icon('more', 'ticon')}</button></span></div></div>`;
+  // The index changes only with the data; opening or closing a folder re-flattens the cached one.
+  let cachedIndex = null;
+  function flatten(reindex) {
+    const index = cachedIndex = reindex || !cachedIndex ? treeIndex() : cachedIndex, list = [{ kind: 'root', depth: 0, total: index.total }];
+    const walk = (parentId, depth) => {
+      const siblings = index.folders.get(parentId) || [];
+      siblings.forEach(([folderId, folder], position) => {
+        const documents = index.shown.get(folderId) || [];
+        const hasChildren = (index.folders.get(folderId) || []).length > 0 || documents.length > 0, open = !closed.has(folderId);
+        list.push({ kind: 'folder', id: folderId, folder, depth, hasChildren, open, count: index.counts.get(folderId) || 0, position: position + 1, size: siblings.length });
+        if (!open) return;
+        walk(folderId, depth + 1);
+        for (const key of documents) list.push({ kind: 'document', key, depth: depth + 1 });
+        if (adding === folderId) list.push({ kind: 'add', depth: depth + 1 });
+      });
+    };
+    walk(null, 0);
+    for (const key of index.unfiled) list.push({ kind: 'document', key, depth: 0 });
+    if (adding === null) list.push({ kind: 'add', depth: 0 });
+    return { list, index };
   }
 
-  function branch(parentId, folders) {
-    return (folders.get(parentId) || []).map(([folderId, folder]) => {
-      const documents = under(folderId), hasChildren = (folders.get(folderId) || []).length > 0 || documents.length > 0;
-      const open = !closed.has(folderId), count = within(folderId).length;
-      const name = renaming === folderId
-        ? `<input class="tname-input" data-rename value="${escapeHtml(folder.name)}" maxlength="80" aria-label="Folder name">`
-        : `<button type="button" class="tname" data-select="${folderId}" aria-pressed="${selected === folderId}" title="${escapeHtml(pathName(folderId))}">${escapeHtml(folder.name)}</button>`;
-      return `<div role="treeitem" aria-label="${escapeHtml(folder.name)}" aria-selected="${selected === folderId}"${hasChildren ? ` aria-expanded="${open}"` : ''}>`
-        + `<div class="trow" data-folder="${folderId}" draggable="${renaming !== folderId}">`
-        + (hasChildren ? `<button type="button" class="tchev${open ? ' open' : ''}" data-toggle aria-label="${open ? 'Collapse' : 'Expand'} ${escapeHtml(folder.name)}">${core.icon('chevron', 'ticon')}</button>` : '<span class="tspace"></span>')
-        // Filled in the folder's colour; the chevron already says open or closed.
-        + `<label class="tglyph" title="${escapeHtml(folder.name)} colour">${core.folderIcon(folder.color || '#9aa5b1', 'ticon')}<input type="color" value="${escapeHtml(folder.color || '#9aa5b1')}" data-color aria-label="${escapeHtml(folder.name)} colour"></label>`
-        + `${name}<span class="tcount">${count || ''}</span>`
-        + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(folder.name)} options">${core.icon('more', 'ticon')}</button></span></div>`
-        + (open ? `<div role="group" class="tgroup">${branch(folderId, folders)}${documents.map(documentNode).join('')}${addField(folderId)}</div>` : '')
-        + '</div>';
-    }).join('');
+  function rowHtml(row, at) {
+    const place = `class="tvrow" style="top:${at * ROW}px;padding-inline-start:${row.depth * 16}px" aria-level="${row.depth + 1}"`;
+    if (row.kind === 'root') {
+      return `<div role="treeitem" ${place} aria-selected="${selected === null}"><button type="button" class="trow troot" data-select="" data-root aria-pressed="${selected === null}">`
+        + `<span class="tspace"></span><span class="tname">All documents</span><span class="tcount">${row.total || ''}</span><span class="tactions"></span></button></div>`;
+    }
+    if (row.kind === 'add') return `<div role="treeitem" ${place}><div class="tadd"><input class="tname-input" data-add maxlength="80" placeholder="Folder name" aria-label="Folder name"></div></div>`;
+    if (row.kind === 'document') {
+      const key = row.key, title = documentTitle(key), note = projectData(key)?.note || '', url = documentUrl(key);
+      const glyph = key.includes('/laws/') ? 'scroll' : key.startsWith('commentary/') ? 'file' : 'gavel';
+      return `<div role="treeitem" ${place} aria-label="${escapeHtml(title)}"><div class="trow" data-document="${escapeHtml(key)}" draggable="true" title="${escapeHtml([title, note].filter(Boolean).join('\n'))}">`
+        + `<span class="tspace"></span><span class="tglyph">${core.icon(glyph, 'ticon')}</span>`
+        + (url ? `<a class="tname" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>` : `<span class="tname">${escapeHtml(title)}</span>`)
+        + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(title)} options">${core.icon('more', 'ticon')}</button></span></div></div>`;
+    }
+    const { id: folderId, folder, open } = row, color = escapeHtml(folder.color || '#9aa5b1');
+    const name = renaming === folderId
+      ? `<input class="tname-input" data-rename value="${escapeHtml(folder.name)}" maxlength="80" aria-label="Folder name">`
+      : `<button type="button" class="tname" data-select="${folderId}" aria-pressed="${selected === folderId}" title="${escapeHtml(pathName(folderId))}">${escapeHtml(folder.name)}</button>`;
+    return `<div role="treeitem" ${place} aria-label="${escapeHtml(folder.name)}" aria-selected="${selected === folderId}" aria-setsize="${row.size}" aria-posinset="${row.position}"${row.hasChildren ? ` aria-expanded="${open}"` : ''}>`
+      + `<div class="trow" data-folder="${folderId}" draggable="${renaming !== folderId}">`
+      + (row.hasChildren ? `<button type="button" class="tchev${open ? ' open' : ''}" data-toggle aria-label="${open ? 'Collapse' : 'Expand'} ${escapeHtml(folder.name)}">${core.icon('chevron', 'ticon')}</button>` : '<span class="tspace"></span>')
+      // Filled in the folder's colour; the chevron already says open or closed.
+      + `<label class="tglyph" title="${escapeHtml(folder.name)} colour">${core.folderIcon(folder.color || '#9aa5b1', 'ticon')}<input type="color" value="${color}" data-color aria-label="${escapeHtml(folder.name)} colour"></label>`
+      + `${name}<span class="tcount">${row.count || ''}</span>`
+      + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(folder.name)} options">${core.icon('more', 'ticon')}</button></span></div></div>`;
   }
 
-  function renderTree() {
-    const folders = tree(), active = document.activeElement?.closest?.('#tree [data-select]')?.dataset.select;
-    $('tree').innerHTML = `<div role="treeitem" aria-selected="${selected === null}"><button type="button" class="trow troot" data-select="" data-root aria-pressed="${selected === null}">`
-      + `<span class="tspace"></span><span class="tname">All documents</span><span class="tcount">${projectDocuments().length || ''}</span><span class="tactions"></span></button></div>`
-      + branch(null, folders) + under(null).map(documentNode).join('') + addField(null);
-    if (!folders.size && !projectDocuments().length && adding === undefined) $('tree').insertAdjacentHTML('beforeend', '<p class="tempty">No folders yet. Add one, then click a circle on CanLII to file a case.</p>');
+  /** Draws the rows in or near view; keeps the focused control focused across a redraw. */
+  function draw(force = false) {
+    const tree = $('tree');
+    if (!tree.offsetParent) return;
+    const offset = scroller.getBoundingClientRect().top - tree.getBoundingClientRect().top;
+    const start = Math.max(0, Math.floor(offset / ROW) - OVERSCAN), end = Math.min(rows.length, Math.ceil((offset + scroller.clientHeight) / ROW) + OVERSCAN);
+    const span = `${start}:${end}`;
+    if (!force && span === drawn) return;
+    const focused = document.activeElement && tree.contains(document.activeElement) ? document.activeElement : null;
+    const keep = focused && (focused.closest('[data-select]') ? `[data-select="${CSS.escape(focused.closest('[data-select]').dataset.select)}"]` : null);
+    let html = '';
+    for (let at = start; at < end; at++) html += rowHtml(rows[at], at);
+    tree.innerHTML = html;
+    drawn = span;
+    if (keep) tree.querySelector(keep)?.focus({ preventScroll: true });
+  }
+  scroller.addEventListener('scroll', () => {
+    if (!drawFrame) drawFrame = requestAnimationFrame(() => { drawFrame = 0; draw(); });
+  }, { passive: true });
+
+  /** Scrolls a row into view (drawing it) and returns its element. */
+  function reveal(at) {
+    if (at < 0) return null;
+    const tree = $('tree'), offset = scroller.getBoundingClientRect().top - tree.getBoundingClientRect().top;
+    if (at * ROW < offset) scroller.scrollTop -= offset - at * ROW;
+    else if ((at + 1) * ROW > offset + scroller.clientHeight) scroller.scrollTop += (at + 1) * ROW - (offset + scroller.clientHeight);
+    draw();
+    return tree.querySelector(`.tvrow[style^="top:${at * ROW}px"]`);
+  }
+
+  /** `reindex: false` when only what is open changed (the data did not). */
+  function renderTree({ reindex = true } = {}) {
+    const active = document.activeElement?.closest?.('#tree [data-select]')?.dataset.select;
+    const { list, index } = flatten(reindex);
+    rows = list;
+    $('tree').style.height = `${rows.length * ROW}px`;
+    $('tree-empty').hidden = Boolean(index.folders.size || index.total || adding !== undefined);
     $('copy-links').title = `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
-    $('tree').querySelector('[data-add], [data-rename]')?.focus();
-    if (active !== undefined && !$('tree').querySelector('[data-add], [data-rename]')) focusFolder(active);
+    draw(true);
+    const editing = rows.findIndex((row) => row.kind === 'add' || (row.kind === 'folder' && row.id === renaming));
+    if (editing >= 0) { reveal(editing)?.querySelector('input.tname-input')?.focus(); return; }
+    if (active !== undefined) focusFolder(active);
   }
-  const focusFolder = (id) => $('tree').querySelector(`[data-select="${CSS.escape(id || '')}"]`)?.focus();
+  /** Focuses a folder's row (or "All documents" for ''), scrolling it into view. */
+  function focusFolder(id) {
+    const at = rows.findIndex((row) => id ? row.kind === 'folder' && row.id === id : row.kind === 'root');
+    reveal(at)?.querySelector('[data-select]')?.focus({ preventScroll: true });
+  }
 
   function renderMarker() {
     markerRendered = true;
@@ -482,8 +568,13 @@
     if (!button) return;
     const row = button.closest('.trow'), folderId = row?.dataset.folder;
     if (button.hasAttribute('data-menu')) { if ($('menu').target?.button === button && !$('menu').hidden) closeMenu(); else openMenu(button); }
-    else if (button.hasAttribute('data-toggle')) { if (!closed.delete(folderId)) closed.add(folderId); renderTree(); }
-    else if (button.hasAttribute('data-select')) { selected = button.dataset.select || null; renderTree(); focusFolder(button.dataset.select); }
+    else if (button.hasAttribute('data-toggle')) { if (!closed.delete(folderId)) closed.add(folderId); renderTree({ reindex: false }); }
+    else if (button.hasAttribute('data-select')) {
+      // Choosing a folder changes only which row is marked: redraw the rows in view.
+      selected = button.dataset.select || null;
+      $('copy-links').title = `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
+      draw(true);
+    }
   });
 
   // Colour changes repaint the folder at once and save when the picker settles.
@@ -506,15 +597,16 @@
     event.preventDefault();
     const folderId = button.dataset.select, hasChildren = folderId && tree().has(folderId);
     if (event.altKey && folderId) return moveKey(folderId, event.key);
-    if (event.key === 'ArrowRight' && hasChildren) { closed.delete(folderId); renderTree(); focusFolder(folderId); return; }
+    if (event.key === 'ArrowRight' && hasChildren) { closed.delete(folderId); renderTree({ reindex: false }); focusFolder(folderId); return; }
     if (event.key === 'ArrowLeft' && folderId) {
-      if (hasChildren && !closed.has(folderId)) { closed.add(folderId); renderTree(); focusFolder(folderId); }
+      if (hasChildren && !closed.has(folderId)) { closed.add(folderId); renderTree({ reindex: false }); focusFolder(folderId); }
       else focusFolder(marker.folders[folderId].parentId || '');
       return;
     }
-    const buttons = [...$('tree').querySelectorAll('[data-select]')], index = buttons.indexOf(button);
-    const target = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : index + (event.key === 'ArrowUp' ? -1 : 1);
-    buttons[Math.max(0, Math.min(buttons.length - 1, target))]?.focus();
+    // Up and down walk "All documents" and the folders in the whole list, drawn or not.
+    const ids = rows.flatMap((row) => row.kind === 'root' ? [''] : row.kind === 'folder' ? [row.id] : []), index = ids.indexOf(folderId);
+    const target = event.key === 'Home' ? 0 : event.key === 'End' ? ids.length - 1 : index + (event.key === 'ArrowUp' ? -1 : 1);
+    focusFolder(ids[Math.max(0, Math.min(ids.length - 1, target))]);
   });
   $('tree').addEventListener('focusout', (event) => { if (event.target.matches?.('.tname-input')) commitName(event.target); });
 
@@ -643,6 +735,8 @@
   });
 
   let armedProject = 0;
+  const trashIcon = document.querySelector('[data-project="delete"]').innerHTML;
+  const disarm = (button) => { button.innerHTML = trashIcon; button.classList.remove('text-brand-text', 'w-auto', 'px-2'); };
   document.querySelector('.project').addEventListener('click', (event) => {
     const button = event.target.closest('[data-project]');
     if (!button) return;
@@ -652,8 +746,8 @@
     if (projects().length < 2) return status('Keep at least one project.', true);
     if (!armedProject) {
       button.textContent = 'Delete?';
-      button.style.width = 'auto';
-      armedProject = setTimeout(() => { armedProject = 0; button.textContent = '🗑'; button.style.width = ''; }, 2500);
+      button.classList.add('text-brand-text', 'w-auto', 'px-2');
+      armedProject = setTimeout(() => { armedProject = 0; disarm(button); }, 2500);
       return;
     }
     clearTimeout(armedProject);
@@ -666,8 +760,7 @@
     saveMarker(true);
     renderMarker();
     renderSlots();
-    button.textContent = '🗑';
-    button.style.width = '';
+    disarm(button);
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {

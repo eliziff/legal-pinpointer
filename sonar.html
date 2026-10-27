@@ -4,28 +4,46 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Tab Search · Legal Pinpointer</title>
-  <link rel="stylesheet" href="sonar.css">
+  <link rel="stylesheet" href="ui.css">
 </head>
-<body data-route="tabs">
-  <main id="workspace">
-    <header id="search-header">
-      <nav aria-label="Search destination"><button id="tabs-route" aria-pressed="true">Open tabs</button><button id="canlii-route" aria-pressed="false">CanLII</button></nav>
-      <form id="search-form" role="search">
+<body data-route="tabs" class="m-0 h-dvh overflow-hidden bg-surface">
+  <main id="workspace" class="grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+    <header id="search-header" class="border-b border-line bg-surface px-3 pt-2.5 pb-2">
+      <div class="flex items-center gap-2">
+        <span class="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-white" aria-hidden="true"><svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4v16"/><path d="M17 4v16"/><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/></svg></span>
+        <nav class="seg" aria-label="Search destination"><button id="tabs-route" type="button" aria-pressed="true">Open tabs</button><button id="canlii-route" type="button" aria-pressed="false">CanLII</button></nav>
+      </div>
+      <form id="search-form" role="search" class="mt-2">
         <label class="sr-only" for="query">Search open tabs</label>
-        <div class="input-row"><input id="query" type="text" placeholder="Search open tabs" autocomplete="off" spellcheck="false" maxlength="1024"><button id="help" type="button" aria-label="Search operators" aria-controls="operators">?</button></div>
-        <div id="canlii-fields"><label class="sr-only" for="canlii-title">Case name, citation or title</label><input id="canlii-title" data-field="id" type="text" placeholder="Case name, citation or title" autocomplete="off" spellcheck="false" maxlength="4096"><label class="sr-only" for="canlii-noteup">Noteup / discussion</label><input id="canlii-noteup" data-field="noteup" type="text" placeholder="Noteup / discussion" autocomplete="off" spellcheck="false" maxlength="4096"></div>
-        <div id="scope-row"><div id="scope" role="group" aria-label="Search in"><button type="button" data-scope="window" aria-pressed="true">This window</button><button type="button" data-scope="group" aria-pressed="false">This group</button><button type="button" data-scope="current" aria-pressed="false">This tab</button></div><button id="issues" type="button" class="quiet" hidden>Skipped tabs</button><button id="use-active" type="button" class="quiet">Use active tab</button></div>
-        <p id="origin"></p>
+        <div class="flex gap-1.5">
+          <div class="relative min-w-0 flex-1">
+            <svg class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="query" class="field h-9 w-full ps-8 text-sm" type="text" placeholder="Search open tabs" autocomplete="off" spellcheck="false" maxlength="1024">
+          </div>
+          <button id="help" type="button" class="btn btn-outline btn-icon size-9 text-muted" aria-label="Search operators" aria-controls="operators" title="Search operators"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9a2.5 2.5 0 0 1 4.8.8c0 1.7-2.4 2.3-2.4 3.7"/><path d="M12 17h.01"/></svg></button>
+        </div>
+        <div id="canlii-fields" class="mt-1.5 grid gap-1.5">
+          <label class="sr-only" for="canlii-title">Case name, citation or title</label><input id="canlii-title" class="field w-full" data-field="id" type="text" placeholder="Case name, citation or title" autocomplete="off" spellcheck="false" maxlength="4096">
+          <label class="sr-only" for="canlii-noteup">Noteup / discussion</label><input id="canlii-noteup" class="field w-full" data-field="noteup" type="text" placeholder="Noteup / discussion" autocomplete="off" spellcheck="false" maxlength="4096">
+        </div>
+        <div id="scope-row" class="mt-2 flex h-7 min-w-0 items-center gap-2">
+          <div id="scope" class="seg" role="group" aria-label="Search in"><button type="button" data-scope="window" aria-pressed="true">This window</button><button type="button" data-scope="group" aria-pressed="false">This group</button><button type="button" data-scope="current" aria-pressed="false">This tab</button></div>
+          <button id="issues" type="button" class="btn-link ms-auto" hidden>Skipped tabs</button>
+        </div>
+        <div class="mt-1.5 flex h-4 min-w-0 items-center gap-2">
+          <p id="origin" class="m-0 min-w-0 flex-1 truncate text-[11px] text-muted"></p>
+          <button id="use-active" type="button" class="btn-link text-[11px] text-muted hover:text-ink">Use active tab</button>
+        </div>
       </form>
     </header>
     <div id="list-viewport" role="listbox" aria-label="Matching passages" tabindex="0">
       <div id="result-spacer"><div id="result-rows"></div></div>
-      <p id="empty" hidden>No matching passages.</p>
+      <p id="empty" class="absolute inset-x-0 top-0 m-0 px-3 py-6 text-center text-xs text-muted" hidden>No matching passages.</p>
     </div>
-    <p id="notice" role="status" aria-live="polite"></p>
+    <p id="notice" class="m-0 h-6 truncate border-t border-line bg-surface px-3 text-[11px] leading-6 text-ink-soft" role="status" aria-live="polite"></p>
   </main>
-  <section id="operators" popover aria-label="Search operators"><table><tr><th scope="row">AND</th><td><code>permit AND hunting</code></td><td>Both terms</td></tr><tr><th scope="row">OR</th><td><code>city OR municipality</code></td><td>Either term</td></tr><tr><th scope="row">NOT or -</th><td><code>custody NOT child<br>custody -child</code></td><td>Not the term that follows</td></tr><tr><th scope="row">&quot; &quot;</th><td><code>&quot;R. v. Douglas&quot;</code></td><td>The phrase or its variants</td></tr><tr><th scope="row">EXACT( )</th><td><code>EXACT(reviewable transaction)</code></td><td>Exactly this phrase</td></tr><tr><th scope="row">*</th><td><code>constru*</code></td><td>Words beginning with these letters</td></tr><tr><th scope="row">/n</th><td><code>letter /5 credit</code></td><td>Within n words of each other</td></tr><tr><th scope="row">/s</th><td><code>tax /s income</code></td><td>In the same sentence</td></tr><tr><th scope="row">/p</th><td><code>levy /p probate</code></td><td>In the same paragraph</td></tr><tr><th scope="row">( )</th><td><code>(contract /s sale) OR seller</code></td><td>Groups terms</td></tr></table></section>
-  <section id="issue-popover" popover aria-label="Skipped tabs"><p id="limit-detail"></p><ul id="issue-list"></ul></section>
+  <section id="operators" class="popover" popover aria-label="Search operators"><table><tr><th scope="row">AND</th><td><code>permit AND hunting</code></td><td>Both terms</td></tr><tr><th scope="row">OR</th><td><code>city OR municipality</code></td><td>Either term</td></tr><tr><th scope="row">NOT or -</th><td><code>custody NOT child<br>custody -child</code></td><td>Not the term that follows</td></tr><tr><th scope="row">&quot; &quot;</th><td><code>&quot;R. v. Douglas&quot;</code></td><td>The phrase or its variants</td></tr><tr><th scope="row">EXACT( )</th><td><code>EXACT(reviewable transaction)</code></td><td>Exactly this phrase</td></tr><tr><th scope="row">*</th><td><code>constru*</code></td><td>Words beginning with these letters</td></tr><tr><th scope="row">/n</th><td><code>letter /5 credit</code></td><td>Within n words of each other</td></tr><tr><th scope="row">/s</th><td><code>tax /s income</code></td><td>In the same sentence</td></tr><tr><th scope="row">/p</th><td><code>levy /p probate</code></td><td>In the same paragraph</td></tr><tr><th scope="row">( )</th><td><code>(contract /s sale) OR seller</code></td><td>Groups terms</td></tr></table></section>
+  <section id="issue-popover" class="popover max-h-[70vh] w-[390px] overflow-auto" popover aria-label="Tabs not searched"><p class="m-0 mb-1.5 font-semibold">Not in these results</p><p id="limit-detail" class="mt-0"></p><ul id="issue-list" class="m-0 ps-4.5 text-ink-soft"></ul></section>
   <script src="find-core.js"></script>
   <script src="sonar-results.js"></script>
   <script src="sonar.js"></script>
