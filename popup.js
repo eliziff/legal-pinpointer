@@ -9,7 +9,7 @@
     unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
     sonarWakeTabs: true, providerHeader: true, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
-  const MARKER = { canliiFolders: {}, canliiMarkers: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
+  const MARKER = { canliiFolders: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
   // Folders take the next unused colour of this palette instead of all starting the same.
   const PALETTE = ['#3b7ddd', '#e0533d', '#2f9e6e', '#e3a21a', '#8b5cf6', '#db4f9a', '#1aa3a3', '#ef7d22', '#5f6f86', '#7cb32a'];
   const settings = { ...SETTINGS };
@@ -176,8 +176,16 @@
 
   $('shortcuts').addEventListener('click', () => chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }));
 
+  // Export writes the original Case Marker's format: every document in one canliiMarkers object,
+  // each project's folderPath its first filing's path.
   $('export').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify({ canliiFolders: marker.folders, canliiMarkers: marker.markers, canliiProjects: marker.projects,
+    const markers = {};
+    for (const [key, value] of Object.entries(marker.markers)) {
+      const copy = structuredClone(value);
+      for (const [projectId, data] of Object.entries(copy.byProject || {})) core.setFilings(data, core.filings(data, marker.folders, projectId), marker.folders);
+      markers[key] = copy;
+    }
+    const blob = new Blob([JSON.stringify({ canliiFolders: marker.folders, canliiMarkers: markers, canliiProjects: marker.projects,
       canliiCurrentProject: marker.project, canliiHotkeySlot1: marker.slot1, canliiHotkeySlot2: marker.slot2 }, null, 1)], { type: 'application/json' });
     const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `case-marker-${new Date().toISOString().slice(0, 10)}.json` });
     link.click();
@@ -193,12 +201,13 @@
       if (!imported || typeof imported !== 'object' || (!imported.canliiFolders && !imported.canliiMarkers)) throw new Error('That file has no Case Marker folders or markers.');
       Object.assign(marker.projects, imported.canliiProjects || {});
       Object.assign(marker.folders, imported.canliiFolders || {});
+      const changed = {};
       for (const [key, value] of Object.entries(imported.canliiMarkers || {})) {
         const existing = marker.markers[key];
-        marker.markers[key] = existing ? { ...existing, ...value, byProject: { ...(existing.byProject || {}), ...(value.byProject || {}) } } : value;
+        changed[key] = marker.markers[key] = existing ? { ...existing, ...value, byProject: { ...(existing.byProject || {}), ...(value.byProject || {}) } } : value;
       }
       ensureProject();
-      await saveMarker(true);
+      await Promise.all([saveMarker(true), core.writeDocuments(changed)]);
       markerRendered = false;
       renderSlots();
       status(`Imported ${Object.keys(imported.canliiFolders || {}).length} folders and ${Object.keys(imported.canliiMarkers || {}).length} documents.`);
@@ -220,7 +229,7 @@
 
   function saveMarker(all = false) {
     const values = { canliiFolders: marker.folders, canliiProjects: marker.projects, canliiCurrentProject: marker.project };
-    if (all) Object.assign(values, { canliiMarkers: marker.markers, canliiHotkeySlot1: marker.slot1, canliiHotkeySlot2: marker.slot2 });
+    if (all) Object.assign(values, { canliiHotkeySlot1: marker.slot1, canliiHotkeySlot2: marker.slot2 });
     return chrome.storage.local.set(values);
   }
 
@@ -280,8 +289,9 @@
     return { folders: tree(), shown, counts, unfiled, total: documents.length };
   }
 
-  function saveDocuments() {
-    return chrome.storage.local.set({ canliiMarkers: marker.markers });
+  /** Writes the documents named, each under its own key; nothing else is rewritten. */
+  function saveDocuments(...keys) {
+    return core.writeDocuments(Object.fromEntries(keys.map((key) => [key, marker.markers[key] || null])));
   }
 
   function renderProjects() {
@@ -492,11 +502,8 @@
 
   function deleteFolder(folderId) {
     const gone = new Set([folderId, ...projectFolders().filter((other) => inside(other, folderId))]);
+    // Documents are not rewritten: a filing whose folder is gone is never read (core.filings).
     for (const goneId of gone) delete marker.folders[goneId];
-    for (const key of projectDocuments()) {
-      const data = projectData(key);
-      core.setFilings(data, core.filings(data, marker.folders, marker.project), marker.folders);
-    }
     if (gone.has(selected)) selected = null;
     if (gone.has(marker.slot1)) marker.slot1 = null;
     if (gone.has(marker.slot2)) marker.slot2 = null;
@@ -512,13 +519,13 @@
     const data = projectData(key);
     if (!data) return;
     core.setFilings(data, folderIds, marker.folders);
-    saveDocuments();
+    saveDocuments(key);
     renderTree();
   }
   function removeDocument(key) {
     delete marker.markers[key].byProject[marker.project];
     if (!Object.keys(marker.markers[key].byProject).length) delete marker.markers[key];
-    saveDocuments();
+    saveDocuments(key);
     renderTree();
   }
   function label(key, anchor) {
@@ -531,7 +538,7 @@
         core.setFilings(data, folderIds, marker.folders);
         if (note) data.note = note; else delete data.note;
         if (badge) data.badge = badge; else delete data.badge;
-        saveDocuments();
+        saveDocuments(key);
         renderTree();
       },
       onClose() { editor = null; }
@@ -786,7 +793,13 @@
     clearTimeout(armedProject);
     armedProject = 0;
     for (const [folderId, folder] of Object.entries(marker.folders)) if (folder.projectId === marker.project) delete marker.folders[folderId];
-    for (const value of Object.values(marker.markers)) delete value?.byProject?.[marker.project];
+    // Only the documents filed in this project are rewritten (or removed, when it was their last).
+    const touched = Object.keys(marker.markers).filter((key) => marker.markers[key]?.byProject?.[marker.project]);
+    for (const key of touched) {
+      delete marker.markers[key].byProject[marker.project];
+      if (!Object.keys(marker.markers[key].byProject).length) delete marker.markers[key];
+    }
+    saveDocuments(...touched);
     delete marker.projects[marker.project];
     ensureProject();
     selected = null;
@@ -796,18 +809,22 @@
     disarm(button);
   });
 
+  // A page filed or changed documents: each change carries its document.
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes.canliiMarkers) return;
-    marker.markers = changes.canliiMarkers.newValue || {};
+    if (area !== 'local') return;
+    const changed = Object.entries(core.documentChanges(changes));
+    if (!changed.length) return;
+    for (const [key, value] of changed) if (value) marker.markers[key] = value; else delete marker.markers[key];
     if (markerRendered && !$('tree').querySelector('.tname-input')) renderTree();
   });
 
   // ---------------------------------------------------------------------------
 
-  chrome.storage.local.get({ ...SETTINGS, ...MARKER }, (stored) => {
+  // A stored single-object canliiMarkers (before documents had their own keys) is split first.
+  Promise.all([chrome.storage.local.get({ ...SETTINGS, ...MARKER }), core.splitLegacy().catch(() => false).then(() => core.readDocuments())]).then(([stored, documents]) => {
     for (const key of Object.keys(SETTINGS)) settings[key] = stored[key];
     marker.folders = stored.canliiFolders || {};
-    marker.markers = stored.canliiMarkers || {};
+    marker.markers = documents;
     marker.projects = stored.canliiProjects || {};
     marker.project = stored.canliiCurrentProject;
     marker.slot1 = stored.canliiHotkeySlot1;

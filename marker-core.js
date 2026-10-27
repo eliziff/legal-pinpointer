@@ -202,5 +202,48 @@
     };
   }
 
-  globalThis.LegalPinpointerMarkerCore = { escapeHtml, icon, folderIcon, folderChildren, folderPath, filings, setFilings, circle, filingNames, waterfall, openEditor, BADGE_MAX };
+  // ---------------------------------------------------------------------------
+  // Storage: one key per document (DOC_PREFIX + its key), so a change writes that document alone and
+  // a page reads only the documents it shows. The original Case Marker's single canliiMarkers object
+  // is what Export writes and Import reads; a stored one is split into documents once (splitLegacy).
+
+  const DOC_PREFIX = 'cm:';
+  const storageKey = (key) => DOC_PREFIX + key;
+  function documentsIn(stored) {
+    const documents = {};
+    for (const [name, value] of Object.entries(stored || {})) if (name.startsWith(DOC_PREFIX) && value) documents[name.slice(DOC_PREFIX.length)] = value;
+    return documents;
+  }
+  /** The stored documents for `keys`, or every stored document when `keys` is omitted. */
+  async function readDocuments(keys) {
+    const area = chrome.storage.local;
+    if (keys) return keys.length ? documentsIn(await area.get(keys.map(storageKey))) : {};
+    const names = area.getKeys ? (await area.getKeys()).filter((name) => name.startsWith(DOC_PREFIX)) : null;
+    return documentsIn(await area.get(names));
+  }
+  /** Writes each document given (a null value removes it), in one set and one remove. */
+  async function writeDocuments(entries) {
+    const set = {}, remove = [];
+    for (const [key, value] of Object.entries(entries)) if (value) set[storageKey(key)] = value; else remove.push(storageKey(key));
+    await Promise.all([Object.keys(set).length && chrome.storage.local.set(set), remove.length && chrome.storage.local.remove(remove)]);
+  }
+  /** Changed documents in a storage change: { key: new value, or undefined when removed }. */
+  function documentChanges(changes) {
+    const changed = {};
+    for (const [name, change] of Object.entries(changes)) if (name.startsWith(DOC_PREFIX)) changed[name.slice(DOC_PREFIX.length)] = change.newValue;
+    return changed;
+  }
+  /** Moves a stored canliiMarkers object into per-document keys (never over a newer document). */
+  async function splitLegacy() {
+    const { canliiMarkers } = await chrome.storage.local.get('canliiMarkers');
+    if (!canliiMarkers || typeof canliiMarkers !== 'object') return false;
+    const present = await readDocuments(Object.keys(canliiMarkers)), set = {};
+    for (const [key, value] of Object.entries(canliiMarkers)) if (value && !present[key]) set[storageKey(key)] = value;
+    if (Object.keys(set).length) await chrome.storage.local.set(set);
+    await chrome.storage.local.remove('canliiMarkers');
+    return true;
+  }
+
+  globalThis.LegalPinpointerMarkerCore = { escapeHtml, icon, folderIcon, folderChildren, folderPath, filings, setFilings, circle, filingNames, waterfall, openEditor, BADGE_MAX,
+    readDocuments, writeDocuments, documentChanges, splitLegacy };
 })();
