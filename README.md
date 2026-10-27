@@ -166,10 +166,10 @@ node .\tools\build-canlii-legislation-index.cjs 'C:\path\to\canlii_legislation.c
 npm run audit:legislation
 ```
 
-Refresh the packaged reporter-alias to CanLII case index from local A2AJ and CanLII metadata, using the same `legal-citations` Python package revision as the packaged WASM:
+Refresh the packaged reporter-alias to CanLII case index from the engine's alias table (`crates/legal-citations/registry/aliases.json` in common-law-cite) and local A2AJ and CanLII metadata, using the same `legal-citations` Python package revision as the packaged WASM:
 
 ```powershell
-python .\tools\build-canlii-case-aliases.py 'C:\path\to\a2aj_reporter_aliases.json' 'C:\path\to\a2aj.sqlite' 'C:\path\to\canlii.db'
+python .\tools\build-canlii-case-aliases.py 'C:\path\to\aliases.json' 'C:\path\to\a2aj.sqlite' 'C:\path\to\canlii.db'
 ```
 
 Then extend it from A2AJ's citation table (every parallel citation of a decision whose neutral citation CanLII routes, such as the SCR citation of a neutral-era SCC decision) and rebuild `case-court-sites.tsv.gz`, the Lexum/Decisia fallback for decisions CanLII lacks:

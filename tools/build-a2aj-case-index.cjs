@@ -9,7 +9,8 @@
 // 2. case-court-sites.tsv.gz: citation key -> the decision on its court's own Lexum/Decisia site, the
 //    fallback when a case has no CanLII version (and the identity Case Marker files it under).
 //
-// Keys are the packaged engine's (version-3 identity keys, as A2AJ's citation_lookup table).
+// Keys are the packaged engine's identity keys, as A2AJ's citation_lookup table must hold them (the app re-keys it
+// when the engine's key version changes).
 // Usage: node tools/build-a2aj-case-index.cjs <a2aj.sqlite>
 const fs = require('node:fs');
 const path = require('node:path');
@@ -45,6 +46,13 @@ function write(file, header, lines) {
   fs.writeFileSync(file, zlib.gzipSync(Buffer.from(`${header}\tsha256=${digest}\n${body}`, 'utf8'), { level: 9 }));
 }
 
+const version = engine.citation('extract', { text: '2016 SCC 27', options: { resolve: false, parallel: false } })
+  .citations[0].key.split(':')[0];
+const stored = database.prepare('select citation_key from citation_lookup limit 1').get()?.citation_key.split(':')[0];
+if (stored !== version) {
+  process.stderr.write(`A2AJ's citation keys are version ${stored}, the engine's ${version}: re-key the store first.\n`);
+  process.exit(1);
+}
 const keysOf = new Map();
 for (const { citation_key: key, document_id: id } of database.prepare('select citation_key, document_id from citation_lookup').iterate()) {
   const keys = keysOf.get(id);
@@ -63,14 +71,14 @@ const documents = database.prepare("select id, citation_en, url_en from document
 for (const { id, citation_en: citation } of documents) {
   if (!/^\d{4} [A-Za-z][A-Za-z .]*[A-Za-z] \d+$/.test(citation || '') || !canliiRouted(citation)) continue;
   for (const key of keysOf.get(id) || []) {
-    if (key.startsWith('3:neutral:') || base.has(key) || conflicts.has(key)) continue;
+    if (key.startsWith(`${version}:neutral:`) || base.has(key) || conflicts.has(key)) continue;
     if (added.has(key) && added.get(key) !== citation) { added.delete(key); conflicts.add(key); continue; }
     added.set(key, citation);
   }
 }
 const aliases = new Map([...base, ...added]);
 const aliasLines = [...aliases.keys()].sort().map((key) => `${key}\t${aliases.get(key)}\n`);
-write(ALIASES, '# legal-pinpointer-canlii-case-aliases-v3', aliasLines);
+write(ALIASES, `# legal-pinpointer-canlii-case-aliases-v${version}`, aliasLines);
 
 // 2. Lexum/Decisia court sites, written as <prefix number>:<item id> against a prefix table.
 const prefixes = new Map(), sites = new Map(), siteConflicts = new Set();
