@@ -8,7 +8,7 @@
   max-width: min(440px, calc(100vw - 36px));
   padding: 10px 14px;
   border-radius: 9px;
-  background: #16352a;
+  background: #111827;
   color: #ffffff;
   box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 8px 24px rgb(0 0 0 / 18%);
   font: 600 13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -18,7 +18,7 @@
 }
 
 #legal-pinpointer-status.legal-pinpointer-toast--error {
-  background: #7a2424;
+  background: #b72016;
 }
 
 #legal-pinpointer-status[hidden] {
@@ -90,7 +90,7 @@
   width: 25px !important;
   height: 25px !important;
   border-radius: 6px !important;
-  color: #b3bdb8 !important;
+  color: #c4c8cf !important;
   cursor: pointer !important;
   font: 600 16px/1 Georgia, "Times New Roman", serif !important;
 }
@@ -102,20 +102,20 @@
 .lp-unit.hot > button,
 .lp-unit:hover > button,
 .lp-unit > button:focus-visible {
-  color: #66766e !important;
+  color: #6b7280 !important;
 }
 
 .lp-unit > button:hover {
-  background: #e7f0eb !important;
-  color: #1a5139 !important;
+  background: #fff1f0 !important;
+  color: #b72016 !important;
 }
 
 .lp-unit > button:active {
-  background: #d5e6dc !important;
+  background: #ffe1de !important;
 }
 
 .lp-unit > button:focus-visible {
-  outline: 2px solid #6aa98a !important;
+  outline: 2px solid #d52b1e !important;
   outline-offset: 0 !important;
 }
 
@@ -142,7 +142,7 @@
 
 .lp-unit > button.done,
 .lp-unit > button.done:hover {
-  color: #177040 !important;
+  color: #111827 !important;
 }
 
 .lp-unit > button.done::before {
@@ -158,7 +158,7 @@
   z-index: 2147483647 !important;
   padding: 5px 8px !important;
   border-radius: 6px !important;
-  background: #17241e !important;
+  background: #111827 !important;
   color: #ffffff !important;
   font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;
   white-space: nowrap !important;
@@ -225,7 +225,7 @@ html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-t
   width: 24px !important;
   height: 24px !important;
   border-radius: 6px !important;
-  color: #5f6f68 !important;
+  color: #6b7280 !important;
   cursor: pointer !important;
   transition: background-color 70ms, color 70ms !important;
 }
@@ -237,8 +237,8 @@ html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-t
 
 .lp-crumb-copy:hover,
 .lp-tools > .lp-link:hover {
-  background: #e7f0eb !important;
-  color: #1a5139 !important;
+  background: #fff1f0 !important;
+  color: #b72016 !important;
 }
 
 .lp-crumb-copy::before,
@@ -254,7 +254,7 @@ html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-t
 
 .lp-crumb-copy.done,
 .lp-tools > .lp-link.done {
-  color: #177040 !important;
+  color: #111827 !important;
 }
 
 .lp-crumb-copy.done::before,
@@ -331,7 +331,7 @@ html:not(.lp-raw-titles) #crsw_legalMemoIcon {
 }
 
 .lp-tools > .lp-canlii {
-  border: 1px solid #d5dee6 !important;
+  border: 1px solid #e5e7eb !important;
   background: #fff !important;
 }
 
@@ -395,7 +395,7 @@ html:not(.lp-raw-titles) #crsw_legalMemoIcon {
   z-index: 4 !important;
   padding: 5px 8px !important;
   border-radius: 6px !important;
-  background: #17241e !important;
+  background: #111827 !important;
   color: #ffffff !important;
   content: attr(data-tip) !important;
   font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;

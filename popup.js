@@ -14,7 +14,7 @@
   const PALETTE = ['#3b7ddd', '#e0533d', '#2f9e6e', '#e3a21a', '#8b5cf6', '#db4f9a', '#1aa3a3', '#ef7d22', '#5f6f86', '#7cb32a'];
   const settings = { ...SETTINGS };
   const marker = { folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
-  let markerRendered = false, viewerFolder = null, nameMode = null, statusTimer = 0;
+  let markerRendered = false, nameMode = null, statusTimer = 0;
   let supported = false, canliiAvailable = false, busy = false;
 
   function status(text, error = false) {
@@ -208,7 +208,6 @@
   const children = (parentId) => Object.entries(marker.folders)
     .filter(([, folder]) => (folder.parentId || null) === parentId && folder.projectId === marker.project)
     .sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
-  const descendants = (folderId) => children(folderId).flatMap(([childId]) => [childId, ...descendants(childId)]);
 
   function saveMarker(all = false) {
     const values = { canliiFolders: marker.folders, canliiProjects: marker.projects, canliiCurrentProject: marker.project };
@@ -227,17 +226,39 @@
     return PALETTE[start % PALETTE.length];
   }
 
-  // Documents filed in each folder of this project (a document in a subfolder counts for its parents).
-  function filed() {
-    const byFolder = new Map();
-    for (const [key, value] of Object.entries(marker.markers)) {
-      const path = value?.byProject?.[marker.project]?.folderPath || [];
-      for (const folderId of path) {
-        if (!byFolder.has(folderId)) byFolder.set(folderId, []);
-        byFolder.get(folderId).push([key, value]);
-      }
-    }
-    return byFolder;
+  // The folder tree is Beaver's source tree (ResearchLabelTree.tsx + ResearchTree.tsx): folders nest
+  // without limit, each document hangs under every folder it is filed in (and not again above a
+  // deeper one), and folders and documents move by drag, by their menu or by Alt+arrows.
+  const core = globalThis.LegalPinpointerMarkerCore;
+  const FOLDER_DRAG = 'application/x-lp-folder', DOCUMENT_DRAG = 'application/x-lp-document';
+  const closed = new Set(); // folders start open
+  let selected = null, adding, renaming = null, dragged = null, editor = null, colorTimer = 0;
+  const tree = () => core.folderChildren(marker.folders, marker.project);
+  const projectData = (key) => marker.markers[key]?.byProject?.[marker.project];
+  const documentFilings = (key) => core.filings(projectData(key), marker.folders, marker.project);
+  const documentTitle = (key) => marker.markers[key]?.fullDisplayText || marker.markers[key]?.displayText || key;
+  const inside = (id, ancestor) => core.folderPath(marker.folders, id).includes(ancestor);
+  const pathName = (id) => core.filingNames(marker.folders, [id])[0];
+
+  function sortDocuments(keys) {
+    const sort = $('viewer-sort').value;
+    if (sort === 'alpha') keys.sort((a, b) => documentTitle(a).localeCompare(documentTitle(b)));
+    if (sort === 'newest') keys.sort((a, b) => (marker.markers[b].year || '').localeCompare(marker.markers[a].year || ''));
+    return keys;
+  }
+  const projectDocuments = () => Object.keys(marker.markers).filter((key) => projectData(key));
+  /** Under a folder: filed there and not also deeper inside it. Under the root: filed nowhere. */
+  function under(folderId) {
+    return sortDocuments(projectDocuments().filter((key) => {
+      const ids = documentFilings(key);
+      return folderId ? ids.includes(folderId) && !ids.some((id) => id !== folderId && inside(id, folderId)) : !ids.length;
+    }));
+  }
+  /** In a folder or anywhere below it (all documents for the root): counts and Copy links. */
+  const within = (folderId) => sortDocuments(projectDocuments().filter((key) => !folderId || documentFilings(key).some((id) => inside(id, folderId))));
+
+  function saveDocuments() {
+    return chrome.storage.local.set({ canliiMarkers: marker.markers });
   }
 
   function renderProjects() {
@@ -245,61 +266,333 @@
       `<option value="${escapeHtml(projectId)}"${projectId === marker.project ? ' selected' : ''}>${escapeHtml(project.name)}</option>`).join('');
   }
 
+  const addField = (parentId) => adding === parentId
+    ? '<div class="tadd"><input class="tname-input" data-add maxlength="80" placeholder="Folder name" aria-label="Folder name"></div>' : '';
+
+  function documentNode(key) {
+    const title = documentTitle(key), note = projectData(key)?.note || '', url = documentUrl(key);
+    const glyph = key.includes('/laws/') ? 'scroll' : key.startsWith('commentary/') ? 'file' : 'gavel';
+    return `<div role="treeitem" aria-label="${escapeHtml(title)}"><div class="trow" data-document="${escapeHtml(key)}" draggable="true" title="${escapeHtml([title, note].filter(Boolean).join('\n'))}">`
+      + `<span class="tspace"></span><span class="tglyph">${core.icon(glyph, 'ticon')}</span>`
+      + (url ? `<a class="tname" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>` : `<span class="tname">${escapeHtml(title)}</span>`)
+      + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(title)} options">${core.icon('more', 'ticon')}</button></span></div></div>`;
+  }
+
+  function branch(parentId, folders) {
+    return (folders.get(parentId) || []).map(([folderId, folder]) => {
+      const documents = under(folderId), hasChildren = (folders.get(folderId) || []).length > 0 || documents.length > 0;
+      const open = !closed.has(folderId), count = within(folderId).length;
+      const name = renaming === folderId
+        ? `<input class="tname-input" data-rename value="${escapeHtml(folder.name)}" maxlength="80" aria-label="Folder name">`
+        : `<button type="button" class="tname" data-select="${folderId}" aria-pressed="${selected === folderId}" title="${escapeHtml(pathName(folderId))}">${escapeHtml(folder.name)}</button>`;
+      return `<div role="treeitem" aria-label="${escapeHtml(folder.name)}" aria-selected="${selected === folderId}"${hasChildren ? ` aria-expanded="${open}"` : ''}>`
+        + `<div class="trow" data-folder="${folderId}" draggable="${renaming !== folderId}">`
+        + (hasChildren ? `<button type="button" class="tchev${open ? ' open' : ''}" data-toggle aria-label="${open ? 'Collapse' : 'Expand'} ${escapeHtml(folder.name)}">${core.icon('chevron', 'ticon')}</button>` : '<span class="tspace"></span>')
+        // Filled in the folder's colour; the chevron already says open or closed.
+        + `<label class="tglyph" title="${escapeHtml(folder.name)} colour">${core.folderIcon(folder.color || '#9aa5b1', 'ticon')}<input type="color" value="${escapeHtml(folder.color || '#9aa5b1')}" data-color aria-label="${escapeHtml(folder.name)} colour"></label>`
+        + `${name}<span class="tcount">${count || ''}</span>`
+        + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(folder.name)} options">${core.icon('more', 'ticon')}</button></span></div>`
+        + (open ? `<div role="group" class="tgroup">${branch(folderId, folders)}${documents.map(documentNode).join('')}${addField(folderId)}</div>` : '')
+        + '</div>';
+    }).join('');
+  }
+
   function renderTree() {
-    const counts = filed();
-    const rows = [];
-    const walk = (parentId, depth) => {
-      for (const [folderId, folder] of children(parentId)) {
-        const count = counts.get(folderId)?.length || 0;
-        rows.push(`<div class="folder${viewerFolder === folderId ? ' open' : ''}" data-id="${folderId}" style="--depth:${depth}">`
-          + `<span class="swatch" style="background:${escapeHtml(folder.color)}"><input type="color" value="${escapeHtml(folder.color)}" data-color title="Colour"></span>`
-          + `<button type="button" class="folder-name" data-view>${escapeHtml(folder.name)}</button><span class="count">${count || ''}</span>`
-          + '<span class="tools">'
-          + (depth < 2 ? '<button type="button" data-sub title="New subfolder">+</button>' : '')
-          + '<button type="button" data-rename title="Rename">✎</button><button type="button" data-up title="Move up">↑</button>'
-          + '<button type="button" data-down title="Move down">↓</button><button type="button" class="danger" data-delete title="Delete">×</button></span></div>');
-        if (depth < 2) walk(folderId, depth + 1);
-      }
-    };
-    walk(null, 0);
-    $('tree').innerHTML = rows.join('');
+    const folders = tree(), active = document.activeElement?.closest?.('#tree [data-select]')?.dataset.select;
+    $('tree').innerHTML = `<div role="treeitem" aria-selected="${selected === null}"><button type="button" class="trow troot" data-select="" data-root aria-pressed="${selected === null}">`
+      + `<span class="tspace"></span><span class="tname">All documents</span><span class="tcount">${projectDocuments().length || ''}</span><span class="tactions"></span></button></div>`
+      + branch(null, folders) + under(null).map(documentNode).join('') + addField(null);
+    if (!folders.size && !projectDocuments().length && adding === undefined) $('tree').insertAdjacentHTML('beforeend', '<p class="tempty">No folders yet. Add one, then click a circle on CanLII to file a case.</p>');
+    $('copy-links').title = `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
+    $('tree').querySelector('[data-add], [data-rename]')?.focus();
+    if (active !== undefined && !$('tree').querySelector('[data-add], [data-rename]')) focusFolder(active);
   }
-
-  function documentUrl(key) {
-    if (key.startsWith('cite:')) return marker.markers[key]?.meta?.url || '';
-    return `https://www.canlii.org/en/${key.replace(/^\/+/, '')}`;
-  }
-
-  function viewerItems() {
-    const items = (filed().get(viewerFolder) || []).slice();
-    const title = ([key, value]) => value.fullDisplayText || value.displayText || key;
-    const sort = $('viewer-sort').value;
-    if (sort === 'alpha') items.sort((a, b) => title(a).localeCompare(title(b)));
-    if (sort === 'newest') items.sort((a, b) => (b[1].year || '').localeCompare(a[1].year || ''));
-    return items.map((item) => ({ key: item[0], title: title(item), note: item[1].byProject?.[marker.project]?.note || '' }));
-  }
-
-  function renderViewer() {
-    const folder = viewerFolder && marker.folders[viewerFolder];
-    $('viewer').hidden = !folder;
-    if (!folder) return;
-    $('viewer-title').textContent = folder.name;
-    const items = viewerItems();
-    $('viewer-list').innerHTML = items.length ? items.map((item) => `<li>${documentUrl(item.key) ? `<a href="${escapeHtml(documentUrl(item.key))}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>` : `<span>${escapeHtml(item.title)}</span>`}`
-      + (item.note ? `<small>${escapeHtml(item.note)}</small>` : '') + '</li>').join('') : '<li class="empty">Nothing filed here yet.</li>';
-  }
+  const focusFolder = (id) => $('tree').querySelector(`[data-select="${CSS.escape(id || '')}"]`)?.focus();
 
   function renderMarker() {
     markerRendered = true;
     renderProjects();
     renderTree();
-    renderViewer();
   }
 
+  // Folders: name, nest, order, delete.
+
+  function canMove(id, parentId) {
+    return marker.folders[id]?.projectId === marker.project && (!parentId || marker.folders[parentId]?.projectId === marker.project && !inside(parentId, id));
+  }
+  /** Puts a folder at `position` among `parentId`'s children and renumbers them. */
+  function move(id, parentId, position) {
+    if (!canMove(id, parentId)) return;
+    const siblings = (tree().get(parentId) || []).map(([siblingId]) => siblingId).filter((siblingId) => siblingId !== id);
+    siblings.splice(Math.max(0, Math.min(position, siblings.length)), 0, id);
+    marker.folders[id].parentId = parentId;
+    siblings.forEach((siblingId, order) => { marker.folders[siblingId].order = order; });
+    if (parentId) closed.delete(parentId);
+    saveMarker();
+    renderTree();
+    focusFolder(id);
+  }
+  function moveKey(id, key) {
+    const folder = marker.folders[id], parentId = folder.parentId || null;
+    const siblings = (tree().get(parentId) || []).map(([siblingId]) => siblingId), index = siblings.indexOf(id);
+    if (key === 'ArrowUp' && index > 0) move(id, parentId, index - 1);
+    if (key === 'ArrowDown' && index < siblings.length - 1) move(id, parentId, index + 1);
+    if (key === 'ArrowRight' && index > 0) move(id, siblings[index - 1], (tree().get(siblings[index - 1]) || []).length);
+    if (key === 'ArrowLeft' && parentId) {
+      const grandparent = marker.folders[parentId].parentId || null;
+      move(id, grandparent, (tree().get(grandparent) || []).findIndex(([siblingId]) => siblingId === parentId) + 1);
+    }
+  }
+
+  function commitName(input) {
+    const name = input.value.trim();
+    if (input.hasAttribute('data-add')) {
+      if (adding === undefined) return;
+      const parentId = adding;
+      adding = undefined;
+      if (name) {
+        const folderId = id();
+        marker.folders[folderId] = { name, color: nextColor(parentId), parentId, projectId: marker.project, order: (tree().get(parentId) || []).length };
+        if (parentId) closed.delete(parentId);
+        saveMarker();
+        renderSlots();
+      }
+    } else {
+      if (!renaming) return;
+      const folder = marker.folders[renaming];
+      renaming = null;
+      if (folder && name && name !== folder.name) { folder.name = name; saveMarker(); renderSlots(); }
+    }
+    renderTree();
+  }
+  function cancelName() {
+    adding = undefined;
+    renaming = null;
+    renderTree();
+  }
+
+  function deleteFolder(folderId) {
+    const gone = new Set([folderId, ...projectFolders().filter((other) => inside(other, folderId))]);
+    for (const goneId of gone) delete marker.folders[goneId];
+    for (const key of projectDocuments()) {
+      const data = projectData(key);
+      core.setFilings(data, core.filings(data, marker.folders, marker.project), marker.folders);
+    }
+    if (gone.has(selected)) selected = null;
+    if (gone.has(marker.slot1)) marker.slot1 = null;
+    if (gone.has(marker.slot2)) marker.slot2 = null;
+    saveMarker(true);
+    renderTree();
+    renderSlots();
+  }
+  const projectFolders = () => Object.keys(marker.folders).filter((folderId) => marker.folders[folderId].projectId === marker.project);
+
+  // Documents: file, remove.
+
+  function file(key, folderIds) {
+    const data = projectData(key);
+    if (!data) return;
+    core.setFilings(data, folderIds, marker.folders);
+    saveDocuments();
+    renderTree();
+  }
+  function removeDocument(key) {
+    delete marker.markers[key].byProject[marker.project];
+    if (!Object.keys(marker.markers[key].byProject).length) delete marker.markers[key];
+    saveDocuments();
+    renderTree();
+  }
+  function label(key, anchor) {
+    editor?.close();
+    editor = core.openEditor({
+      anchor, folders: marker.folders, project: marker.project, data: projectData(key),
+      onChange({ folderIds, note, badge }) {
+        const data = projectData(key);
+        if (!data) return;
+        core.setFilings(data, folderIds, marker.folders);
+        if (note) data.note = note; else delete data.note;
+        if (badge) data.badge = badge; else delete data.badge;
+        saveDocuments();
+        renderTree();
+      },
+      onClose() { editor = null; }
+    });
+  }
+
+  // The row menu (Beaver's MoreActionsMenu): one at a time; Delete and Remove ask once more.
+
+  function openMenu(button) {
+    closeMenu();
+    const row = button.closest('.trow'), folderId = row.dataset.folder, key = row.dataset.document;
+    let items;
+    if (folderId) {
+      const folder = marker.folders[folderId], siblings = (tree().get(folder.parentId || null) || []).map(([siblingId]) => siblingId);
+      items = [['rename', 'Rename'], ['sub', 'New folder inside'], ['up', 'Move up', siblings[0] === folderId],
+        ['down', 'Move down', siblings[siblings.length - 1] === folderId], ...(folder.parentId ? [['out', 'Move out']] : []), ['delete', 'Delete']];
+    } else items = [['label', 'Folders and note'], ['remove', 'Remove']];
+    const menu = $('menu');
+    menu.innerHTML = items.map(([action, text, disabled]) => `<button type="button" role="menuitem" data-action="${action}"${disabled ? ' disabled' : ''}>${text}</button>`).join('');
+    menu.hidden = false;
+    menu.target = { folderId, key, button };
+    const rect = button.getBoundingClientRect();
+    menu.style.left = `${Math.max(6, Math.min(rect.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 6))}px`;
+    menu.style.top = `${rect.bottom + menu.offsetHeight + 4 > innerHeight ? Math.max(6, rect.top - menu.offsetHeight - 4) : rect.bottom + 4}px`;
+    button.setAttribute('aria-expanded', 'true');
+    menu.querySelector('button:not(:disabled)')?.focus();
+  }
+  function closeMenu(refocus = false) {
+    const menu = $('menu');
+    if (menu.hidden) return;
+    menu.hidden = true;
+    menu.target?.button.removeAttribute('aria-expanded');
+    if (refocus && menu.target?.button.isConnected) menu.target.button.focus();
+  }
+  $('menu').addEventListener('click', (event) => {
+    const item = event.target.closest('[data-action]');
+    if (!item || item.disabled) return;
+    const { folderId, key, button } = $('menu').target, action = item.dataset.action;
+    if ((action === 'delete' || action === 'remove') && !item.dataset.armed) {
+      item.dataset.armed = 'true';
+      item.textContent = action === 'delete' ? 'Delete with its subfolders?' : 'Remove from this project?';
+      return;
+    }
+    closeMenu();
+    if (action === 'rename') { renaming = folderId; renderTree(); }
+    else if (action === 'sub') { closed.delete(folderId); adding = folderId; renderTree(); }
+    else if (action === 'up') moveKey(folderId, 'ArrowUp');
+    else if (action === 'down') moveKey(folderId, 'ArrowDown');
+    else if (action === 'out') moveKey(folderId, 'ArrowLeft');
+    else if (action === 'delete') deleteFolder(folderId);
+    else if (action === 'label') label(key, button.closest('.trow'));
+    else if (action === 'remove') removeDocument(key);
+  });
+  $('menu').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); closeMenu(true); return; }
+    if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...$('menu').querySelectorAll('button:not(:disabled)')], index = items.indexOf(document.activeElement);
+    items[(index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length]?.focus();
+  });
+  addEventListener('pointerdown', (event) => { if (!$('menu').hidden && !$('menu').contains(event.target) && !event.target.closest('[data-menu]')) closeMenu(); }, true);
+
+  // Tree events.
+
+  $('tree').addEventListener('click', (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    const row = button.closest('.trow'), folderId = row?.dataset.folder;
+    if (button.hasAttribute('data-menu')) { if ($('menu').target?.button === button && !$('menu').hidden) closeMenu(); else openMenu(button); }
+    else if (button.hasAttribute('data-toggle')) { if (!closed.delete(folderId)) closed.add(folderId); renderTree(); }
+    else if (button.hasAttribute('data-select')) { selected = button.dataset.select || null; renderTree(); focusFolder(button.dataset.select); }
+  });
+
+  // Colour changes repaint the folder at once and save when the picker settles.
+  $('tree').addEventListener('input', (event) => {
+    if (!event.target.hasAttribute('data-color')) return;
+    marker.folders[event.target.closest('.trow').dataset.folder].color = event.target.value;
+    event.target.previousElementSibling.style.color = event.target.value;
+    clearTimeout(colorTimer);
+    colorTimer = setTimeout(saveMarker, 250);
+  });
+
+  $('tree').addEventListener('keydown', (event) => {
+    if (event.target.matches('.tname-input')) {
+      if (event.key === 'Enter') { event.preventDefault(); commitName(event.target); }
+      if (event.key === 'Escape') { event.preventDefault(); cancelName(); }
+      return;
+    }
+    const button = event.target.closest('[data-select]');
+    if (!button || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const folderId = button.dataset.select, hasChildren = folderId && tree().has(folderId);
+    if (event.altKey && folderId) return moveKey(folderId, event.key);
+    if (event.key === 'ArrowRight' && hasChildren) { closed.delete(folderId); renderTree(); focusFolder(folderId); return; }
+    if (event.key === 'ArrowLeft' && folderId) {
+      if (hasChildren && !closed.has(folderId)) { closed.add(folderId); renderTree(); focusFolder(folderId); }
+      else focusFolder(marker.folders[folderId].parentId || '');
+      return;
+    }
+    const buttons = [...$('tree').querySelectorAll('[data-select]')], index = buttons.indexOf(button);
+    const target = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : index + (event.key === 'ArrowUp' ? -1 : 1);
+    buttons[Math.max(0, Math.min(buttons.length - 1, target))]?.focus();
+  });
+  $('tree').addEventListener('focusout', (event) => { if (event.target.matches?.('.tname-input')) commitName(event.target); });
+
+  // Drag: a folder before, inside or after another (or to the top level on "All documents"); a
+  // document onto a folder files it there.
+  $('tree').addEventListener('dragstart', (event) => {
+    const row = event.target.closest?.('.trow');
+    if (!row) return;
+    dragged = row.dataset.folder ? { folder: row.dataset.folder } : { document: row.dataset.document };
+    event.dataTransfer.setData(dragged.folder ? FOLDER_DRAG : DOCUMENT_DRAG, dragged.folder || dragged.document);
+    event.dataTransfer.effectAllowed = 'move';
+  });
+  /** The drop line or ring is a class on the row, never a re-render: the dragged row must survive. */
+  function markDrop(target) {
+    for (const row of $('tree').querySelectorAll('.drop-before, .drop-inside, .drop-after')) row.classList.remove('drop-before', 'drop-inside', 'drop-after');
+    if (target) $('tree').querySelector(target.id ? `.trow[data-folder="${CSS.escape(target.id)}"]` : '.troot')?.classList.add(`drop-${target.mode}`);
+  }
+  $('tree').addEventListener('dragend', () => { dragged = null; markDrop(null); });
+  $('tree').addEventListener('dragleave', (event) => { if (!$('tree').contains(event.relatedTarget)) markDrop(null); });
+  function dropTarget(event) {
+    const row = event.target.closest?.('.trow[data-folder], .troot');
+    if (!row || !dragged) return null;
+    if (row.classList.contains('troot')) return dragged.folder && canMove(dragged.folder, null) ? { id: '', mode: 'inside' } : null;
+    const folderId = row.dataset.folder, folder = marker.folders[folderId];
+    if (dragged.document) return { id: folderId, mode: 'inside' };
+    const box = row.getBoundingClientRect(), y = box.height ? (event.clientY - box.top) / box.height : 0.5;
+    const mode = y < 0.25 ? 'before' : y > 0.75 ? 'after' : 'inside';
+    return canMove(dragged.folder, mode === 'inside' ? folderId : folder.parentId || null) ? { id: folderId, mode } : null;
+  }
+  $('tree').addEventListener('dragover', (event) => {
+    const target = dropTarget(event);
+    markDrop(target);
+    if (target) event.preventDefault();
+  });
+  $('tree').addEventListener('drop', (event) => {
+    const target = dropTarget(event);
+    event.preventDefault();
+    markDrop(null);
+    if (!target) return;
+    if (dragged.document) return file(dragged.document, [target.id]);
+    if (!target.id) return move(dragged.folder, null, (tree().get(null) || []).length);
+    const folder = marker.folders[target.id], parentId = folder.parentId || null;
+    if (target.mode === 'inside') return move(dragged.folder, target.id, (tree().get(target.id) || []).length);
+    const siblings = (tree().get(parentId) || []).map(([siblingId]) => siblingId).filter((siblingId) => siblingId !== dragged.folder);
+    move(dragged.folder, parentId, siblings.indexOf(target.id) + (target.mode === 'after' ? 1 : 0));
+  });
+
+  $('add-folder').addEventListener('click', () => { adding = null; renderTree(); });
+  $('viewer-sort').addEventListener('change', renderTree);
+
+  function documentUrl(key) {
+    if (key.startsWith('cite:') || key.startsWith('site:')) return marker.markers[key]?.meta?.url || '';
+    return `https://www.canlii.org/en/${key.replace(/^\/+/, '')}`;
+  }
+
+  $('copy-links').addEventListener('click', async () => {
+    const items = within(selected).map((key) => ({ key, title: documentTitle(key), note: projectData(key)?.note || '' }));
+    if (!items.length) return status('Nothing to copy.', true);
+    const plain = items.map((item) => `${item.title}${item.note ? ` — ${item.note}` : ''}\n${documentUrl(item.key)}`).join('\n');
+    const html = items.map((item) => `<a href="${escapeHtml(documentUrl(item.key))}">${escapeHtml(item.title)}</a>${item.note ? ` — ${escapeHtml(item.note)}` : ''}`).join('<br>');
+    try {
+      // A copy event: Chrome's async write wraps the HTML in a document of its own, which Word
+      // pastes as a paragraph of its own.
+      let copied = false;
+      const onCopy = (event) => { event.preventDefault(); event.clipboardData.setData('text/plain', plain); event.clipboardData.setData('text/html', html); copied = true; };
+      document.addEventListener('copy', onCopy, { once: true, capture: true });
+      try { document.execCommand('copy'); } finally { document.removeEventListener('copy', onCopy, true); }
+      if (!copied) await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' })
+      })]);
+      status(`Copied ${items.length} link${items.length === 1 ? '' : 's'}`);
+    } catch (error) { status('The browser denied clipboard access.', true); }
+  });
+
   function renderSlots() {
-    const options = ['<option value="">—</option>'];
+    const options = ['<option value="">—</option>'], folders = tree();
     const walk = (parentId, prefix) => {
-      for (const [folderId, folder] of children(parentId)) {
+      for (const [folderId, folder] of folders.get(parentId) || []) {
         options.push(`<option value="${folderId}">${escapeHtml(prefix + folder.name)}</option>`);
         walk(folderId, `${prefix}${folder.name} › `);
       }
@@ -329,7 +622,7 @@
       const projectId = id();
       marker.projects[projectId] = { name, order: projects().length };
       marker.project = projectId;
-      viewerFolder = null;
+      selected = null;
     } else if (nameMode.kind === 'project-rename' && marker.projects[marker.project]) {
       marker.projects[marker.project].name = name;
     }
@@ -342,7 +635,8 @@
 
   $('project').addEventListener('change', () => {
     marker.project = $('project').value;
-    viewerFolder = null;
+    selected = null;
+    editor?.close();
     saveMarker();
     renderMarker();
     renderSlots();
@@ -368,7 +662,7 @@
     for (const value of Object.values(marker.markers)) delete value?.byProject?.[marker.project];
     delete marker.projects[marker.project];
     ensureProject();
-    viewerFolder = null;
+    selected = null;
     saveMarker(true);
     renderMarker();
     renderSlots();
@@ -376,120 +670,10 @@
     button.style.width = '';
   });
 
-  function addFolder(parentId) {
-    const folderId = id();
-    marker.folders[folderId] = { name: 'New folder', color: nextColor(parentId), parentId: parentId || null,
-      projectId: marker.project, order: children(parentId).length };
-    saveMarker();
-    renderTree();
-    renameFolder(folderId);
-  }
-  $('add-folder').addEventListener('click', () => addFolder(null));
-
-  function renameFolder(folderId) {
-    const row = $('tree').querySelector(`[data-id="${folderId}"]`);
-    const name = row?.querySelector('.folder-name');
-    if (!name) return;
-    const input = Object.assign(document.createElement('input'), { className: 'folder-edit', value: marker.folders[folderId].name, maxLength: 80 });
-    name.replaceWith(input);
-    input.focus();
-    input.select();
-    let done = false;
-    const finish = (keep) => {
-      if (done) return;
-      done = true;
-      const value = input.value.trim();
-      if (keep && value) { marker.folders[folderId].name = value; saveMarker(); }
-      renderTree();
-      renderViewer();
-    };
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
-      if (event.key === 'Escape') { event.preventDefault(); finish(false); }
-    });
-    input.addEventListener('blur', () => finish(true));
-  }
-
-  function move(folderId, step) {
-    const siblings = children(marker.folders[folderId].parentId || null).map(([siblingId]) => siblingId);
-    const at = siblings.indexOf(folderId), to = at + step;
-    if (to < 0 || to >= siblings.length) return;
-    [siblings[at], siblings[to]] = [siblings[to], siblings[at]];
-    siblings.forEach((siblingId, order) => { marker.folders[siblingId].order = order; });
-    saveMarker();
-    renderTree();
-  }
-
-  const armed = new Map();
-  function remove(folderId, button) {
-    if (!armed.has(folderId)) {
-      button.classList.add('armed');
-      button.textContent = 'Delete?';
-      armed.set(folderId, setTimeout(() => { armed.delete(folderId); renderTree(); }, 2500));
-      return;
-    }
-    clearTimeout(armed.get(folderId));
-    armed.delete(folderId);
-    const gone = new Set([folderId, ...descendants(folderId)]);
-    for (const goneId of gone) delete marker.folders[goneId];
-    for (const value of Object.values(marker.markers)) {
-      const data = value?.byProject?.[marker.project];
-      if (!data?.folderPath) continue;
-      const cut = data.folderPath.findIndex((pathId) => gone.has(pathId));
-      if (cut >= 0) data.folderPath = data.folderPath.slice(0, cut);
-    }
-    if (gone.has(viewerFolder)) viewerFolder = null;
-    if (gone.has(marker.slot1)) marker.slot1 = null;
-    if (gone.has(marker.slot2)) marker.slot2 = null;
-    saveMarker(true);
-    renderTree();
-    renderViewer();
-  }
-
-  $('tree').addEventListener('click', (event) => {
-    const row = event.target.closest('.folder');
-    if (!row) return;
-    const folderId = row.dataset.id;
-    const button = event.target.closest('button');
-    if (!button) return;
-    if (button.hasAttribute('data-view')) { viewerFolder = viewerFolder === folderId ? null : folderId; renderTree(); renderViewer(); }
-    else if (button.hasAttribute('data-sub')) addFolder(folderId);
-    else if (button.hasAttribute('data-rename')) renameFolder(folderId);
-    else if (button.hasAttribute('data-up')) move(folderId, -1);
-    else if (button.hasAttribute('data-down')) move(folderId, 1);
-    else if (button.hasAttribute('data-delete')) remove(folderId, button);
-  });
-
-  // Colour changes repaint the swatch at once and save when the picker settles.
-  let colorTimer = 0;
-  $('tree').addEventListener('input', (event) => {
-    if (!event.target.hasAttribute('data-color')) return;
-    const folderId = event.target.closest('.folder').dataset.id;
-    marker.folders[folderId].color = event.target.value;
-    event.target.parentElement.style.background = event.target.value;
-    clearTimeout(colorTimer);
-    colorTimer = setTimeout(saveMarker, 250);
-  });
-
-  $('viewer-sort').addEventListener('change', renderViewer);
-
-  $('copy-links').addEventListener('click', async () => {
-    const items = viewerItems();
-    if (!items.length) return status('Nothing to copy.', true);
-    const plain = items.map((item) => `${item.title}${item.note ? ` — ${item.note}` : ''}\n${documentUrl(item.key)}`).join('\n');
-    const html = items.map((item) => `<a href="${escapeHtml(documentUrl(item.key))}">${escapeHtml(item.title)}</a>${item.note ? ` — ${escapeHtml(item.note)}` : ''}`).join('<br>');
-    try {
-      await navigator.clipboard.write([new ClipboardItem({
-        'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' })
-      })]);
-      status(`Copied ${items.length} link${items.length === 1 ? '' : 's'}`);
-    } catch (error) { status('The browser denied clipboard access.', true); }
-  });
-
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes.canliiMarkers) return;
     marker.markers = changes.canliiMarkers.newValue || {};
-    if (markerRendered && !document.querySelector('.folder-edit')) { renderTree(); renderViewer(); }
+    if (markerRendered && !$('tree').querySelector('.tname-input')) renderTree();
   });
 
   // ---------------------------------------------------------------------------

@@ -319,7 +319,7 @@
     function ensureSheet(root) {
       if (sheets.has(root)) return;
       const sheet = new CSSStyleSheet();
-      sheet.replaceSync(`::highlight(${HIT}) {background:#ffe096;color:#24201a} ::highlight(${ACTIVE}) {background:#17685b;color:white}`);
+      sheet.replaceSync(`::highlight(${HIT}) {background:#ffe096;color:#24201a} ::highlight(${ACTIVE}) {background:#d52b1e;color:white}`);
       root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
       sheets.set(root, sheet);
     }
@@ -387,7 +387,7 @@
     returnHost = document.createElement('div'); returnHost.setAttribute('data-pinpointer-sonar', '');
     returnHost.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647';
     const shadow = returnHost.attachShadow({ mode: 'closed' }), button = document.createElement('button');
-    button.textContent = '← Return to Tab Search'; button.style.cssText = 'padding:10px 16px;border-radius:10px;border:1px solid #78988b;background:#fff;color:#154c42;font:14px system-ui;cursor:pointer';
+    button.textContent = '← Return to Tab Search'; button.style.cssText = 'padding:10px 16px;border-radius:10px;border:1px solid #d1d5db;background:#fff;color:#111827;font:14px system-ui;cursor:pointer';
     button.onclick = async () => {
       try {
         const reply = await chrome.runtime.sendMessage({ type: 'SONAR_RETURN', session: origin });

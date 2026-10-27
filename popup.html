@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Legal Pinpointer</title>
+  <link rel="stylesheet" href="marker.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body data-tab="marker">
@@ -28,18 +29,16 @@
         <input id="name-input" maxlength="80" autocomplete="off" spellcheck="false">
         <button type="submit">Save</button><button type="button" id="name-cancel" class="ghost">Cancel</button>
       </form>
-      <div class="folders-head"><h2 class="label">Folders</h2><button type="button" class="link" id="add-folder">+ New folder</button></div>
-      <div id="tree" class="tree"></div>
-      <div id="viewer" class="viewer" hidden>
-        <div class="viewer-head">
-          <h2 class="label" id="viewer-title"></h2>
-          <select id="viewer-sort" aria-label="Sort">
-            <option value="saved">Saved order</option><option value="alpha">A–Z</option><option value="newest">Newest</option>
-          </select>
-          <button type="button" class="link" id="copy-links">Copy links</button>
-        </div>
-        <ol id="viewer-list"></ol>
+      <div class="folders-head">
+        <h2 class="label">Folders</h2>
+        <select id="viewer-sort" aria-label="Sort documents">
+          <option value="saved">Saved order</option><option value="alpha">A–Z</option><option value="newest">Newest</option>
+        </select>
+        <button type="button" class="link" id="copy-links">Copy links</button>
       </div>
+      <div id="tree" class="tree" role="tree" aria-label="Folders"></div>
+      <button type="button" class="new-folder" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
+      <div id="menu" class="menu" role="menu" hidden></div>
     </section>
 
     <section class="panel" data-panel="copy" role="tabpanel" hidden>
@@ -105,6 +104,7 @@
   </main>
 
   <footer><p id="status" role="status" aria-live="polite"></p></footer>
+  <script src="marker-core.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

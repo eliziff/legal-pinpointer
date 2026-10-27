@@ -330,25 +330,24 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       if (tab === 'marker') {
         await popup.click('#add-folder'); await popup.keyboard.type('Charter'); await popup.keyboard.press('Enter');
         await popup.click('#add-folder'); await popup.keyboard.type('Remedies'); await popup.keyboard.press('Enter');
-        await popup.locator('.folder').first().hover();
-        await popup.locator('.folder').first().locator('[data-sub]').click(); await popup.keyboard.type('Section 24(2)'); await popup.keyboard.press('Enter');
+        await popup.locator('.trow[data-folder]').first().hover(); await popup.locator('.trow[data-folder]').first().locator('[data-menu]').click();
+        await popup.locator('#menu [data-action="sub"]').click(); await popup.keyboard.type('Section 24(2)'); await popup.keyboard.press('Enter');
       }
       await popup.screenshot({ path: path.join(out, `popup-${tab}.png`), fullPage: true });
     }
-    log('folder colours', await popup.evaluate(() => [...document.querySelectorAll('.swatch')].map((swatch) => swatch.style.background)));
+    log('folder colours', await popup.evaluate(() => [...document.querySelectorAll('.tglyph input[data-color]')].map((input) => input.value)));
     // File the first search result into the first folder from the page's picker.
     await search.bringToFront();
     await search.locator('.lpm-circle').first().click();
     await search.waitForSelector('.lpm-picker:not([hidden])');
     await search.screenshot({ path: path.join(out, 'marker-picker.png') });
-    await search.locator('.lpm-row[data-folder]:not([data-folder=""])').first().click();
+    await search.locator('.lpm-chip[data-folder]:not([data-folder=""])').first().click();
     await sleep(200);
     log('filed circle colour', await search.locator('.lpm-circle').first().evaluate((circle) => circle.style.background));
     await popup.bringToFront();
     await popup.click('.tabs [data-tab="marker"]');
-    await popup.locator('.folder [data-view]').first().click();
     await sleep(150);
-    log('folder viewer', await popup.locator('#viewer-list').innerText());
+    log('folder tree', await popup.locator('#tree').innerText());
     await popup.screenshot({ path: path.join(out, 'popup-marker-viewer.png'), fullPage: true });
   } finally {
     await context.close();

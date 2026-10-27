@@ -170,13 +170,13 @@ function escapeHtml(value) {
 async function flash(tab, text, error) {
   const shown = await chrome.scripting.executeScript({ target: { tabId: tab.id }, args: [text, Boolean(error)], func: (message, failed) => {
     const toast = document.getElementById('legal-pinpointer-status') || document.documentElement.appendChild(Object.assign(document.createElement('div'), { id: 'legal-pinpointer-status' }));
-    toast.setAttribute('style', `all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647;padding:10px 12px;border-radius:8px;background:${failed ? '#7a2424' : '#16352a'};color:#fff;font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 6px 20px rgb(0 0 0/.25);pointer-events:none`);
+    toast.setAttribute('style', `all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647;padding:10px 12px;border-radius:8px;background:${failed ? '#b72016' : '#111827'};color:#fff;font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 6px 20px rgb(0 0 0/.25);pointer-events:none`);
     toast.textContent = message;
     clearTimeout(toast.lpTimer);
     toast.lpTimer = setTimeout(() => toast.remove(), 2400);
   } }).then(() => true, () => false);
   if (shown) return;
-  await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: error ? '#a33' : '#1b6b48' }).catch(() => {});
+  await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: error ? '#d52b1e' : '#111827' }).catch(() => {});
   await chrome.action.setBadgeText({ tabId: tab.id, text: error ? '!' : '✓' }).catch(() => {});
   setTimeout(() => chrome.action.setBadgeText({ tabId: tab.id, text: '' }).catch(() => {}), 2400);
 }
@@ -236,7 +236,7 @@ const CASE_MARKER = {
     'https://*.gc.ca/*/item/*', 'https://decisia.lexum.com/*/item/*', 'https://decisions.scc-csc.ca/*/item/*',
     'https://coadecisions.ontariocourts.ca/*/item/*', 'https://decisions.cmac-cacm.ca/*/item/*', 'https://decisions.sct-trp.ca/*/item/*'
   ],
-  js: ['marker.js'],
+  js: ['marker-core.js', 'marker.js'],
   css: ['marker.css'],
   runAt: 'document_start',
   allFrames: true
