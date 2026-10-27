@@ -25,7 +25,8 @@
   const state = { enabled: true, folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
   const wraps = new Map(); // key -> Set of circle wraps on this page
   const labels = new Map(); // key -> the name and citation shown on this page
-  let editor = null, editorKey = null, hoveredKey = null, saveTimer = 0, ownWrite = false;
+  let editor = null, editorKey = null, hoveredKey = null, saveHandle = 0;
+  const ownWrites = new Set(); // tokens of this page's own writes, so their echoes are skipped
 
   const docKey = (href) => {
     try { return new URL(href, location.origin).pathname.replace(/^\/(?:en|fr)\//, ''); } catch (_) { return ''; }
@@ -50,13 +51,22 @@
     state.slot2 = stored.canliiHotkeySlot2 || null;
   }
 
-  function save(delay = 0) {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      ownWrite = true;
-      chrome.storage.local.set({ canliiMarkers: state.markers }, () => { ownWrite = false; });
-    }, delay);
+  // Writing the markers copies every filed document (tens of milliseconds for thousands), so it
+  // waits until the page is idle, after the change has painted; quick changes share one write, and
+  // one still pending is flushed when the tab is hidden or left.
+  function flush() {
+    if (!saveHandle) return;
+    cancelIdleCallback(saveHandle);
+    saveHandle = 0;
+    const token = crypto.randomUUID();
+    ownWrites.add(token);
+    chrome.storage.local.set({ canliiMarkers: state.markers, caseMarkerWrite: token });
   }
+  function save() {
+    if (!saveHandle) saveHandle = requestIdleCallback(() => { saveHandle = -1; flush(); }, { timeout: 800 });
+  }
+  addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  addEventListener('pagehide', flush);
 
   function entry(key, create) {
     const marker = state.markers[key];
@@ -313,15 +323,18 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !KEYS.some((key) => changes[key])) return;
-    if (changes.canliiMarkers && ownWrite && Object.keys(changes).length === 1) return;
-    chrome.storage.local.get(KEYS, (stored) => {
-      const wasEnabled = state.enabled;
-      load(stored);
-      if (!state.enabled) return removeAll();
-      if (!wasEnabled) return scan();
-      refreshAll();
-      if (editor && editor.project !== state.project) hidePicker(); else editor?.refresh(state.folders);
-    });
+    // This page's own write: already in hand.
+    if (changes.caseMarkerWrite && ownWrites.delete(changes.caseMarkerWrite.newValue)) return;
+    // Another page's or the popup's: the change carries the new values, so nothing is read back.
+    const stored = { caseMarker: state.enabled, canliiFolders: state.folders, canliiMarkers: state.markers, canliiProjects: state.projects,
+      canliiCurrentProject: state.project, canliiHotkeySlot1: state.slot1, canliiHotkeySlot2: state.slot2 };
+    for (const key of KEYS) if (changes[key]) stored[key] = changes[key].newValue;
+    const wasEnabled = state.enabled;
+    load(stored);
+    if (!state.enabled) return removeAll();
+    if (!wasEnabled) return scan();
+    refreshAll();
+    if (editor && editor.project !== state.project) hidePicker(); else editor?.refresh(state.folders);
   });
 
   // Circles go in as the page is parsed (and, on CanLII's search page, as results arrive): the

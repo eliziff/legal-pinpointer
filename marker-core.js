@@ -110,6 +110,9 @@
 
   function openEditor({ anchor, folders, project, data, root = document.body, badge = true, onChange, onClose, inside = () => false }) {
     let slots = filings(data, folders, project), activeSlot = 0, noteTimer = 0, closed = false;
+    // Where the anchor is, read before anything is inserted: the page's layout is still clean, so
+    // this costs nothing even on a long judgment (after an insertion it would lay the page out).
+    const anchorRect = anchor.getBoundingClientRect();
     const element = document.createElement('div');
     element.className = 'lpm-picker';
     element.setAttribute('role', 'dialog');
@@ -150,11 +153,19 @@
       render();
       emit();
     }
-    function place() {
-      const rect = anchor.getBoundingClientRect(), width = element.offsetWidth, height = element.offsetHeight;
-      const left = Math.min(Math.max(6, rect.left), innerWidth - width - 6);
-      const below = rect.bottom + 6, top = below + height + 6 > innerHeight ? Math.max(6, Math.min(rect.top - height - 6, innerHeight - height - 6)) : below;
-      element.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+    // Below the anchor at once, from its rect and the picker's known width; its height is read a
+    // frame later, when layout is clean, and only then does it move above an anchor too low for it.
+    const width = Math.min(446, innerWidth - 12);
+    function place(rect = anchor.getBoundingClientRect()) {
+      const left = Math.min(Math.max(6, rect.left), innerWidth - width - 6), below = rect.bottom + 6;
+      element.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(below)}px, 0)`;
+      requestAnimationFrame(() => {
+        if (closed) return;
+        const height = element.offsetHeight;
+        if (below + height + 6 <= innerHeight) return;
+        const top = Math.max(6, Math.min(rect.top - height - 6, innerHeight - height - 6));
+        element.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+      });
     }
     function close() {
       if (closed) return;
@@ -183,7 +194,7 @@
     addEventListener('pointerdown', outside, true);
     addEventListener('keydown', escape, true);
     render();
-    place();
+    place(anchorRect);
     return {
       element, close, place,
       /** New folders from storage: keeps the note being typed, drops filings whose folder is gone. */

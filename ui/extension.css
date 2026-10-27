@@ -53,7 +53,7 @@
 }
 
 @theme inline {
-  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   --color-app: var(--app);
   --color-surface: var(--surface);
