@@ -91,6 +91,12 @@
         revision: page.revision, limited: Boolean(page.limited), count, total, lengths, ids, offsets, units, tfs, bytes, byteStarts, paras, hashes });
     }
     function drop(tabId) { tabs.delete(tabId); }
+    // A tab the browser replaced (Edge gives a discarded tab a new id) keeps its reading.
+    function move({ from, to }) {
+      const tab = tabs.get(from);
+      if (!tab) return;
+      tabs.delete(from); tab.tabId = to; tabs.set(to, tab);
+    }
     // An unchanged tab keeps its text; its address or window may have changed.
     function meta({ tabId, documentId, windowId, url, title }) {
       const tab = tabs.get(tabId);
@@ -192,7 +198,7 @@
       for (const tab of tabs.values()) { bytes += tab.bytes.length; postings += tab.units.length; units += tab.count; }
       return { tabs: tabs.size, units, bytes, postings, terms: names.length, forms: filled };
     }
-    return { put, drop, meta, search, excerpts, stats };
+    return { put, drop, move, meta, search, excerpts, stats };
   }
   if (typeof module !== 'undefined' && module.exports) { module.exports = { createIndex }; return; }
   // Dedicated worker: messages from sonar.js, answered in order.
@@ -209,6 +215,7 @@
       queue = queue.then(() => data.type === 'put' ? index.put(data.page, pause) : index.meta(data.meta) || Promise.reject(new Error('Not indexed.')))
         .then(() => global.postMessage({ type: data.type, id: data.id }), error => global.postMessage({ type: data.type, id: data.id, error: String(error.message || error) }));
     } else if (data?.type === 'drop') { index.drop(data.tabId); queue = queue.then(() => index.drop(data.tabId)); }
+    else if (data?.type === 'move') { index.move(data); queue = queue.then(() => index.move(data)); }
     else if (data?.type === "excerpts" || data?.type === "stats") global.postMessage({ type: data.type, id: data.id, ...index[data.type](data) });
   };
   global.postMessage({ type: 'ready' });

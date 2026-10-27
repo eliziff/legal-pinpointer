@@ -75,9 +75,9 @@ Each window's panel searches that window; an ungrouped origin's Group scope is
 empty, not all ungrouped tabs. Chrome freezes and discards background tabs to
 save memory: a tab that has been read keeps its last reading and stays searchable
 while it sleeps, and opening one of its results wakes the tab, reads it again and
-then opens the same passage. A sleeping tab that was never read is listed, not read;
-with Settings → *Wake sleeping tabs* (off by default) it is reloaded in the background
-so it can be read (at most 24 per panel).
+then opens the same passage. A sleeping tab that was never read is reloaded in the
+background when the panel opens so it can be read (at most 24 per panel); with
+Settings → *Wake sleeping tabs* off, it is listed, not read.
 Restricted/unavailable pages and partial results are reported, not silently counted
 as zero-hit documents.
 

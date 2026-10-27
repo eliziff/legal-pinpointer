@@ -286,7 +286,10 @@
       try {
         const origin = await api.tabs.get(message.originTabId);
         if (Boolean(origin.incognito) !== sender.incognito) throw new Error('Cannot mix private and normal windows.');
-        const read = new Map(((await load(unitsKey(sender.workspace)))?.targets || []).map(t => [t.tabId, t]));
+        const targets = (await load(unitsKey(sender.workspace)))?.targets || [];
+        const read = new Map(targets.map(t => [t.tabId, t]));
+        // A replaced tab (Edge gives a discarded tab a new id) is still the document this workspace read.
+        for (const r of message.results) if (!read.has(r.tabId)) { const moved = targets.find(t => t.documentId === r.documentId); if (moved) read.set(r.tabId, moved); }
         const windows = new Map();
         for (const tabId of new Set(message.results.map(r => r.tabId))) windows.set(tabId, await api.tabs.get(tabId).then(tab => tab.windowId, () => undefined));
         const results = message.results.map(({ tabId, documentId, unit, hash }) => {
