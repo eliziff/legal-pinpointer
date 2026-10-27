@@ -1,0 +1,242 @@
+/* The extension's own pages (popup, Tab Search): Tailwind with Beaver's tokens, compiled to ui.css
+   by `npm run build:ui` (static CSS, no runtime). Pages that host Pinpointer's controls (CanLII,
+   Westlaw, Lexis) never load this: their controls are content.css and marker.css, on the same
+   tokens. Only transforms, opacity and colours animate; nothing blurs. */
+@import "tailwindcss" source(none);
+@source "../popup.html";
+@source "../popup.js";
+@source "../sonar.html";
+@source "../sonar.js";
+@source "../sonar-results.js";
+
+:root {
+  color-scheme: light dark;
+  --app: #f9fafb;
+  --surface: #ffffff;
+  --hover: #f3f4f6;
+  --active: #e5e7eb;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --ink: #111827;
+  --ink-soft: #374151;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --brand: #d52b1e;
+  --brand-ink: #b72016;
+  --brand-text: #b72016;
+  --brand-soft: #fff1f0;
+  --action: #030712;
+  --action-hover: #1f2937;
+  --on-action: #ffffff;
+  --mark: #ffe8a3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app: #15191f;
+    --surface: #1b2028;
+    --hover: #252c37;
+    --active: #2f3845;
+    --line: #2a313c;
+    --line-strong: #3d4757;
+    --ink: #edf0f5;
+    --ink-soft: #d3d9e2;
+    --muted: #a3adbd;
+    --faint: #6f7a8b;
+    --brand-text: #ff8578;
+    --brand-soft: #3a2220;
+    --action: #f3f4f6;
+    --action-hover: #ffffff;
+    --on-action: #0b0f14;
+    --mark: #5c4a17;
+  }
+}
+
+@theme inline {
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-brand: var(--brand);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-text: var(--brand-text);
+  --color-brand-soft: var(--brand-soft);
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-on-action: var(--on-action);
+  --color-mark: var(--mark);
+}
+
+@layer base {
+  body { @apply bg-app font-sans text-ink antialiased; font-size: 13px; line-height: 1.45; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  [hidden] { display: none !important; }
+  mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+  ::selection { background: color-mix(in srgb, var(--brand) 22%, transparent); }
+}
+
+/* Buttons: Beaver's button.tsx variants, as utilities so other classes can build on them. */
+@utility btn {
+  @apply inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-3 font-medium whitespace-nowrap transition-colors duration-75 disabled:opacity-45 [&_svg]:size-4 [&_svg]:shrink-0;
+  font-size: 13px;
+}
+@utility btn-primary { @apply bg-action text-on-action enabled:hover:bg-action-hover; }
+@utility btn-outline { @apply border-line-strong bg-surface text-ink enabled:hover:bg-hover; }
+@utility btn-ghost { @apply bg-transparent text-ink-soft enabled:hover:bg-hover enabled:hover:text-ink; }
+@utility btn-sm { @apply h-7 gap-1 px-2 text-xs [&_svg]:size-3.5; }
+@utility btn-icon { @apply size-8 px-0; }
+@utility btn-link { @apply h-auto border-0 bg-transparent px-0 text-xs font-medium whitespace-nowrap text-brand-text hover:underline; }
+
+@layer components {
+  /* A shortcut on a primary (dark) button reads as part of it. */
+  .btn-primary .kbd { @apply border-on-action/20 bg-transparent text-on-action/70; }
+
+  .field {
+    @apply h-8 min-w-0 rounded-md border border-line-strong bg-surface px-2.5 text-ink outline-none transition-[border-color,box-shadow] duration-75 placeholder:text-faint focus:border-brand focus:ring-3 focus:ring-brand/15;
+    font-size: 13px;
+  }
+  select.field { @apply pe-6; }
+
+  /* Segmented control: tabs, routes, scopes and choices. */
+  .seg { @apply inline-flex items-center gap-0.5 rounded-lg bg-active/70 p-0.5; }
+  .seg > button, .seg > label > span {
+    @apply flex h-7 items-center justify-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap text-muted transition-colors duration-75 hover:text-ink;
+  }
+  .seg > button[aria-pressed="true"], .seg > button[aria-selected="true"], .seg > label > input:checked + span {
+    @apply bg-surface text-ink shadow-[0_1px_2px_rgb(0_0_0/0.08)];
+  }
+  .seg > label { @apply relative flex-1; }
+  .seg > label > input { @apply pointer-events-none absolute opacity-0; }
+  .seg > label > input:focus-visible + span { outline: 2px solid var(--brand); }
+
+  .card { @apply overflow-hidden rounded-lg border border-line bg-surface; }
+  .eyebrow { @apply mx-0.5 mb-1.5 mt-4 text-[11px] font-semibold tracking-[0.06em] text-muted uppercase first:mt-0; }
+  .kbd { @apply inline-flex h-4.5 items-center rounded border border-line bg-app px-1 font-sans text-[10.5px] font-medium whitespace-nowrap text-muted; }
+
+  /* A settings row: name and description, the control on the right. */
+  .setting { @apply flex cursor-pointer items-center justify-between gap-3 border-t border-line px-3 py-2.5 first:border-t-0; }
+  .setting b { @apply block text-[13px] font-medium text-ink; }
+  .setting small { @apply mt-px block text-xs leading-snug text-muted; }
+  .setting-field { @apply flex items-center justify-between gap-3 border-t border-line px-3 py-2 first:border-t-0; }
+  .setting-field > span:first-child { @apply text-ink-soft; }
+
+  .switch {
+    @apply relative h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-line-strong transition-colors duration-100 checked:bg-brand;
+  }
+  .switch::after {
+    @apply absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.25)] transition-transform duration-100 content-[''];
+  }
+  .switch:checked::after { @apply translate-x-4; }
+
+  /* A list row with a shortcut on the right (Copy tab). */
+  .list-row {
+    @apply flex h-9 w-full items-center justify-between gap-2 border-t border-line bg-transparent px-3 text-start text-ink transition-colors duration-75 first:border-t-0 enabled:hover:bg-hover;
+  }
+
+  /* The folder tree: Beaver's file-explorer rows (ResearchTree.tsx ROW). One fixed-height line of
+     chevron, glyph, name, number and actions; nothing wraps. */
+  .trow { @apply flex h-7 w-full min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 text-start text-ink-soft hover:bg-hover; }
+  .trow:has(> [aria-pressed="true"]), .troot[aria-pressed="true"] { @apply bg-active/70 text-ink; }
+  .trow.drop-inside { box-shadow: inset 0 0 0 1px var(--faint); }
+  .trow.drop-before { box-shadow: inset 0 2px 0 var(--muted); }
+  .trow.drop-after { box-shadow: inset 0 -2px 0 var(--muted); }
+  .tspace { @apply w-6 shrink-0; }
+  .tchev { @apply grid size-6 shrink-0 place-items-center rounded border-0 bg-transparent p-0 text-faint hover:text-ink; }
+  .tchev .ticon { @apply size-3.5 transition-transform duration-100; }
+  .tchev.open .ticon { @apply rotate-90; }
+  .tglyph { @apply relative grid size-5 shrink-0 place-items-center rounded text-muted; }
+  .tglyph .ticon { @apply size-4; }
+  .tglyph input { @apply absolute inset-0 size-5 cursor-pointer border-0 p-0 opacity-0; }
+  .tname { @apply min-w-0 flex-1 truncate border-0 bg-transparent py-1 text-start text-[13px] text-inherit no-underline; }
+  .tname[aria-pressed="true"] { @apply font-semibold; }
+  a.tname:hover { @apply text-ink underline underline-offset-2; }
+  .tname-input { @apply h-5.5 min-w-0 flex-1 border-0 border-b border-line-strong bg-transparent px-0.5 text-[13px] text-ink outline-none focus:border-brand; }
+  /* One virtualized tree row: absolutely placed at its index, always 28px (popup.js ROW). */
+  .tvrow { @apply absolute inset-x-0 h-7; contain: layout style; }
+  .tadd { @apply flex h-7 items-center px-2; }
+  .tcount { @apply shrink-0 text-[11px] text-faint tabular-nums; }
+  .tactions { @apply flex w-7 shrink-0 items-center justify-end opacity-0; }
+  .trow:hover .tactions, .trow:focus-within .tactions { @apply opacity-100; }
+  @media (hover: none) { .tactions { @apply opacity-100; } }
+  .tmore { @apply grid size-7 place-items-center rounded-md border-0 bg-transparent p-0 text-muted hover:bg-active hover:text-ink aria-expanded:bg-active aria-expanded:text-ink; }
+  .tmore .ticon { @apply size-4; }
+  .tgroup { @apply ms-4; }
+  .tempty { @apply m-0 px-2 py-3 text-xs text-muted; }
+
+  /* Beaver's action menu. */
+  .menu {
+    @apply fixed z-10 min-w-44 rounded-lg border border-line bg-surface p-1 shadow-[0_10px_24px_-6px_rgb(0_0_0/0.18),0_2px_6px_-2px_rgb(0_0_0/0.08)];
+  }
+  .menu button { @apply block w-full rounded-md border-0 bg-transparent px-2 py-1.5 text-start text-[13px] text-ink enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-faint; }
+  .menu button[data-armed] { @apply font-semibold text-brand-text; }
+}
+
+/* Tab Search: one 132px row per result (the list is virtualized at that height). */
+@layer components {
+  .result-row {
+    @apply relative h-[132px] cursor-default overflow-hidden border-b border-line px-3 py-2.5 transition-colors duration-75 hover:bg-hover;
+    contain: layout paint style;
+    box-shadow: inset 2px 0 0 transparent;
+  }
+  .result-row[aria-selected="true"] { @apply bg-brand-soft/60; box-shadow: inset 2px 0 0 var(--brand); }
+  #list-viewport:focus-visible .result-row[aria-selected="true"] { outline: 2px solid var(--brand); outline-offset: -2px; }
+  .result-head { @apply flex h-5.5 items-center gap-1.5; }
+  .result-icon { @apply size-4 flex-none rounded-sm; }
+  .result-title { @apply min-w-0 flex-1 truncate text-xs font-semibold text-ink; }
+  .result-locator { @apply flex-none rounded border border-line bg-app px-1 text-[10.5px] font-medium text-muted tabular-nums; }
+  .result-open { @apply btn btn-ghost h-6 px-2 text-xs text-brand-text; }
+  .result-text { @apply mt-1 mb-0 line-clamp-3 h-[60px] text-[13px] leading-5 text-ink-soft; }
+  .result-actions { @apply mt-1.5 flex h-6 gap-1.5; }
+  .result-copy { @apply btn btn-outline h-6 min-w-0 flex-1 px-1.5 text-[11px] text-ink-soft; }
+}
+
+/* Tab Search: states its script sets. Unlayered, so they win over the layout utilities. */
+body[data-route="canlii"] :is(#scope-row, #origin, #use-active, #list-viewport) { display: none; }
+body:not([data-route="canlii"]) #canlii-fields { display: none; }
+
+@layer components {
+  #list-viewport { position: relative; min-height: 0; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; scrollbar-gutter: stable; contain: strict; outline: none; }
+  #result-spacer { position: relative; width: 100%; }
+  #result-rows { position: absolute; inset: 0 0 auto 0; will-change: transform; }
+  #query[aria-invalid="true"] { border-color: var(--brand); }
+  #notice.error { color: var(--brand-text); }
+  #operators { position-anchor: --help; position-area: bottom span-left; margin: 6px 0 0; }
+  #help { anchor-name: --help; }
+  .popover { @apply max-w-[calc(100vw-16px)] rounded-lg border border-line bg-surface p-3 text-xs text-ink shadow-[0_10px_24px_-6px_rgb(0_0_0/0.18)]; }
+  #operators table { border-collapse: collapse; }
+  #operators :is(th, td) { @apply border-t border-line px-1.5 py-1 text-start align-top; }
+  #operators tr:first-child :is(th, td) { border-top: 0; }
+  #operators th { @apply font-semibold whitespace-nowrap; }
+  #operators code { @apply font-mono text-[11px] text-ink-soft; }
+  #issue-popover::backdrop { background: rgb(17 24 39 / 0.18); }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
+}
+
+@media (forced-colors: active) {
+  .result-row[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .switch::after { background: CanvasText; }
+}
+/* The folder picker (marker.css) opened from the popup follows the popup's scheme; on provider pages
+   it stays light, as those pages are. */
+@media (prefers-color-scheme: dark) {
+  .lpm-picker { background: var(--surface); border-color: var(--line-strong); color: var(--ink); }
+  .lpm-slots, .lpm-level.lpm-sub { border-color: var(--line); }
+  .lpm-picker .lpm-slot:hover, .lpm-x:hover { background: var(--hover); }
+  .lpm-picker .lpm-slot[aria-pressed="true"] { background: var(--active); box-shadow: inset 0 0 0 1px var(--ink); }
+  .lpm-slot-name, .lpm-picker .lpm-chip { color: var(--ink-soft); }
+  .lpm-picker .lpm-chip { background: var(--hover); }
+  .lpm-picker .lpm-chip:hover, .lpm-picker .lpm-chip[aria-pressed="true"] { background: var(--active); color: var(--ink); }
+  .lpm-picker .lpm-chip[aria-pressed="true"] { border-color: var(--ink); }
+  .lpm-picker :is(.lpm-note, .lpm-badge-text, .lpm-badge-color) { background: var(--app); border-color: var(--line-strong); }
+  .lpm-circle.lpm-empty { box-shadow: inset 0 0 0 2px var(--line-strong); }
+}

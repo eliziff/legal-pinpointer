@@ -58,7 +58,9 @@
   function details() {
     const skipped = (result?.skipped || []).filter(item => !/^Browser-restricted/.test(item.reason));
     $('issues').hidden = route !== 'tabs' || !(skipped.length || result?.limited);
-    $('issues').textContent = skipped.length ? 'Skipped tabs' : 'Partial results';
+    // Says what it is: the tabs left out of these results (the list says why), or a limit reached.
+    $('issues').textContent = skipped.length ? `${skipped.length} tab${skipped.length === 1 ? '' : 's'} not searched` : 'Results cut short';
+    $('issues').title = skipped.length ? 'Show which tabs were not searched, and why' : 'Show which limit was reached';
     $('limit-detail').textContent = result?.limited ? 'A text, time, result or highlight limit was reached. Narrow the query or scope.' : '';
     $('issue-list').replaceChildren(...skipped.map(item => {
       const li = document.createElement('li'); li.textContent = `${item.title}: ${item.reason}`; return li;

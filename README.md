@@ -142,6 +142,8 @@ Popup actions report once in the popup. Keyboard copy/navigation actions report 
 
 ## Maintenance
 
+The popup and Tab Search are styled with Tailwind on Beaver's tokens: edit `ui/extension.css` (or their markup) and run `npm install` once, then `npm run build:ui`, which writes the static `ui.css` the extension loads (it is committed, so a checkout loads without a build). Pages Pinpointer works on never load it; their controls use `content.css` and `marker.css` on the same tokens.
+
 `npm run package:extension` creates `dist/legal-pinpointer.zip` and `dist/SHA256SUMS` from the tracked extension files, including the compressed engine and metadata. The archive contains the browser extension alone. `PINPOINTER_EXTENSION_ROOT` can point the installed-extension check at an extracted package.
 
 Refresh the exact parser after changing `legal-structure`:

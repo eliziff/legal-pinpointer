@@ -58,7 +58,7 @@
   overflow: hidden;
   border-radius: 999px;
   color: #ffffff;
-  font: 600 11.5px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 600 11.5px/1.3 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -92,7 +92,7 @@
   background: #ffffff;
   color: #6b7280;
   box-shadow: 0 0 0 1px #e5e7eb;
-  font: 600 9.5px/13px system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 600 9.5px/13px "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   pointer-events: none;
 }
 
@@ -110,6 +110,7 @@
   width: min(446px, calc(100vw - 12px));
   max-height: 80vh;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   padding: 10px 12px;
   border: 1px solid #d1d5db;
@@ -117,7 +118,7 @@
   background: #ffffff;
   color: #111827;
   box-shadow: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
-  font: 14px/1.43 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 14px/1.43 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   text-align: left;
   contain: layout paint style;
 }

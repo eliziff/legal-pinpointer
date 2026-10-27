@@ -11,7 +11,7 @@
   background: #111827;
   color: #ffffff;
   box-shadow: 0 1px 2px rgb(0 0 0 / 12%), 0 8px 24px rgb(0 0 0 / 18%);
-  font: 600 13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 600 13.5px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   overflow-wrap: anywhere;
   pointer-events: none;
   contain: layout paint style;
@@ -148,7 +148,7 @@
 .lp-unit > button.done::before {
   content: "\2713" !important;
   margin-top: 0 !important;
-  font: 700 15px/1 system-ui, sans-serif !important;
+  font: 700 15px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif !important;
 }
 
 /* The one tooltip the controls share, in Pinpointer's fixed layer. */
@@ -160,7 +160,7 @@
   border-radius: 6px !important;
   background: #111827 !important;
   color: #ffffff !important;
-  font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font: 500 12px/1.2 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif !important;
   white-space: nowrap !important;
   pointer-events: none !important;
 }
@@ -265,7 +265,7 @@ html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-t
   -webkit-mask: none !important;
   mask: none !important;
   content: "\2713" !important;
-  font: 700 14px/1 system-ui, sans-serif !important;
+  font: 700 14px/1 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif !important;
 }
 
 /* Westlaw and Lexis: the native title as plain, wrapping, selectable text (on by default, from the
@@ -398,7 +398,7 @@ html:not(.lp-raw-titles) #crsw_legalMemoIcon {
   background: #111827 !important;
   color: #ffffff !important;
   content: attr(data-tip) !important;
-  font: 500 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font: 500 12px/1.2 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif !important;
   white-space: nowrap !important;
   opacity: 0 !important;
   pointer-events: none !important;
