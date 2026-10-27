@@ -23,7 +23,7 @@ citation-copying shortcuts and output formats are unchanged.
 | Use active tab | Explicitly change the origin of This tab/This group search. |
 | Escape | Close the panel (an open ? table or skipped-tabs list closes first) and release its shared search session. |
 | Enter on the CanLII route | Search CanLII in a new tab and close the panel. |
-| Alt+Shift+C | Open CanLII document-text search from any browser tab, including blank/new tabs. |
+| Ctrl+Shift+E | Open CanLII document-text search from any browser tab, including blank/new tabs. |
 
 Each result has its Copy quote, Copy pinpoint and Copy link buttons on one line
 below its excerpt. The copy shortcuts act on the result with keyboard focus
@@ -36,12 +36,12 @@ that off (Chrome skips it only when Windows' Animation effects setting is off).
 The popup provides both
 search buttons and reports unassigned shortcut bindings. Chrome or another
 extension may claim a shortcut: assign it at `chrome://extensions/shortcuts`.
-Chrome itself uses Alt+Shift+C (add a new tab to a group), which is why CanLII
-search is Alt+Shift+C. The extension does not override the new-tab page.
+Chrome itself uses Ctrl+Shift+E (add a new tab to a group), which is why CanLII
+search is Ctrl+Shift+E. The extension does not override the new-tab page.
 
 ## CanLII document-text search, including from new tabs
 
-Alt+Shift+C is a **chrome.commands** command handled by the service worker. The
+Ctrl+Shift+E is a **chrome.commands** command handled by the service worker. The
 handler opens the native panel synchronously in the keyboard gesture, before
 awaiting storage, tab lookup, or page access. It never injects into the originating
 page. Blank tabs, `chrome://newtab/`, and other browser-owned pages therefore need

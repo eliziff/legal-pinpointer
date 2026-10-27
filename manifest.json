@@ -105,8 +105,8 @@
     },
     "canlii-text-search": {
       "suggested_key": {
-        "default": "Alt+Shift+C",
-        "mac": "Alt+Shift+C"
+        "default": "Ctrl+Shift+E",
+        "mac": "Ctrl+Shift+E"
       },
       "description": "CanLII document text search (including from new tabs)"
     },
