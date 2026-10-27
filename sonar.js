@@ -20,10 +20,11 @@
   let indexer = null, indexReady = false, indexCalls = 0, reading = 0;
   // Chrome freezes and discards background tabs. A sleeping tab keeps its last reading in the
   // index; opening one of its results wakes it first. A sleeping tab never read can be reloaded
-  // in the background (Settings: Wake sleeping tabs) so it can be read at all.
+  // in the background when the panel opens (Settings: Wake sleeping tabs, on by default) so it
+  // can be read at all.
   const waking = new Set();
-  let wakeTabs = false, wakes = 0, pendingOpen = null;
-  chrome.storage.local?.get({ sonarWakeTabs: false }, (stored) => { wakeTabs = stored?.sonarWakeTabs === true; });
+  let wakeTabs = true, wakes = 0, pendingOpen = null;
+  chrome.storage.local?.get({ sonarWakeTabs: true }, (stored) => { wakeTabs = stored?.sonarWakeTabs !== false; });
   const favicon = url => url ? `${chrome.runtime.getURL('/_favicon/')}?pageUrl=${encodeURIComponent(url)}&size=16` : '';
   const list = new LegalPinpointerResults.ResultsList($('list-viewport'), $('result-spacer'), $('result-rows'),
     { choose: (index, action) => choose(index, action), icon: favicon, leave: () => $('query').focus() });
@@ -269,15 +270,15 @@
     waking.add(tabId); wakes++;
     chrome.tabs.reload(tabId).catch(() => {}).finally(() => setTimeout(() => waking.delete(tabId), 30_000));
   }
-  // Resolves once a tab is loaded and awake (or after a bounded wait).
+  // Resolves true once a tab is loaded and awake, false after a bounded wait.
   function awake(tabId, ms = 20_000) {
     return new Promise(resolve => {
       const ready = tab => tab && tab.status === 'complete' && !tab.discarded && !tab.frozen;
-      const done = () => { chrome.tabs.onUpdated.removeListener(listener); clearTimeout(timeout); resolve(); };
-      const listener = (id, change, tab) => { if (id === tabId && ready(tab)) done(); };
-      const timeout = setTimeout(done, ms);
+      const done = value => { chrome.tabs.onUpdated.removeListener(listener); clearTimeout(timeout); resolve(value); };
+      const listener = (id, change, tab) => { if (id === tabId && ready(tab)) done(true); };
+      const timeout = setTimeout(() => done(false), ms);
       chrome.tabs.onUpdated.addListener(listener);
-      chrome.tabs.get(tabId).then(tab => { if (ready(tab)) done(); }, done);
+      chrome.tabs.get(tabId).then(tab => { if (ready(tab)) done(true); }, () => done(false));
     });
   }
   function forget(tabId) {
@@ -316,9 +317,15 @@
     if (origin?.id === tabId) { origin = null; originRequest++; labels(); }
     sourceChanged(tabId);
   });
-  chrome.tabs.onReplaced?.addListener((added, removed) => {
-    forget(removed);
+  chrome.tabs.onReplaced?.addListener(async (added, removed) => {
     if (origin?.id === removed) { origin = { ...origin, id: added }; originRequest++; }
+    // Edge gives a tab it discards a new id; that document's last reading stays searchable
+    // under it. Any other replacement (a prerendered page) is a new document.
+    const entry = reads.get(removed), tab = entry?.state === 'ready' ? await chrome.tabs.get(added).catch(() => null) : null;
+    if (tab?.discarded && reads.get(removed) === entry && !reads.has(added)) {
+      reads.delete(removed); reads.set(added, entry); entry.asleep = true;
+      indexer?.postMessage({ type: 'move', from: removed, to: added });
+    } else forget(removed);
     if (indexReady) want(added);
     sourceChanged(added);
   });
@@ -374,7 +381,8 @@
     try {
       tell('Waking the tab\u2026');
       await chrome.tabs.update(item.tabId, { active: true });
-      await awake(item.tabId);
+      // Edge does not always load a discarded or frozen tab it activates; reload it then.
+      if (!await awake(item.tabId, 2000)) { await chrome.tabs.reload(item.tabId); await awake(item.tabId); }
       await want(item.tabId, true, true);
       pendingOpen = { tabId: item.tabId, hash: item.hash };
     } catch (error) { tell(error.message, true); }

@@ -86,8 +86,8 @@ visiting results. This window covers the origin's window; other windows have
 their own panels. A tab Chrome freezes or discards keeps its last reading in the
 index (plain-word queries still find it); opening one of its results activates the
 tab, waits until it is awake, reads it again and opens the same passage. Never-read
-sleeping tabs are listed; with the setting *Wake sleeping tabs* (off by default) they are
-reloaded in the background to be read.
+sleeping tabs are reloaded in the background when the panel opens, so they can be read
+(setting *Wake sleeping tabs*, on by default; off, they are only listed).
 Operator queries run in the pages themselves, so they skip sleeping tabs and list
 them. A search started from a tab in another window still opens that window's
 native panel **within the original click/key gesture** and hands off the query,

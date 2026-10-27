@@ -7,7 +7,7 @@
   const SETTINGS = {
     pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
     unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
-    sonarWakeTabs: false, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
+    sonarWakeTabs: true, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
   const MARKER = { canliiFolders: {}, canliiMarkers: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
   // Folders take the next unused colour of this palette instead of all starting the same.

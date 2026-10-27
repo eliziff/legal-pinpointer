@@ -317,15 +317,15 @@ test('a tab Chrome freezes or discards keeps its last reading and stays searchab
   assert.equal(results.find(row => row.tabId === 3).asleep, true);
 });
 
-test('a sleeping tab that was never read is woken in the background to read it (Wake sleeping tabs on)', async t => {
-  const f = panelFixture({ settings: { sonarWakeTabs: true } }); t.after(f.close);
+test('by default a sleeping tab that was never read is woken in the background to read it', async t => {
+  const f = panelFixture(); t.after(f.close);
   f.unitsHook = (_message, tab) => tab.id === 2 ? { tabId: 2, skipped: 'Asleep (Chrome froze or discarded it)' } : null;
   await f.ready();
   await until(() => f.calls.some(call => call.type === 'reload' && call.id === 2), 'sleeping tab reloaded');
 });
 
-test('by default a sleeping tab is left asleep', async t => {
-  const f = panelFixture(); t.after(f.close);
+test('with Wake sleeping tabs off a sleeping tab is left asleep', async t => {
+  const f = panelFixture({ settings: { sonarWakeTabs: false } }); t.after(f.close);
   f.unitsHook = (_message, tab) => tab.id === 2 ? { tabId: 2, skipped: 'Asleep (Chrome froze or discarded it)' } : null;
   await f.ready();
   f.advance(5000);
