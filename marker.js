@@ -1,8 +1,9 @@
 'use strict';
 
 // Case Marker: coloured circles on CanLII search results and document titles, on the Westlaw and
-// Lexis title, and on court decision pages (Lexum/Decisia), filed into the current project's folders
-// (up to three levels; a circle shows the folder path as nested rings). One identity across
+// Lexis title, and on court decision pages (Lexum/Decisia), filed into any number of the current
+// project's nested folders (a circle shows its deepest filing's path as nested rings; the picker is
+// marker-core.js, Beaver's label editor). One identity across
 // providers: a document's CanLII path ("ca/scc/doc/2016/2016scc27/2016scc27.html"), which Westlaw,
 // Lexis and court pages resolve to, so a case filed on one shows as filed on the others; a decision
 // with no CanLII version is keyed by its court page ("site:...") or else its citation ("cite:...").
@@ -19,13 +20,12 @@
   // Frames: only a court site's document frame (Decisia renders the decision in an iframe).
   if (window !== window.top && !onCourtSite) return;
 
-  const RING = ['', '62%', '52%'];
-  const BADGE_MAX = 19;
+  const core = globalThis.LegalPinpointerMarkerCore;
   const KEYS = ['caseMarker', 'canliiFolders', 'canliiMarkers', 'canliiProjects', 'canliiCurrentProject', 'canliiHotkeySlot1', 'canliiHotkeySlot2'];
   const state = { enabled: true, folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
   const wraps = new Map(); // key -> Set of circle wraps on this page
   const labels = new Map(); // key -> the name and citation shown on this page
-  let picker = null, pickerKey = null, hoveredKey = null, saveTimer = 0, ownWrite = false;
+  let editor = null, editorKey = null, hoveredKey = null, saveTimer = 0, ownWrite = false;
 
   const docKey = (href) => {
     try { return new URL(href, location.origin).pathname.replace(/^\/(?:en|fr)\//, ''); } catch (_) { return ''; }
@@ -34,7 +34,6 @@
   const currentVersion = (key) => !/\/laws\/[^/]+\/[^/]+\/\d+\//.test(key);
   const isDocument = (key) => /^[a-z]{2}\/[a-z]+\/doc\/\d{4}\/|^[a-z]{2}\/laws\/|^commentary\/doc\//.test(key);
   const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-  const escapeHtml = (value) => String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   // ---------------------------------------------------------------------------
   // State
@@ -72,31 +71,11 @@
   function prune(key) {
     const marker = state.markers[key];
     const data = marker?.byProject?.[state.project];
-    if (data && !data.folderPath?.length && !data.note && !data.badge) delete marker.byProject[state.project];
+    if (data && !data.folderPath?.length && !data.folderIds?.length && !data.note && !data.badge) delete marker.byProject[state.project];
     if (marker && !Object.keys(marker.byProject || {}).length) delete state.markers[key];
   }
 
-  function children(parentId) {
-    return Object.entries(state.folders)
-      .filter(([, folder]) => (folder.parentId || null) === parentId && folder.projectId === state.project)
-      .sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
-  }
-
-  function validPath(path) {
-    const valid = [];
-    for (const id of path || []) {
-      const folder = state.folders[id];
-      if (!folder || folder.projectId !== state.project || (folder.parentId || null) !== (valid[valid.length - 1] || null)) break;
-      valid.push(id);
-    }
-    return valid;
-  }
-
-  function pathTo(id) {
-    const path = [];
-    for (let at = id; at && state.folders[at]; at = state.folders[at].parentId) path.unshift(at);
-    return validPath(path);
-  }
+  const filed = (key) => core.filings(entry(key), state.folders, state.project);
 
   function remember(key, label, meta) {
     const marker = state.markers[key] ||= {};
@@ -111,24 +90,9 @@
   // Circles
 
   function circle(key) {
-    const path = validPath(entry(key)?.folderPath);
-    const outer = document.createElement('span');
-    outer.className = 'lpm-circle';
+    const ids = filed(key), outer = core.circle(state.folders, ids);
     outer.dataset.key = key;
-    if (!path.length) outer.classList.add('lpm-empty');
-    let parent = outer;
-    path.slice(0, 3).forEach((id, depth) => {
-      const ring = depth ? document.createElement('span') : outer;
-      ring.style.background = state.folders[id].color || '#9aa5b1';
-      if (depth) {
-        ring.className = 'lpm-ring';
-        ring.style.width = ring.style.height = RING[depth];
-        parent.appendChild(ring);
-      }
-      parent = ring;
-    });
-    const data = entry(key);
-    outer.title = data?.note || (path.length ? path.map((id) => state.folders[id].name).join(' › ') : 'Mark this document');
+    outer.title = [core.filingNames(state.folders, ids).join(' · '), entry(key)?.note].filter(Boolean).join('\n') || 'File this document';
     return outer;
   }
 
@@ -136,6 +100,14 @@
     const key = wrap.dataset.key;
     const data = entry(key);
     const parts = [];
+    const others = filed(key).length - 1;
+    if (others > 0) {
+      // Floats like the badge, so the circle's box never changes; drawn from the attribute, so it is never copied.
+      const more = document.createElement('span');
+      more.className = 'lpm-more';
+      more.dataset.more = `+${others}`;
+      parts.push(more);
+    }
     if (data?.badge?.text) {
       const badge = document.createElement('span');
       badge.className = 'lpm-badge';
@@ -279,76 +251,35 @@
   // Picker
 
   function hidePicker() {
-    if (picker) picker.hidden = true;
-    pickerKey = null;
-  }
-
-  function folderRows(parentId, depth, selected, rows) {
-    for (const [id, folder] of children(parentId)) {
-      rows.push(`<button type="button" class="lpm-row${selected.includes(id) ? ' lpm-on' : ''}" data-folder="${id}" style="--depth:${depth}">`
-        + `<span class="lpm-dot" style="background:${escapeHtml(folder.color || '#9aa5b1')}"></span><span>${escapeHtml(folder.name)}</span></button>`);
-      if (depth < 2) folderRows(id, depth + 1, selected, rows);
-    }
-    return rows;
+    editor?.close();
   }
 
   function showPicker(key, anchor) {
-    if (!picker) {
-      picker = document.createElement('div');
-      picker.className = 'lpm-picker';
-      picker.setAttribute('data-lp-ui', '');
-      picker.addEventListener('click', onPickerClick);
-      picker.addEventListener('input', onPickerInput);
-      document.body.appendChild(picker);
-    }
-    pickerKey = key;
-    const data = entry(key) || {};
-    const path = validPath(data.folderPath);
-    const rows = folderRows(null, 0, path, []);
-    picker.innerHTML = `<div class="lpm-head"><span>${escapeHtml(state.projects[state.project]?.name || 'Project')}</span><button type="button" class="lpm-x" data-close aria-label="Close">×</button></div>`
-      + `<div class="lpm-list"><button type="button" class="lpm-row${path.length ? '' : ' lpm-on'}" data-folder=""><span class="lpm-dot lpm-none"></span><span>None</span></button>`
-      + (rows.length ? rows.join('') : '<p class="lpm-help">Create folders in the Legal Pinpointer menu (Marker tab).</p>') + '</div>'
-      + `<textarea class="lpm-note" rows="2" placeholder="Note" maxlength="2000">${escapeHtml(data.note || '')}</textarea>`
-      + `<div class="lpm-badge-row"><input class="lpm-badge-text" maxlength="${BADGE_MAX}" placeholder="Badge" value="${escapeHtml(data.badge?.text || '')}">`
-      + `<input class="lpm-badge-color" type="color" value="${escapeHtml(data.badge?.color || '#5b6670')}" title="Badge colour"></div>`;
-    picker.hidden = false;
-    const rect = anchor.getBoundingClientRect();
-    const width = 260, height = picker.offsetHeight;
-    const left = Math.min(Math.max(8, rect.left), innerWidth - width - 8);
-    const top = rect.bottom + height + 8 > innerHeight ? Math.max(8, rect.top - height - 6) : rect.bottom + 6;
-    picker.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
-  }
-
-  function onPickerClick(event) {
-    if (event.target.closest('[data-close]')) return hidePicker();
-    const row = event.target.closest('[data-folder]');
-    if (!row || !pickerKey) return;
-    const data = entry(pickerKey, true);
-    data.folderPath = row.dataset.folder ? pathTo(row.dataset.folder) : [];
-    prune(pickerKey);
-    save();
-    refresh(pickerKey);
-    for (const other of picker.querySelectorAll('.lpm-row')) other.classList.toggle('lpm-on', data.folderPath.includes(other.dataset.folder) || (!data.folderPath.length && !other.dataset.folder));
-  }
-
-  function onPickerInput(event) {
-    if (!pickerKey) return;
-    const data = entry(pickerKey, true);
-    if (event.target.classList.contains('lpm-note')) data.note = event.target.value.trim();
-    if (event.target.matches('.lpm-badge-text, .lpm-badge-color')) {
-      const text = picker.querySelector('.lpm-badge-text').value.trim().slice(0, BADGE_MAX);
-      if (text) data.badge = { text, color: picker.querySelector('.lpm-badge-color').value };
-      else delete data.badge;
-    }
-    prune(pickerKey);
-    save(400);
-    refresh(pickerKey);
+    hidePicker();
+    editorKey = key;
+    editor = core.openEditor({
+      anchor, folders: state.folders, project: state.project, data: entry(key) || {},
+      // A press on a circle is the circle's own: it toggles this editor or opens another.
+      inside: (event) => Boolean(circleIn(event)),
+      onChange({ folderIds, note, badge }) {
+        const data = entry(key, true);
+        core.setFilings(data, folderIds, state.folders);
+        if (note) data.note = note; else delete data.note;
+        if (badge) data.badge = badge; else delete data.badge;
+        prune(key);
+        save();
+        refresh(key);
+      },
+      onClose() { editor = editorKey = null; }
+    });
+    editor.project = state.project;
   }
 
   // ---------------------------------------------------------------------------
   // Events: one listener each, on the window in the capture phase, registered before the page's own.
 
-  const circleIn = (event) => event.composedPath().find((node) => node.nodeType === 1 && node.classList.contains('lpm-circle'));
+  // A document's circle; the editor's own small circles carry no key.
+  const circleIn = (event) => event.composedPath().find((node) => node.nodeType === 1 && node.classList.contains('lpm-circle') && node.dataset.key);
   window.addEventListener('mousedown', (event) => {
     if (circleIn(event)) { event.preventDefault(); event.stopImmediatePropagation(); }
   }, true);
@@ -358,10 +289,8 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       const key = target.dataset.key;
-      if (pickerKey === key && picker && !picker.hidden) hidePicker(); else showPicker(key, target);
-      return;
+      if (editorKey === key) hidePicker(); else showPicker(key, target);
     }
-    if (picker && !picker.hidden && !picker.contains(event.target)) hidePicker();
   }, true);
 
   window.addEventListener('pointerover', (event) => {
@@ -370,14 +299,13 @@
 
   // C and V file the hovered circle into the two hotkey folders; N clears it.
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && picker && !picker.hidden) { hidePicker(); return; }
     if (!hoveredKey || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !['KeyC', 'KeyV', 'KeyN'].includes(event.code)) return;
     if (event.target.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
     const folder = event.code === 'KeyC' ? state.slot1 : event.code === 'KeyV' ? state.slot2 : null;
     if (event.code !== 'KeyN' && !folder) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    entry(hoveredKey, true).folderPath = folder ? pathTo(folder) : [];
+    core.setFilings(entry(hoveredKey, true), folder && state.folders[folder]?.projectId === state.project ? [folder] : [], state.folders);
     prune(hoveredKey);
     save();
     refresh(hoveredKey);
@@ -392,7 +320,7 @@
       if (!state.enabled) return removeAll();
       if (!wasEnabled) return scan();
       refreshAll();
-      if (picker && !picker.hidden && pickerKey) showPicker(pickerKey, document.querySelector(`.lpm-circle[data-key="${CSS.escape(pickerKey)}"]`) || picker);
+      if (editor && editor.project !== state.project) hidePicker(); else editor?.refresh(state.folders);
     });
   });
 

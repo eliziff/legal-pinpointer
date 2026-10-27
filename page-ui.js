@@ -566,7 +566,7 @@
   const LAYER_CSS = `
     :host { all: initial; }
     a { position: fixed; left: 16px; bottom: 18px; display: grid; place-items: center; box-sizing: border-box; width: 30px; height: 30px;
-      border: 1px solid #d5dee6; border-radius: 7px; background: #fff; opacity: 0; transform: scale(.9); pointer-events: none;
+      border: 1px solid #e5e7eb; border-radius: 7px; background: #fff; opacity: 0; transform: scale(.9); pointer-events: none;
       transition: opacity 120ms, transform 120ms; box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
     a.ready { opacity: 1; transform: none; pointer-events: auto; }
     a.ready.dead { opacity: .42; filter: grayscale(1); }
