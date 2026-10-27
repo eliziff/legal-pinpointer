@@ -21,7 +21,7 @@
     : /(?:^|\.)nextcanada\.westlaw\.com$/.test(hostname) ? 'westlaw' : '';
   if (!provider) return;
 
-  const settings = { unitCopyButtons: true, canliiHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
+  const settings = { unitCopyButtons: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   const idle = (callback, timeout) => (window.requestIdleCallback
     ? requestIdleCallback(callback, { timeout }) : setTimeout(callback, 50));
 
@@ -595,8 +595,10 @@
     return floating;
   }
 
+  // The citation bar takes the floating button's place while it is on.
   function floatVisibility() {
-    floating?.classList.toggle('ready', settings.canliiButton && !toolsVisible);
+    floating?.classList.toggle('ready', settings.canliiButton && !settings.providerHeader && !toolsVisible);
+    barVisibility();
   }
 
   function watchTools() {
@@ -604,6 +606,105 @@
     toolsVisible = true;
     toolsObserver = new IntersectionObserver(([entry]) => { toolsVisible = entry.isIntersecting; floatVisibility(); });
     toolsObserver.observe(tools.title);
+  }
+
+  // The citation bar (Settings: Citation bar on Westlaw & Lexis): frozen along the top of the
+  // document's scrolling area while the title is out of view, with the CanLII button, the citation
+  // and Copy link. Fixed, in its own shadow root, and click-through outside the bar: it never moves
+  // the page, the provider's CSS never reaches it, and it covers nothing while the title shows.
+  const BAR_CSS = `
+    :host { all: initial; }
+    .bar { position: fixed; top: 0; left: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 38px;
+      padding: 0 8px; border-bottom: 1px solid #e5e7eb; background: #fff; color: #111827;
+      box-shadow: 0 1px 3px rgb(0 0 0 / 6%), 0 6px 16px -10px rgb(0 0 0 / 18%);
+      font: 600 13px/1.3 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+      opacity: 0; transform: translateY(-100%); pointer-events: none; transition: opacity 120ms, transform 140ms ease-out; }
+    .bar.ready { opacity: 1; transform: none; pointer-events: auto; }
+    .cite { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; }
+    a { display: grid; flex: none; place-items: center; box-sizing: border-box; width: 26px; height: 26px; border: 1px solid #e5e7eb;
+      border-radius: 6px; background: #fff; cursor: pointer; transition: border-color 80ms, box-shadow 80ms; }
+    a::before { content: ""; width: 16px; height: 16px; background: ${CANLII_ICON} center / contain no-repeat; }
+    a.site::before { background-image: ${COURT_ICON}; }
+    a.live:hover { border-color: #f3b4ae; box-shadow: 0 1px 4px rgb(213 43 30 / 18%); }
+    a.dead { opacity: .42; filter: grayscale(1); cursor: default; }
+    a.pending { opacity: .25; filter: grayscale(1); cursor: default; }
+    a[hidden] { display: none; }
+    button { all: unset; display: inline-flex; flex: none; align-items: center; gap: 6px; box-sizing: border-box; height: 28px; padding: 0 8px;
+      border-radius: 6px; color: #374151; font: 500 12px/1 inherit; font-family: inherit; cursor: pointer; transition: background-color 80ms, color 80ms; }
+    button:hover { background: #fff1f0; color: #b72016; }
+    button:focus-visible, a:focus-visible { outline: 2px solid #d52b1e; outline-offset: 1px; }
+    button svg { width: 15px; height: 15px; }
+    button.done { color: #111827; background: #f3f4f6; }
+    button.done span::after { content: "Copied"; }
+    button:not(.done) span::after { content: "Copy link"; }
+    @media print { .bar { display: none; } }
+  `;
+  const LINK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+  let bar = null;
+
+  function mountBar() {
+    if (bar) return bar;
+    const host = document.createElement('div');
+    host.setAttribute('data-lp-ui', '');
+    host.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483645';
+    const shadow = host.attachShadow({ mode: 'open' });
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(BAR_CSS);
+    shadow.adoptedStyleSheets = [sheet];
+    const element = document.createElement('div');
+    element.className = 'bar';
+    element.setAttribute('role', 'toolbar');
+    element.setAttribute('aria-label', 'Citation');
+    element.innerHTML = '<a class="pending" data-lp-action="canlii" aria-label="CanLII" title="Looking for a CanLII version"></a><span class="cite"></span>'
+      + `<button type="button" data-lp-action="citation" aria-label="Copy the linked citation" title="Copy the linked citation (Alt+X)">${LINK_ICON}<span></span></button>`;
+    shadow.appendChild(element);
+    document.documentElement.appendChild(host);
+    bar = { host, element, canlii: element.firstChild, cite: element.children[1] };
+    return bar;
+  }
+
+  // Along the top of the box the title scrolls in (an app's document pane), else of the window below
+  // the provider's own fixed or sticky bars (measured once each time the bar shows).
+  const pinned = (node) => {
+    for (let at = node; at && at !== document.documentElement; at = at.parentElement) if (/fixed|sticky/.test(getComputedStyle(at).position)) return true;
+    return false;
+  };
+  function windowTop() {
+    const x = document.documentElement.clientWidth / 2;
+    for (let y = 0; y < Math.min(240, innerHeight / 3); y += 4) {
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || !pinned(hit)) return y;
+    }
+    return 0;
+  }
+  function placeBar() {
+    const box = tools?.title && scrollBox(tools.title);
+    const rect = box ? box.getBoundingClientRect() : { top: windowTop(), left: 0, width: document.documentElement.clientWidth };
+    Object.assign(bar.element.style, { top: `${Math.max(0, Math.round(rect.top))}px`, left: `${Math.round(rect.left)}px`, width: `${Math.round(rect.width)}px` });
+  }
+
+  function barVisibility() {
+    if (!bar) return;
+    const ready = settings.providerHeader && !toolsVisible;
+    if (ready) placeBar();
+    bar.element.classList.toggle('ready', ready);
+  }
+  addEventListener('resize', () => { if (bar?.element.classList.contains('ready')) placeBar(); }, { passive: true });
+
+  function paintBar(current, fallback = '') {
+    mountBar();
+    bar.cite.textContent = current.citation?.plain || fallback;
+    bar.cite.title = bar.cite.textContent;
+    if (current.citation) paintLink(bar.canlii, current); else paintLink(bar.canlii, {});
+    bar.canlii.removeAttribute('data-tip');
+    bar.canlii.title = bar.canlii.classList.contains('live') ? (current.canliiUrl ? 'Open on CanLII' : 'Open on the court’s site') : 'No CanLII version found';
+    bar.canlii.hidden = !settings.canliiButton;
+    barVisibility();
+  }
+
+  function unmountBar() {
+    bar?.host.remove();
+    bar = null;
   }
 
   function paintTools(current) {
@@ -617,11 +718,14 @@
           { url: current.cleanUrl, citation: current.citation.citation || '', provider }, current.siteUrl);
       } else tools.marker.replaceChildren();
     }
+    if (settings.providerHeader) paintBar(current, titleText());
     if (settings.canliiButton && current.documentType === 'case') {
       paintLink(mountFloating(), current);
       floatVisibility();
     }
   }
+  // The tools hold no text, so the title's text is the title alone.
+  const titleText = () => (findTitle()?.textContent || '').replace(/\s+/g, ' ').trim();
 
   function unmountFloating() {
     floating?.lpHost.remove();
@@ -640,15 +744,18 @@
     } else {
       document.documentElement.classList.toggle('lp-raw-titles', !settings.cleanTitles);
       tameTitle();
-      if (settings.cleanTitles || settings.canliiButton || settings.caseMarker) mountTools(); else unmountTools();
+      if (settings.cleanTitles || settings.canliiButton || settings.caseMarker || settings.providerHeader) mountTools(); else unmountTools();
       if (!settings.canliiButton) unmountFloating();
+      if (!settings.providerHeader) unmountBar();
       if (tools || settings.canliiButton) {
         try {
           const current = metadata && page.current(metadata) ? metadata : (metadata = await page.model(true));
           if (ticket === applying) paintTools(current);
         } catch (_) {
-          // Not a legal document (a results list or an error page): the tools stay grey.
+          // Not a legal document (a results list or an error page): the tools stay grey, and the bar
+          // carries the title.
           if (tools && ticket === applying) paintLink(tools.canlii, {});
+          if (tools && settings.providerHeader && ticket === applying) paintBar({}, titleText());
         }
       }
     }
