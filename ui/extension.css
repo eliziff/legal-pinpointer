@@ -146,7 +146,15 @@
   /* The folder tree: Beaver's file-explorer rows (ResearchTree.tsx ROW). One fixed-height line of
      chevron, glyph, name, number and actions; nothing wraps. */
   .trow { @apply flex h-7 w-full min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 text-start text-ink-soft hover:bg-hover; }
-  .trow:has(> [aria-pressed="true"]), .troot[aria-pressed="true"] { @apply bg-active/70 text-ink; }
+  .trow.is-selected, .troot[aria-pressed="true"] { @apply bg-active/70 text-ink; }
+  /* Row icons are masks painted in currentColor: one rule each, nothing per row to parse. */
+  .ico { display: inline-block; flex: none; background: currentColor; mask: var(--i) center / contain no-repeat; }
+  .i-chevron { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m9 18 6-6-6-6'/></svg>"); }
+  .i-folder { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black' stroke='black' stroke-width='2' stroke-linejoin='round'><path d='M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z'/></svg>"); }
+  .i-more { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'><circle cx='12' cy='12' r='1.6'/><circle cx='19' cy='12' r='1.6'/><circle cx='5' cy='12' r='1.6'/></svg>"); }
+  .i-gavel { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m14.5 12.5-8 8a2.119 2.119 0 1 1-3-3l8-8'/><path d='m16 16 6-6'/><path d='m8 8 6-6'/><path d='m9 7 8 8'/><path d='m21 11-8-8'/></svg>"); }
+  .i-scroll { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 12h-5'/><path d='M15 8h-5'/><path d='M19 17V5a2 2 0 0 0-2-2H4'/><path d='M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3'/></svg>"); }
+  .i-file { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z'/><path d='M14 2v4a2 2 0 0 0 2 2h4'/><path d='M16 13H8'/><path d='M16 17H8'/></svg>"); }
   .trow.drop-inside { box-shadow: inset 0 0 0 1px var(--faint); }
   .trow.drop-before { box-shadow: inset 0 2px 0 var(--muted); }
   .trow.drop-after { box-shadow: inset 0 -2px 0 var(--muted); }

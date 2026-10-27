@@ -64,40 +64,51 @@
       }
       this.render();
     }
+    // Scrolling keeps the rows still in range and builds only those that enter it.
     render() {
       const { start, end } = visibleRange(this.results.length, this.viewport.scrollTop, this.viewport.clientHeight);
       if (start !== this.start || end !== this.end) {
-        const document = this.rows.ownerDocument, fragment = document.createDocumentFragment();
-        for (let i = start; i < end; i++) {
-          const result = this.results[i], row = document.createElement('div');
-          row.className = 'result-row'; row.dataset.result = i; row.id = `sonar-result-${i}`;
-          row.setAttribute('role', 'option'); row.setAttribute('aria-posinset', i + 1); row.setAttribute('aria-setsize', this.results.length);
-          const head = document.createElement('div'); head.className = 'result-head';
-          const src = this.icon(result.url);
-          if (src) {
-            const icon = document.createElement('img'); icon.className = 'result-icon'; icon.alt = ''; icon.src = src;
-            icon.onerror = () => { icon.hidden = true; }; head.append(icon);
-          }
-          const title = document.createElement('span'); title.className = 'result-title'; title.textContent = result.title; title.title = result.title;
-          head.append(title);
-          if (result.locator) { const locator = document.createElement('span'); locator.className = 'result-locator'; locator.textContent = result.locator; head.append(locator); }
-          const button = (action, label, className, hint = '') => {
-            const element = document.createElement('button'); element.type = 'button'; element.className = className; element.tabIndex = -1;
-            element.dataset.action = action; element.textContent = label; if (hint) element.title = hint; return element;
-          };
-          head.append(button('open', 'Open', 'result-open'));
-          const text = document.createElement('p'); text.className = 'result-text';
-          if (result.leading) text.append('…'); text.append(markedText(document, result.preview, result.marks)); if (result.trailing) text.append('…');
-          const actions = document.createElement('div'); actions.className = 'result-actions';
-          actions.append(button('quote', 'Copy quote', 'result-copy', 'Ctrl+Shift+X'), button('pinpoint', 'Copy pinpoint', 'result-copy', 'Ctrl+X'), button('link', 'Copy link', 'result-copy'));
-          row.append(head, text, actions); fragment.append(row);
+        if (this.start < 0 || start >= this.end || end <= this.start) this.rows.replaceChildren(this.build(start, end));
+        else {
+          while (this.rows.firstChild && Number(this.rows.firstChild.dataset.result) < start) this.rows.firstChild.remove();
+          while (this.rows.lastChild && Number(this.rows.lastChild.dataset.result) >= end) this.rows.lastChild.remove();
+          if (start < this.start) this.rows.prepend(this.build(start, this.start));
+          if (end > this.end) this.rows.append(this.build(this.end, end));
         }
-        this.rows.replaceChildren(fragment); this.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
+        this.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
         this.start = start; this.end = end;
       }
       for (const row of this.rows.children) row.setAttribute('aria-selected', Number(row.dataset.result) === this.selected);
       if (this.selected >= start && this.selected < end) this.viewport.setAttribute('aria-activedescendant', `sonar-result-${this.selected}`);
       else this.viewport.removeAttribute('aria-activedescendant');
+    }
+    build(start, end) {
+      const document = this.rows.ownerDocument, fragment = document.createDocumentFragment();
+      for (let i = start; i < end; i++) {
+        const result = this.results[i], row = document.createElement('div');
+        row.className = 'result-row'; row.dataset.result = i; row.id = `sonar-result-${i}`;
+        row.setAttribute('role', 'option'); row.setAttribute('aria-posinset', i + 1); row.setAttribute('aria-setsize', this.results.length);
+        const head = document.createElement('div'); head.className = 'result-head';
+        const src = this.icon(result.url);
+        if (src) {
+          const icon = document.createElement('img'); icon.className = 'result-icon'; icon.alt = ''; icon.src = src;
+          icon.onerror = () => { icon.hidden = true; }; head.append(icon);
+        }
+        const title = document.createElement('span'); title.className = 'result-title'; title.textContent = result.title; title.title = result.title;
+        head.append(title);
+        if (result.locator) { const locator = document.createElement('span'); locator.className = 'result-locator'; locator.textContent = result.locator; head.append(locator); }
+        const button = (action, label, className, hint = '') => {
+          const element = document.createElement('button'); element.type = 'button'; element.className = className; element.tabIndex = -1;
+          element.dataset.action = action; element.textContent = label; if (hint) element.title = hint; return element;
+        };
+        head.append(button('open', 'Open', 'result-open'));
+        const text = document.createElement('p'); text.className = 'result-text';
+        if (result.leading) text.append('…'); text.append(markedText(document, result.preview, result.marks)); if (result.trailing) text.append('…');
+        const actions = document.createElement('div'); actions.className = 'result-actions';
+        actions.append(button('quote', 'Copy quote', 'result-copy', 'Ctrl+Shift+X'), button('pinpoint', 'Copy pinpoint', 'result-copy', 'Ctrl+X'), button('link', 'Copy link', 'result-copy'));
+        row.append(head, text, actions); fragment.append(row);
+      }
+      return fragment;
     }
   }
   const api = { ROW_HEIGHT, visibleRange, markedText, ResultsList };

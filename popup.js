@@ -294,7 +294,7 @@
   // of the popup are in the page. Screen readers get the flat-tree attributes (aria-level, set size,
   // position). 3,000 documents in 300 folders render as fast as ten.
   const ROW = 28, OVERSCAN = 8, scroller = document.querySelector('main');
-  let rows = [], drawn = '', drawFrame = 0;
+  let rows = [], drawFrame = 0;
 
   // The index changes only with the data; opening or closing a folder re-flattens the cached one.
   let cachedIndex = null;
@@ -318,49 +318,82 @@
     return { list, index };
   }
 
+  // Row icons are CSS masks (ui.css .ico): a row is plain spans, with no SVG to parse.
+  const ICON = (name, style = '') => `<span class="ico i-${name} ticon"${style ? ` style="${style}"` : ''}></span>`;
+  const GLYPH = (key) => key.includes('/laws/') ? 'scroll' : key.startsWith('commentary/') ? 'file' : 'gavel';
+
   function rowHtml(row, at) {
-    const place = `class="tvrow" style="top:${at * ROW}px;padding-inline-start:${row.depth * 16}px" aria-level="${row.depth + 1}"`;
+    const place = `class="tvrow" data-at="${at}" style="top:${at * ROW}px;padding-inline-start:${row.depth * 16}px" aria-level="${row.depth + 1}"`;
     if (row.kind === 'root') {
       return `<div role="treeitem" ${place} aria-selected="${selected === null}"><button type="button" class="trow troot" data-select="" data-root aria-pressed="${selected === null}">`
         + `<span class="tspace"></span><span class="tname">All documents</span><span class="tcount">${row.total || ''}</span><span class="tactions"></span></button></div>`;
     }
     if (row.kind === 'add') return `<div role="treeitem" ${place}><div class="tadd"><input class="tname-input" data-add maxlength="80" placeholder="Folder name" aria-label="Folder name"></div></div>`;
     if (row.kind === 'document') {
-      const key = row.key, title = documentTitle(key), note = projectData(key)?.note || '', url = documentUrl(key);
-      const glyph = key.includes('/laws/') ? 'scroll' : key.startsWith('commentary/') ? 'file' : 'gavel';
-      return `<div role="treeitem" ${place} aria-label="${escapeHtml(title)}"><div class="trow" data-document="${escapeHtml(key)}" draggable="true" title="${escapeHtml([title, note].filter(Boolean).join('\n'))}">`
-        + `<span class="tspace"></span><span class="tglyph">${core.icon(glyph, 'ticon')}</span>`
-        + (url ? `<a class="tname" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a>` : `<span class="tname">${escapeHtml(title)}</span>`)
-        + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(title)} options">${core.icon('more', 'ticon')}</button></span></div></div>`;
+      const key = row.key, title = escapeHtml(documentTitle(key)), note = projectData(key)?.note || '', url = documentUrl(key);
+      return `<div role="treeitem" ${place} aria-label="${title}"><div class="trow" data-document="${escapeHtml(key)}" draggable="true" title="${note ? `${title}\n${escapeHtml(note)}` : title}">`
+        + `<span class="tspace"></span><span class="tglyph">${ICON(GLYPH(key))}</span>`
+        + (url ? `<a class="tname" href="${escapeHtml(url)}" target="_blank" rel="noopener">${title}</a>` : `<span class="tname">${title}</span>`)
+        + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${title} options">${ICON('more')}</button></span></div></div>`;
     }
-    const { id: folderId, folder, open } = row, color = escapeHtml(folder.color || '#9aa5b1');
-    const name = renaming === folderId
-      ? `<input class="tname-input" data-rename value="${escapeHtml(folder.name)}" maxlength="80" aria-label="Folder name">`
-      : `<button type="button" class="tname" data-select="${folderId}" aria-pressed="${selected === folderId}" title="${escapeHtml(pathName(folderId))}">${escapeHtml(folder.name)}</button>`;
-    return `<div role="treeitem" ${place} aria-label="${escapeHtml(folder.name)}" aria-selected="${selected === folderId}" aria-setsize="${row.size}" aria-posinset="${row.position}"${row.hasChildren ? ` aria-expanded="${open}"` : ''}>`
-      + `<div class="trow" data-folder="${folderId}" draggable="${renaming !== folderId}">`
-      + (row.hasChildren ? `<button type="button" class="tchev${open ? ' open' : ''}" data-toggle aria-label="${open ? 'Collapse' : 'Expand'} ${escapeHtml(folder.name)}">${core.icon('chevron', 'ticon')}</button>` : '<span class="tspace"></span>')
+    const { id: folderId, folder, open } = row, color = escapeHtml(folder.color || '#9aa5b1'), name = escapeHtml(folder.name), chosen = selected === folderId;
+    const label = renaming === folderId
+      ? `<input class="tname-input" data-rename value="${name}" maxlength="80" aria-label="Folder name">`
+      : `<button type="button" class="tname" data-select="${folderId}" aria-pressed="${chosen}" title="${escapeHtml(pathName(folderId))}">${name}</button>`;
+    return `<div role="treeitem" ${place} aria-label="${name}" aria-selected="${chosen}" aria-setsize="${row.size}" aria-posinset="${row.position}"${row.hasChildren ? ` aria-expanded="${open}"` : ''}>`
+      + `<div class="trow${chosen ? ' is-selected' : ''}" data-folder="${folderId}" draggable="${renaming !== folderId}">`
+      + (row.hasChildren ? `<button type="button" class="tchev${open ? ' open' : ''}" data-toggle aria-label="${open ? 'Collapse' : 'Expand'} ${name}">${ICON('chevron')}</button>` : '<span class="tspace"></span>')
       // Filled in the folder's colour; the chevron already says open or closed.
-      + `<label class="tglyph" title="${escapeHtml(folder.name)} colour">${core.folderIcon(folder.color || '#9aa5b1', 'ticon')}<input type="color" value="${color}" data-color aria-label="${escapeHtml(folder.name)} colour"></label>`
-      + `${name}<span class="tcount">${row.count || ''}</span>`
-      + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${escapeHtml(folder.name)} options">${core.icon('more', 'ticon')}</button></span></div></div>`;
+      + `<label class="tglyph" title="${name} colour">${ICON('folder', `color:${color}`)}<input type="color" value="${color}" data-color aria-label="${name} colour"></label>`
+      + `${label}<span class="tcount">${row.count || ''}</span>`
+      + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${name} options">${ICON('more')}</button></span></div></div>`;
   }
 
-  /** Draws the rows in or near view; keeps the focused control focused across a redraw. */
+  // The rows in the page are one contiguous block, in index order (so Tab order follows the tree).
+  // A frame only makes sure the rows in view (and NEAR beyond) are there; rows up to FAR beyond are
+  // built in idle time, a few at a time, so scrolling usually finds them ready and a frame does
+  // nothing. Rows well past FAR are dropped.
+  const NEAR = 2, FAR = 30, drawnRows = new Map();
+  let blockStart = 0, blockEnd = 0, fillHandle = 0;
+  function rowsFrom(start, end) {
+    const indices = Array.from({ length: end - start }, (_, i) => start + i), template = document.createElement('template');
+    template.innerHTML = indices.map((at) => rowHtml(rows[at], at)).join('');
+    [...template.content.children].forEach((element, i) => drawnRows.set(indices[i], element));
+    return template.content;
+  }
+  function inView() {
+    const tree = $('tree'), offset = scroller.getBoundingClientRect().top - tree.getBoundingClientRect().top;
+    return [Math.max(0, Math.floor(offset / ROW) - NEAR), Math.min(rows.length, Math.ceil((offset + scroller.clientHeight) / ROW) + NEAR)];
+  }
+  function extend(start, end) {
+    const tree = $('tree');
+    if (start < blockStart) { tree.prepend(rowsFrom(start, blockStart)); blockStart = start; }
+    if (end > blockEnd) { tree.append(rowsFrom(blockEnd, end)); blockEnd = end; }
+  }
   function draw(force = false) {
     const tree = $('tree');
     if (!tree.offsetParent) return;
-    const offset = scroller.getBoundingClientRect().top - tree.getBoundingClientRect().top;
-    const start = Math.max(0, Math.floor(offset / ROW) - OVERSCAN), end = Math.min(rows.length, Math.ceil((offset + scroller.clientHeight) / ROW) + OVERSCAN);
-    const span = `${start}:${end}`;
-    if (!force && span === drawn) return;
-    const focused = document.activeElement && tree.contains(document.activeElement) ? document.activeElement : null;
-    const keep = focused && (focused.closest('[data-select]') ? `[data-select="${CSS.escape(focused.closest('[data-select]').dataset.select)}"]` : null);
-    let html = '';
-    for (let at = start; at < end; at++) html += rowHtml(rows[at], at);
-    tree.innerHTML = html;
-    drawn = span;
-    if (keep) tree.querySelector(keep)?.focus({ preventScroll: true });
+    const [start, end] = inView();
+    if (force || end <= blockStart || start >= blockEnd) {
+      const focused = force && document.activeElement && tree.contains(document.activeElement) ? document.activeElement.closest('[data-select]') : null;
+      drawnRows.clear();
+      tree.replaceChildren(rowsFrom(start, end));
+      [blockStart, blockEnd] = [start, end];
+      if (focused) tree.querySelector(`[data-select="${CSS.escape(focused.dataset.select)}"]`)?.focus({ preventScroll: true });
+    } else extend(start, end);
+    for (; blockStart < start - FAR * 2; blockStart++) { drawnRows.get(blockStart)?.remove(); drawnRows.delete(blockStart); }
+    for (; blockEnd > end + FAR * 2; blockEnd--) { drawnRows.get(blockEnd - 1)?.remove(); drawnRows.delete(blockEnd - 1); }
+    if (!fillHandle) fillHandle = requestIdleCallback(fill, { timeout: 250 });
+  }
+  function fill(deadline) {
+    fillHandle = 0;
+    if (!$('tree').offsetParent) return;
+    const [start, end] = inView(), low = Math.max(0, start - FAR), high = Math.min(rows.length, end + FAR);
+    while (deadline.timeRemaining() > 3 && (blockStart > low || blockEnd < high)) {
+      if (blockEnd < high && (blockEnd - end <= start - blockStart || blockStart <= low)) extend(blockStart, Math.min(high, blockEnd + 6));
+      else extend(Math.max(low, blockStart - 6), blockEnd);
+    }
+    if (blockStart > low || blockEnd < high) fillHandle = requestIdleCallback(fill, { timeout: 250 });
   }
   scroller.addEventListener('scroll', () => {
     if (!drawFrame) drawFrame = requestAnimationFrame(() => { drawFrame = 0; draw(); });
@@ -373,7 +406,7 @@
     if (at * ROW < offset) scroller.scrollTop -= offset - at * ROW;
     else if ((at + 1) * ROW > offset + scroller.clientHeight) scroller.scrollTop += (at + 1) * ROW - (offset + scroller.clientHeight);
     draw();
-    return tree.querySelector(`.tvrow[style^="top:${at * ROW}px"]`);
+    return drawnRows.get(at) || null;
   }
 
   /** `reindex: false` when only what is open changed (the data did not). */
