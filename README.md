@@ -82,7 +82,7 @@ Settings → *Wake sleeping tabs* off, it is listed, not read.
 Restricted/unavailable pages and partial results are reported, not silently counted
 as zero-hit documents.
 
-**Alt+Shift+C** opens **CanLII document-text search from any browser tab,
+**Ctrl+Shift+E** opens **CanLII document-text search from any browser tab,
 including blank/new tabs**. The browser command needs no source-page injection.
 Type a query and press Enter: CanLII results open in a new tab, leaving the
 starting tab untouched. Nothing is sent while typing. Open-tab and CanLII
