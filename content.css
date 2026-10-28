@@ -70,15 +70,23 @@
   flex-direction: column !important;
 }
 
-.lp-unit[data-place="peek"] {
+.lp-unit[data-place="peek"],
+.lp-unit[data-place="peek-stack"] {
   visibility: hidden !important;
   border-radius: 7px !important;
   background: #ffffff !important;
   box-shadow: 0 1px 3px rgb(0 0 0 / 18%) !important;
 }
 
+/* A margin too narrow for the pair side by side: the peeking pair stacks too. */
+.lp-unit[data-place="peek-stack"] {
+  flex-direction: column !important;
+}
+
 .lp-unit[data-place="peek"].hot,
-.lp-unit[data-place="peek"]:focus-within {
+.lp-unit[data-place="peek"]:focus-within,
+.lp-unit[data-place="peek-stack"].hot,
+.lp-unit[data-place="peek-stack"]:focus-within {
   visibility: visible !important;
 }
 
