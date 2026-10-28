@@ -176,6 +176,7 @@
     if (!units.length || !overlay?.isConnected) return;
     const origin = overlay.getBoundingClientRect();
     const count = units.length, xs = new Float64Array(count), ys = new Float64Array(count), modes = new Array(count);
+    const unitRights = new Float64Array(count), unitLefts = new Float64Array(count);
     const shown = [], rights = [], lefts = [], blockRects = new Map();
     for (let i = 0; i < count; i += 1) {
       // Hidden (a collapsed section) has no place; an empty anchor (CanLII's <a name>) has a
@@ -191,6 +192,8 @@
       const block = element.closest('p, li, dd, blockquote, td, div') || element;
       let box = blockRects.get(block);
       if (!box) blockRects.set(block, box = block.getBoundingClientRect());
+      unitRights[i] = Math.max(box.right, rect.right) - origin.left;
+      unitLefts[i] = Math.min(box.left, rect.left) - origin.left;
       if (box.width > 0) { rights.push(box.right - origin.left); lefts.push(Math.min(box.left, rect.left) - origin.left); }
     }
     if (!shown.length) { view.order = null; return; }
@@ -216,11 +219,23 @@
       return !hit || hit === document.documentElement || hit === document.body || hit.closest('[data-lp-ui]')
         || !['fixed', 'sticky'].includes(getComputedStyle(hit.closest('*:not(span):not(a):not(i):not(img)') || hit).position);
     };
+    // Controls stay in the margin, never over the text: a margin needs room for one button (the pair stacked), and a
+    // page whose text leaves no such room on either side shows none (the hotkeys still copy).
     let column, side = 'right';
     if (tools.length) column = median(tools.map((tool) => tool.center)) - SIZE / 2;
-    else if (colRight + 12 + 2 * SIZE + GAP <= clipRight && clear(colRight + 12)) column = colRight + 12;
-    else if (colLeft - 12 - 2 * SIZE - GAP >= clipLeft) { column = colLeft - 12 - SIZE; side = 'left'; }
-    else { column = colRight - 2 * SIZE - GAP; side = 'inside'; }
+    else if (colRight + 12 + SIZE <= clipRight && clear(colRight + 12)) column = colRight + 12;
+    else if (colLeft - 12 - SIZE >= clipLeft) { column = colLeft - 12 - SIZE; side = 'left'; }
+    else {
+      // Controls placed while there was a margin (before the window narrowed) come down too.
+      for (const node of view.live.values()) node.remove();
+      view.pool.push(...view.live.values());
+      view.live.clear();
+      view.order = null;
+      return;
+    }
+    // Whether the margin holds the two buttons side by side; where it does not, they stack, peeking ones too.
+    const wide = side === 'right' ? clipRight - Math.max(column, colRight + 4) >= 2 * SIZE + GAP
+      : Math.min(column + SIZE, colLeft - 4) - clipLeft >= 2 * SIZE + GAP;
 
     for (const i of shown) {
       // The nearest unused CanLII button level with the unit's start.
@@ -234,9 +249,13 @@
     shown.sort((a, b) => ys[a] - ys[b]);
     for (let k = 0; k < shown.length; k += 1) {
       const i = shown[k], room = k + 1 < shown.length ? ys[shown[k + 1]] - ys[i] : Infinity;
-      modes[i] = side === 'inside' ? 'peek' : room >= 2 * SIZE + 2 * GAP ? 'stack' : room >= SIZE + GAP ? 'pair' : 'peek';
+      modes[i] = room >= 2 * SIZE + 2 * GAP ? 'stack' : !wide ? 'peek-stack' : room >= SIZE + GAP ? 'pair' : 'peek';
+      const width = modes[i] === 'stack' || modes[i] === 'peek-stack' ? SIZE : 2 * SIZE + GAP;
       // Side by side, a pair centred under a CanLII button stays centred; on the left it grows leftward.
-      if (modes[i] !== 'stack' && (tools.length || side === 'left')) xs[i] -= tools.length ? (SIZE + GAP) / 2 : SIZE + GAP;
+      if (width > SIZE && (tools.length || side === 'left')) xs[i] -= tools.length ? (SIZE + GAP) / 2 : SIZE + GAP;
+      // Never over its own unit's text, however wide that unit runs: beside it, on the margin's side.
+      if (side === 'right') xs[i] = Math.max(xs[i], unitRights[i] + 4);
+      else xs[i] = Math.min(xs[i], unitLefts[i] - 4 - width);
     }
     view.xs = xs;
     view.ys = ys;
@@ -274,7 +293,7 @@
       const top = Math.round(view.ys[i]);
       node.style.setProperty('margin', `${top - bottom}px 0 0 ${Math.round(view.xs[i])}px`, 'important');
       node.dataset.place = view.modes[i];
-      bottom = top + (view.modes[i] === 'stack' ? 2 * SIZE + 1 : SIZE);
+      bottom = top + (view.modes[i] === 'stack' || view.modes[i] === 'peek-stack' ? 2 * SIZE + 1 : SIZE);
       nodes.push(node);
     }
     view.overlay.replaceChildren(...nodes);
