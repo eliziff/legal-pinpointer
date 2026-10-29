@@ -150,7 +150,9 @@ The popup and Tab Search are styled with Tailwind on Beaver's tokens: edit `ui/e
 Refresh the exact parser after changing `legal-structure`:
 
 ```powershell
-.\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure'
+.\tools\refresh-engine.ps1
+# or from local checkouts, overriding the pinned revisions:
+.\tools\refresh-engine.ps1 -LegalStructurePath 'C:\path\to\legal-structure' -CommonLawCitePath 'C:\path\to\common-law-cite'
 ```
 
 The refresh script builds an offline WASM wrapper with one Cargo job and reuses `engine-src/target` across runs. It uses the checked-in ABI and the supplied parser source (Canadian and journal providers only; US and UK adapters are left out), with personal paths remapped out of the binary, then replaces `legal-structure.wasm.gz` and its generated classic-worker (`legal-structure.js`) and module (`legal-structure.mjs`) loaders. Tools load the compressed engine through `tools/engine-node.cjs`. It requires `wasm-bindgen-cli` at the version resolved in the engine dependency lock; the script checks that version before generating bindings.
