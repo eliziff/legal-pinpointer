@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # tools/refresh-engine.ps1 builds the packaged engine from this pin and Cargo.lock; legal-structure pins
 # common-law-cite in turn.
-legal-structure = { git = "https://github.com/eliziff/legal-structure-parser.git", rev = "eed179ceb3ed5666e981ff77f300f774b872ba4f", default-features = false, features = ["canada", "journal", "provider-text", "citator"] }
+legal-structure = { git = "https://github.com/eliziff/legal-structure-parser.git", rev = "6776c3f3820c4df6d4cdce44c48f02d80d08873b", default-features = false, features = ["canada", "journal", "provider-text", "citator"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
