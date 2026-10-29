@@ -4,7 +4,7 @@ A local-first Manifest V3 extension for structure-aware Canadian legal citations
 
 ## Install
 
-1. Download `legal-pinpointer.zip` from the [extension release](https://github.com/eliziff/legal-pinpointer/releases/tag/v0.5.2) and extract it to a permanent folder, or use this source checkout.
+1. Download `legal-pinpointer.zip` from the [extension release](https://github.com/eliziff/legal-pinpointer/releases/tag/v0.5.3) and extract it to a permanent folder, or use this source checkout.
 2. Open `chrome://extensions` in Chrome 116 or newer.
 3. Turn on Developer mode.
 4. Choose **Load unpacked** and select the folder containing `manifest.json`.
