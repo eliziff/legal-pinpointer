@@ -117,7 +117,7 @@
     const level = metadataOnly ? 'metadata' : 'structure';
     let entry = modelCache.get(level);
     if (!entry || entry.url !== url || entry.revision !== revision) {
-      entry = { url, revision, promise: providers.inspect(document, window.location, undefined, { metadataOnly }) };
+      entry = { url, revision, promise: providers.inspect(document, window.location, undefined, { metadataOnly }).then(withCanliiAnchors) };
       modelCache.set(level, entry);
     }
     try {
@@ -336,11 +336,19 @@
     });
   }
 
+  // The units' anchors on the document's CanLII page, read once with its structure.
+  async function withCanliiAnchors(model) {
+    if (!model?.structure?.nodes?.length || !model.canliiUrl || model.provider === 'canlii'
+      || !['case', 'legislation'].includes(model.documentType)) return model;
+    const locators = [...new Set(model.structure.nodes.map(node => node.locator))];
+    const anchors = await core.canliiAnchors(model.canliiUrl, model.structure.kind, locators);
+    model.canliiAnchors = new Map(locators.map((locator, index) => [locator, anchors[index]]));
+    return model;
+  }
+
   function nativeCanliiTarget(model, node) {
-    if (!model.canliiUrl || !['case', 'legislation'].includes(model.documentType)) return '';
-    const fragment = core.canliiAnchorForLocator(model.structure.kind, node.locator, model.canliiUrl);
-    if (!fragment || fragment.includes(':~:text=')) return '';
-    return core.withFragment(model.canliiUrl, fragment);
+    const anchor = model.canliiAnchors?.get(node.locator);
+    return anchor ? core.withFragment(model.canliiUrl, `#${anchor}`) : '';
   }
 
   function targetForNode(model, sourceInfo, node) {

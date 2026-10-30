@@ -180,10 +180,6 @@
     });
   }
 
-  function makeTextFragment(value) {
-    return `#:~:text=${encodeURIComponent(normalizeSpace(value))}`;
-  }
-
   function withFragment(baseUrl, fragment) {
     const url = new URL(baseUrl);
     url.hash = '';
@@ -233,22 +229,15 @@
     return /^https:\/\/(?:decisia\.lexum\.com|coadecisions\.ontariocourts\.ca|decisions?\.[a-z0-9-]+\.(?:gc\.)?ca)\/[a-z0-9-]+\/[a-z0-9-]+\/(?:en|fr)\/item\/\d+\/index\.do$/.test(String(value || ''));
   }
 
-  function canliiAnchorForLocator(kind, locator, canliiUrl) {
-    const value = normalizeSpace(locator);
-    if (kind === 'page') return makeTextFragment(`[page ${value}]`);
-    if (kind === 'paragraph' || kind === 'pilcrow') return `#par${encodeURIComponent(value)}`;
-    if (!['section', 'rule', 'article', 'silcrow'].includes(kind)) return '';
+  const ANCHOR_KINDS = { paragraph: 'paragraph', pilcrow: 'paragraph', section: 'section', silcrow: 'section', rule: 'rule', article: 'article' };
 
-    const parsed = parseLocator(value);
-    if (!parsed) return '';
-    // Quebec statutes carry LégisQuébec section ids ("se:18_1"); deeper units have no stable id.
-    if (/\/\/[^/]+\/(?:en|fr)\/qc\/laws\//.test(String(canliiUrl || ''))) {
-      return `#se:${parsed.root.replace(/\./g, '_')}`;
-    }
-    if (parsed.suffixes.length > 1) return '';
-    const prefix = kind === 'article' ? 'art' : kind === 'rule' ? 'rule' : 'sec';
-    const tail = parsed.suffixes.length ? `subsec${parsed.suffixes[0]}` : '';
-    return `#${prefix}${parsed.root}${tail}`;
+  // Each locator's anchor on a CanLII page (common-law-cite's sourceAnchor: par12, sec7, sec7subsec2, se:18_1) down to a
+  // subsection, null where it has none.
+  function canliiAnchors(canliiUrl, kind, locators) {
+    const engineKind = ANCHOR_KINDS[kind];
+    if (!engineKind || !locators.length) return locators.map(() => null);
+    const prefix = engineKind === 'paragraph' ? 'par' : '';
+    return citationCall('sourceAnchor', { url: canliiUrl, kind: engineKind, depth: 1, labels: locators.map(locator => `${prefix}${normalizeSpace(locator)}`) });
   }
 
   function outputLink(text, htmlText, url) {
@@ -275,7 +264,7 @@
     citationCall,
     articleCitation,
     canliiUrlForAliasTarget,
-    canliiAnchorForLocator,
+    canliiAnchors,
     canliiUrlForCitation,
     isCourtSiteUrl,
     chooseCaseCitation,
@@ -288,7 +277,6 @@
     isProvisionAncestor,
     literalPageMarker,
     makeCitation,
-    makeTextFragment,
     normalizeSpace,
     outputLink,
     outputCitationLink,
