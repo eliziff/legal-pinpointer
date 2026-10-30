@@ -9,7 +9,7 @@ export function textLink(url,whole,start,end) {
   target.hash=':~:text='+(prefix?encode(prefix)+'-,':'')+encode(quote)+(suffix?',-'+encode(suffix):'');
   return target.href;
 }
-export function externalCopy(item,whole,mode,options={}) {
+export async function externalCopy(item,whole,mode,options={}) {
   const c=core(),us=item.unitStart??item.start,ue=item.unitEnd??item.end;
   const start=options.extent==='match'?item.start+(item.focus?.start||0):us;
   const end=options.extent==='match'?item.start+(item.focus?.end??item.text.length):ue;
@@ -17,7 +17,7 @@ export function externalCopy(item,whole,mode,options={}) {
   let target=item.url;
   if(target){const u=new URL(target);if(!['http:','https:'].includes(u.protocol))throw new Error('Invalid source URL.');
     if(options.link==='text')target=textLink(target,whole,start,end);
-    else if(/(^|\.)canlii\.org$/.test(u.hostname)&&item.locator)target=c.withFragment(target,c.canliiAnchorForLocator(item.kind,item.locator));
+    else if(/(^|\.)canlii\.org$/.test(u.hostname)&&item.locator){const [anchor]=await c.canliiAnchors(target,item.kind,[item.locator]);target=c.withFragment(target,anchor?`#${anchor}`:'');}
   }
   const link=(label,html=esc(label))=>target?`<a href="${esc(target)}">${html}</a>`:html;
   if(mode==='link'){if(!target)throw new Error('This record has no source URL.');return {plain:target,html:link(target)};}

@@ -82,7 +82,7 @@ async function select(r,row){
     try{
       if(r.connector==='tabs')await tabs.open(r);
       else{
-        const source=await a2aj.read(r),payload=externalCopy(r,source.text,'link',{extent:'match',link:'text'});
+        const source=await a2aj.read(r),payload=await externalCopy(r,source.text,'link',{extent:'match',link:'text'});
         await chrome.tabs.create({url:payload.plain});
       }
       status();
