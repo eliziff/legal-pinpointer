@@ -569,7 +569,8 @@
     });
   }
 
-  // Pre-neutral and reporter-only cases resolve through the packaged A2AJ alias x CanLII index.
+  // Pre-neutral and reporter-only cases resolve through the engine's alias table and CanLII case ids
+  // (canliiAliasTargetInfo).
   async function caseAliasEvidence(base) {
     const own = String(base.citation.citation || '');
     const read = (text) => core.citationCall('extract', { text, options: { resolve: false, parallel: false } });
@@ -584,10 +585,6 @@ ${base.headerText || ''}`), read(own)]);
     return { cases, keys: keys.length <= 50 ? keys : [], ownKeys };
   }
 
-  async function caseAliasKeys(base) {
-    return (await caseAliasEvidence(base)).keys;
-  }
-
   // Alias evidence can attach a same-named case from another court or year, so a target must share
   // a year with the document's own citations, and an SCC target needs the document to be an SCC decision.
   function plausibleCaseTarget(base, target, cases) {
@@ -600,30 +597,32 @@ ${base.headerText || ''}`), read(own)]);
       || /Supreme Court of Canada|Cour supr[eê]me du Canada/.test(header);
   }
 
-  async function pickCaseTarget(base, targets, cases = [], language = 'en') {
-    const distinct = Array.from(new Set(targets || []));
+  // The one CanLII decision the header's citations name, through the engine (each citation's alias, then its route or
+  // its CanLII case id), among those that fit the document's year and court.
+  async function pickCaseTarget(base, cases = [], language = 'en') {
+    const distinct = Array.from(new Set(cases.map(citation => citation.span.text)));
     const parsed = await Promise.all(distinct.map(target => core.citationCall('canliiAliasTargetInfo', { target, language })));
-    const candidates = parsed.filter(target => target && target.url && plausibleCaseTarget(base, target, cases));
-    return candidates.length === 1 ? candidates[0].url : '';
+    const urls = new Set(parsed.filter(target => target && target.url && plausibleCaseTarget(base, target, cases)).map(target => target.url));
+    return urls.size === 1 ? [...urls][0] : '';
   }
 
-  // The CanLII version, else the decision on its court's own Lexum/Decisia site (A2AJ metadata),
-  // found from the document's own citation only: a header's other citations can be appeals.
-  function resolveCaseKeys(input) {
+  // The decision on its court's own Lexum/Decisia site (A2AJ metadata), found from the document's own citation only:
+  // a header's other citations can be appeals.
+  function requestCourtSites(keys) {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_RESOLVE_CASE', input }, (response) => {
-        resolve(chrome.runtime.lastError || !response || response.ok !== true ? null : response);
+      chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_RESOLVE_CASE', input: { keys } }, (response) => {
+        resolve(chrome.runtime.lastError || !response || response.ok !== true ? {} : response.sites || {});
       });
     });
   }
 
+  // The CanLII version, else the decision on its court's own site.
   async function requestCaseUrl(base, language) {
     const { keys, cases, ownKeys } = await caseAliasEvidence(base);
     if (!keys.length) return { canliiUrl: '', siteUrl: '' };
-    const response = await resolveCaseKeys({ keys });
-    const canliiUrl = response ? await pickCaseTarget(base, response.targets, cases, language) : '';
+    const canliiUrl = await pickCaseTarget(base, cases, language);
     if (canliiUrl) return { canliiUrl, siteUrl: '' };
-    const sites = ownKeys.length ? (await resolveCaseKeys({ keys: ownKeys, sites: true }))?.sites || {} : {};
+    const sites = ownKeys.length ? await requestCourtSites(ownKeys) : {};
     const found = new Set(ownKeys.map((key) => sites[key]).filter(Boolean));
     return { canliiUrl: '', siteUrl: found.size === 1 ? [...found][0] : '' };
   }
@@ -930,7 +929,6 @@ ${base.headerText || ''}`), read(own)]);
 
   const api = {
     adapterFor,
-    caseAliasKeys,
     pickCaseTarget,
     engineInput,
     engineStructure,

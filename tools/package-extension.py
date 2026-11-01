@@ -23,7 +23,7 @@ assert manifest["version"] == json.loads((root / "package.json").read_text())["v
 required = {
     "manifest.json", "THIRD_PARTY_NOTICES.md", "legal-citations-LICENSE.txt",
     "legal-citations-NOTICE.txt", "legal-structure.wasm.gz",
-    "canlii-legislation.tsv.gz", "canlii-case-aliases.tsv.gz", "case-court-sites.tsv.gz",
+    "canlii-legislation.tsv.gz", "case-court-sites.tsv.gz",
     manifest["background"]["service_worker"], manifest["action"]["default_popup"],
     manifest["side_panel"]["default_path"],
 }

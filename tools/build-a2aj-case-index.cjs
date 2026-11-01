@@ -2,16 +2,16 @@
 
 // Extends the case indexes from the A2AJ open case-law metadata (https://a2aj.ca, local SQLite copy):
 //
-// 1. canlii-case-aliases.tsv.gz gains every parallel
-//    citation A2AJ records for a decision with a neutral citation that CanLII routes, e.g. the SCR
-//    citation [2016] 1 SCR 631 -> 2016 SCC 27. Rows already present win; a key A2AJ maps to two
-//    decisions is left out.
+// 1. With --case-ids FILE, the engine's CanLII case ids (common-law-cite crates/legal-citations/registry/
+//    canlii-case-ids.tsv.gz, which canliiAliasTarget reads) gain every parallel citation A2AJ records for a decision
+//    with a neutral citation that CanLII routes, e.g. the SCR citation [2016] 1 SCR 631 -> 2016 SCC 27. Rows already
+//    present win; a key A2AJ maps to two decisions is left out.
 // 2. case-court-sites.tsv.gz: citation key -> the decision on its court's own Lexum/Decisia site, the
 //    fallback when a case has no CanLII version (and the identity Case Marker files it under).
 //
 // Keys are the packaged engine's identity keys, as A2AJ's citation_lookup table must hold them (the app re-keys it
 // when the engine's key version changes).
-// Usage: node tools/build-a2aj-case-index.cjs <a2aj.sqlite>
+// Usage: node tools/build-a2aj-case-index.cjs <a2aj.sqlite> [--case-ids FILE]
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
@@ -20,11 +20,12 @@ const { DatabaseSync } = require('node:sqlite');
 const engine = require('./engine-node.cjs');
 
 const root = path.resolve(__dirname, '..');
-const [databasePath] = process.argv.slice(2);
-if (!databasePath) { process.stderr.write('Usage: node tools/build-a2aj-case-index.cjs <a2aj.sqlite>\n'); process.exit(2); }
+const args = process.argv.slice(2);
+const caseIds = args.includes('--case-ids') ? args[args.indexOf('--case-ids') + 1] : null;
+const [databasePath] = args.filter((arg, at) => arg !== '--case-ids' && args[at - 1] !== '--case-ids');
+if (!databasePath) { process.stderr.write('Usage: node tools/build-a2aj-case-index.cjs <a2aj.sqlite> [--case-ids FILE]\n'); process.exit(2); }
 const database = new DatabaseSync(databasePath, { readOnly: true });
 
-const ALIASES = path.join(root, 'canlii-case-aliases.tsv.gz');
 const SITES = path.join(root, 'case-court-sites.tsv.gz');
 const DECISIA = /^https:\/\/([a-z0-9.-]+)\/([a-z0-9-]+\/[a-z0-9-]+)\/(en|fr)\/item\/(\d+)\/index\.do$/;
 
@@ -60,7 +61,7 @@ for (const { citation_key: key, document_id: id } of database.prepare('select ci
 }
 
 // 1. Parallel citations of routed neutral citations.
-const base = readRows(ALIASES);
+const base = caseIds ? readRows(caseIds) : new Map();
 const added = new Map(), conflicts = new Set(), routed = new Map();
 const canliiRouted = (citation) => {
   const series = citation.replace(/^\d{4}\s+/, '').replace(/\s+\d+$/, '');
@@ -68,7 +69,7 @@ const canliiRouted = (citation) => {
   return routed.get(series);
 };
 const documents = database.prepare("select id, citation_en, url_en from document where doc_type = 'cases'").all();
-for (const { id, citation_en: citation } of documents) {
+for (const { id, citation_en: citation } of caseIds ? documents : []) {
   if (!/^\d{4} [A-Za-z][A-Za-z .]*[A-Za-z] \d+$/.test(citation || '') || !canliiRouted(citation)) continue;
   for (const key of keysOf.get(id) || []) {
     if (key.startsWith(`${version}:neutral:`) || base.has(key) || conflicts.has(key)) continue;
@@ -77,8 +78,7 @@ for (const { id, citation_en: citation } of documents) {
   }
 }
 const aliases = new Map([...base, ...added]);
-const aliasLines = [...aliases.keys()].sort().map((key) => `${key}\t${aliases.get(key)}\n`);
-write(ALIASES, `# legal-pinpointer-canlii-case-aliases-v${version}`, aliasLines);
+if (caseIds) write(caseIds, `# canlii-case-ids-v${version}`, [...aliases.keys()].sort().map((key) => `${key}\t${aliases.get(key)}\n`));
 
 // 2. Lexum/Decisia court sites, written as <prefix number>:<item id> against a prefix table.
 const prefixes = new Map(), sites = new Map(), siteConflicts = new Set();
@@ -99,6 +99,6 @@ const siteLines = [...[...prefixes].map(([prefix, number]) => `#p${number}\t${pr
 write(SITES, '# legal-pinpointer-case-court-sites-v1 (A2AJ open case-law metadata; <prefix>:<item> -> <prefix>/<item>/index.do)', siteLines);
 
 console.log(JSON.stringify({
-  aliases: { base: base.size, added: added.size, conflicts: conflicts.size, total: aliases.size, bytes: fs.statSync(ALIASES).size },
+  caseIds: caseIds ? { base: base.size, added: added.size, conflicts: conflicts.size, total: aliases.size, bytes: fs.statSync(caseIds).size } : null,
   sites: { keys: sites.size, prefixes: prefixes.size, conflicts: siteConflicts.size, bytes: fs.statSync(SITES).size }
 }));

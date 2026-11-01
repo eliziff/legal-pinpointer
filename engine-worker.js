@@ -96,14 +96,14 @@ function caseInput(input) {
   if (!keys || keys.length > 50 || keys.some((key) => typeof key !== 'string' || key.length > 200)) {
     throw new Error('The CanLII case request is invalid or too large.');
   }
-  return { keys, sites: input.sites === true };
+  return { keys };
 }
 
 const ROUTES = {
   LEGAL_PINPOINTER_CITATION_CALL: (message) => host('citation', citationInput(message)).then((result) => ({ ok: true, result })),
   LEGAL_PINPOINTER_DERIVE_STRUCTURE: (message) => host('derive', structureInput(message.input)),
   LEGAL_PINPOINTER_RESOLVE_LEGISLATION: (message) => host('legislation', legislationInput(message.input)).then((url) => ({ ok: true, url })),
-  LEGAL_PINPOINTER_RESOLVE_CASE: (message) => host('case', caseInput(message.input)).then(({ targets, sites }) => ({ ok: true, targets, sites })),
+  LEGAL_PINPOINTER_RESOLVE_CASE: (message) => host('case', caseInput(message.input)).then(({ sites }) => ({ ok: true, sites })),
   LEGAL_PINPOINTER_CLIPBOARD: (message) => host('clipboard', clipboardInput(message)).then(() => ({ ok: true })),
   LEGAL_PINPOINTER_METADATA: metadata,
   // A legal page started loading: open the engine host now, so its first answer is ready sooner.

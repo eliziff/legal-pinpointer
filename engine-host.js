@@ -10,7 +10,7 @@
   const legislation = globalThis.LegalPinpointerCanliiLegislation;
   const workerUrl = chrome.runtime.getURL('engine-worker.js');
   const IDLE_CLOSE = 10 * 60_000, LARGE_CLOSE = 20_000, LARGE_MEMORY = 96 * 1024 * 1024;
-  let enginePromise, legislationPromise, caseAliasPromise, courtSitePromise, engineMemory = null, idleTimer = 0;
+  let enginePromise, legislationPromise, courtSitePromise, engineMemory = null, idleTimer = 0;
 
   function touch() {
     clearTimeout(idleTimer);
@@ -44,20 +44,6 @@
     legislationPromise ||= once(async () => legislation.parseIndex(await (await gunzip('canlii-legislation.tsv.gz')).text()),
       () => { legislationPromise = undefined; });
     return legislationPromise;
-  }
-
-  // Reporter/alias citation key -> CanLII target.
-  function loadCaseAliases() {
-    caseAliasPromise ||= once(async () => {
-      const map = new Map();
-      for (const line of (await (await gunzip('canlii-case-aliases.tsv.gz')).text()).split('\n')) {
-        if (!line || line[0] === '#') continue;
-        const tab = line.indexOf('\t');
-        if (tab > 0) map.set(line.slice(0, tab), line.slice(tab + 1).replace(/\r$/, ''));
-      }
-      return map;
-    }, () => { caseAliasPromise = undefined; });
-    return caseAliasPromise;
   }
 
   // Citation key -> the decision on its court's Lexum/Decisia site, built by
@@ -103,23 +89,20 @@
   }
 
   // A Lexum/Decisia decision's CanLII page, from the citations its page lists: a routed neutral
-  // citation directly, else the one CanLII target its keyed citations agree on.
+  // citation directly, else the one CanLII page its keyed citations agree on (the engine's alias table and CanLII
+  // case ids).
   async function identity(input) {
     const direct = await citation('canliiCitationUrl', { text: input.text, language: 'en' });
     if (direct) return direct;
     const found = await citation('extract', { text: input.text, options: { resolve: false, parallel: false } });
-    const keys = Array.from(new Set(found.citations.filter((item) => item.form === 'full' && item.key).map((item) => item.key)));
-    const index = await loadCaseAliases();
-    const targets = Array.from(new Set(keys.map((key) => index.get(key)).filter(Boolean)));
-    if (targets.length !== 1) return '';
-    const target = await citation('canliiAliasTargetInfo', { target: targets[0], language: 'en' });
-    return target && target.url ? target.url : '';
+    const texts = Array.from(new Set(found.citations.filter((item) => item.form === 'full' && item.key).map((item) => item.span.text)));
+    const urls = new Set((await Promise.all(texts.map((target) => citation('canliiAliasTargetInfo', { target, language: 'en' }))))
+      .filter((target) => target && target.url).map((target) => target.url));
+    return urls.size === 1 ? [...urls][0] : '';
   }
 
   async function resolveCase(input) {
-    const index = await loadCaseAliases();
-    const targets = Array.from(new Set(input.keys.map((key) => index.get(key)).filter(Boolean)));
-    return { targets, sites: input.sites ? await courtSites(input.keys) : {} };
+    return { sites: await courtSites(input.keys) };
   }
 
   // The rich clipboard for pages the extension cannot script (Chrome's PDF viewer).
@@ -165,11 +148,11 @@
     return true;
   });
 
-  // The host opens for a request; warm the engine's tables and the case index behind it. The
-  // legislation index loads on the first legislation page.
+  // The host opens for a request; warm the engine's tables behind it. The legislation index loads on the first
+  // legislation page.
   setTimeout(() => {
     loadEngine().then(() => citation('formatDocument', { documentType: 'case', title: 'A v B', citation: '2016 SCC 27' }))
-      .then(loadCaseAliases).catch(() => {});
+      .catch(() => {});
   }, 50);
   touch();
 })();

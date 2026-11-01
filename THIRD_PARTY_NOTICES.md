@@ -2,7 +2,7 @@
 
 `canlii-legislation.tsv` contains legislation identifiers, titles, database identifiers, and document types derived from a local CanLII metadata snapshot. It contains no legislative text. CanLII is the source: <https://www.canlii.org/>.
 
-`canlii-case-aliases.tsv.gz` and `case-court-sites.tsv.gz` contain citation keys, citations and court-site document URLs derived from the A2AJ open Canadian case-law metadata (Access to Algorithmic Justice, <https://a2aj.ca/>), joined to CanLII case identifiers. They contain no decision text; the decisions remain on CanLII and the courts' own sites.
+`case-court-sites.tsv.gz` contains citation keys and court-site document URLs derived from the A2AJ open Canadian case-law metadata (Access to Algorithmic Justice, <https://a2aj.ca/>). It contains no decision text; the decisions remain on the courts' own sites.
 
 `legal-structure.wasm` contains the `legal-structure` parser from <https://github.com/eliziff/legal-structure-parser>, used under the MIT License.
 
