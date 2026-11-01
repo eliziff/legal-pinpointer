@@ -21,7 +21,7 @@
     : /(?:^|\.)nextcanada\.westlaw\.com$/.test(hostname) ? 'westlaw' : '';
   if (!provider) return;
 
-  const settings = { unitCopyButtons: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
+  const settings = { unitCopyButtons: true, canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   const idle = (callback, timeout) => (window.requestIdleCallback
     ? requestIdleCallback(callback, { timeout }) : setTimeout(callback, 50));
 
@@ -45,6 +45,10 @@
   actions?.set('unit', (button) => {
     const control = button.parentElement;
     if (control?.lpElement) run(page.copyControl(control.lpElement, control.lpLocator, button.dataset.mode), button);
+  });
+  actions?.set('citedby', (button) => {
+    const control = button.parentElement;
+    if (control?.lpElement) run(openCitedBy(control.lpElement), button);
   });
   actions?.set('citation', (button) => run(page.copyCitation(), button));
   actions?.set('canlii', (link) => {
@@ -93,7 +97,7 @@
     overlay: null, live: new Map(), pool: [], hot: null,
     frame: 0, syncFrame: 0, syncTimer: 0, measureTimer: 0, resize: null, mutations: null
   };
-  let template = null;
+  let template = null, citedTemplate = null;
 
   function control() {
     if (!template) {
@@ -104,6 +108,53 @@
         + '<button type="button" class="lp-unit-quote" data-lp-action="unit" data-mode="quote" data-tip="Copy with text (Ctrl+Shift+X)" aria-label="Copy pinpoint with text"></button>';
     }
     return view.pool.pop() || template.cloneNode(true);
+  }
+
+  // CanLII's paragraph tools: the menu its pen icon opens holds the paragraph's Cited by (the decisions citing it),
+  // and the icon carries how many there are. With canliiCitedBy, that is a third button in the paragraph's group
+  // (the icon itself is not drawn: html.lp-cited-by, content.css), opening CanLII's own Cited by link in a new tab.
+  const citedBy = () => provider === 'canlii' && settings.canliiCitedBy && settings.unitCopyButtons;
+  function canliiTools(element) {
+    return element.closest?.('.paragWrapper')?.querySelector(':scope > .viibes-marker-toolbox [data-bs-toggle="dropdown"]') || null;
+  }
+  function citedCount(element) {
+    const count = Number(canliiTools(element)?.dataset.noteupCount || 0);
+    return count > 0 ? count : 0;
+  }
+  function setCited(node, count) {
+    let button = node.querySelector(':scope > .lp-unit-cited');
+    if (!count) { button?.remove(); return; }
+    if (!button) {
+      if (!citedTemplate) {
+        citedTemplate = document.createElement('button');
+        citedTemplate.type = 'button';
+        citedTemplate.className = 'lp-unit-cited';
+        citedTemplate.setAttribute('data-lp-action', 'citedby');
+      }
+      button = node.appendChild(citedTemplate.cloneNode());
+    }
+    const shown = canliiTools(node.lpElement)?.dataset.noteupCountDisplay || String(count);
+    button.dataset.count = shown;
+    const label = `Cited by ${shown} (CanLII, in a new tab)`;
+    button.dataset.tip = label;
+    button.setAttribute('aria-label', label);
+  }
+  // CanLII fills a paragraph's menu with its links when the menu opens; the Cited by link is taken from there, so it
+  // is CanLII's own address, whatever form CanLII gives it.
+  async function openCitedBy(element) {
+    const trigger = canliiTools(element);
+    const menu = trigger?.parentElement.querySelector('.dropdown-menu');
+    if (!menu) throw new Error('CanLII lists no Cited by for this paragraph.');
+    const find = () => Array.from(menu.querySelectorAll('a[href]'))
+      .find((link) => /cit|noteup/i.test(`${link.textContent} ${link.getAttribute('href')}`));
+    let link = find();
+    if (!link) {
+      trigger.click();
+      for (let wait = 0; wait < 30 && !(link = find()); wait += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+      if (menu.classList.contains('show')) trigger.click();
+    }
+    if (!link) throw new Error('CanLII did not give this paragraph’s Cited by list.');
+    window.open(link.href, '_blank', 'noopener');
   }
 
   // Where the overlay goes so that it scrolls with the text and changes nothing on the page. When the
@@ -143,13 +194,14 @@
     if (!settings.unitCopyButtons) return;
     let found;
     try { found = providers.quickUnits(document, location); } catch (_) { return; }
-    const units = [], seen = new Set();
+    const units = [], seen = new Set(), cited = citedBy();
     for (const unit of found) {
       if (!unit.element?.isConnected || seen.has(unit.element)) continue; // two units on one element: the first keeps it
       seen.add(unit.element);
-      units.push(unit);
+      units.push({ ...unit, cited: cited ? citedCount(unit.element) : 0 });
     }
-    const same = units.length === view.units.length && units.every((unit, i) => unit.element === view.units[i].element);
+    const same = units.length === view.units.length
+      && units.every((unit, i) => unit.element === view.units[i].element && unit.cited === view.units[i].cited);
     if (same && view.overlay?.isConnected) return;
     for (const node of view.live.values()) node.remove();
     view.pool.push(...view.live.values());
@@ -233,9 +285,12 @@
       view.order = null;
       return;
     }
-    // Whether the margin holds the two buttons side by side; where it does not, they stack, peeking ones too.
-    const wide = side === 'right' ? clipRight - Math.max(column, colRight + 4) >= 2 * SIZE + GAP
-      : Math.min(column + SIZE, colLeft - 4) - clipLeft >= 2 * SIZE + GAP;
+    // A unit's buttons: the two copy buttons, and CanLII's Cited by where the paragraph is cited.
+    const buttons = (i) => (units[i].cited ? 3 : 2);
+    // Whether the margin holds a group side by side; where it does not, they stack, peeking ones too.
+    const most = shown.some((i) => units[i].cited) ? 3 : 2;
+    const wide = side === 'right' ? clipRight - Math.max(column, colRight + 4) >= most * SIZE + (most - 1) * GAP
+      : Math.min(column + SIZE, colLeft - 4) - clipLeft >= most * SIZE + (most - 1) * GAP;
 
     for (const i of shown) {
       // The nearest unused CanLII button level with the unit's start.
@@ -248,11 +303,11 @@
     }
     shown.sort((a, b) => ys[a] - ys[b]);
     for (let k = 0; k < shown.length; k += 1) {
-      const i = shown[k], room = k + 1 < shown.length ? ys[shown[k + 1]] - ys[i] : Infinity;
-      modes[i] = room >= 2 * SIZE + 2 * GAP ? 'stack' : !wide ? 'peek-stack' : room >= SIZE + GAP ? 'pair' : 'peek';
-      const width = modes[i] === 'stack' || modes[i] === 'peek-stack' ? SIZE : 2 * SIZE + GAP;
-      // Side by side, a pair centred under a CanLII button stays centred; on the left it grows leftward.
-      if (width > SIZE && (tools.length || side === 'left')) xs[i] -= tools.length ? (SIZE + GAP) / 2 : SIZE + GAP;
+      const i = shown[k], n = buttons(i), room = k + 1 < shown.length ? ys[shown[k + 1]] - ys[i] : Infinity;
+      modes[i] = room >= n * SIZE + n * GAP ? 'stack' : !wide ? 'peek-stack' : room >= SIZE + GAP ? 'pair' : 'peek';
+      const width = modes[i] === 'stack' || modes[i] === 'peek-stack' ? SIZE : n * SIZE + (n - 1) * GAP;
+      // Side by side, a group centred under a CanLII button stays centred; on the left it grows leftward.
+      if (width > SIZE && (tools.length || side === 'left')) xs[i] -= tools.length ? (width - SIZE) / 2 : width - SIZE;
       // Never over its own unit's text, however wide that unit runs: beside it, on the margin's side.
       if (side === 'right') xs[i] = Math.max(xs[i], unitRights[i] + 4);
       else xs[i] = Math.min(xs[i], unitLefts[i] - 4 - width);
@@ -293,7 +348,8 @@
       const top = Math.round(view.ys[i]);
       node.style.setProperty('margin', `${top - bottom}px 0 0 ${Math.round(view.xs[i])}px`, 'important');
       node.dataset.place = view.modes[i];
-      bottom = top + (view.modes[i] === 'stack' || view.modes[i] === 'peek-stack' ? 2 * SIZE + 1 : SIZE);
+      const n = view.units[i].cited ? 3 : 2;
+      bottom = top + (view.modes[i] === 'stack' || view.modes[i] === 'peek-stack' ? n * SIZE + n - 1 : SIZE);
       nodes.push(node);
     }
     view.overlay.replaceChildren(...nodes);
@@ -331,6 +387,7 @@
       const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[unit.kind] || unit.kind} ${unit.locator}`;
       node.firstChild.dataset.tip = label;
       node.firstChild.setAttribute('aria-label', label);
+      setCited(node, unit.cited);
       view.live.set(i, node);
       changed = true;
     }
@@ -397,7 +454,7 @@
   // provider redrawing its panels and menus all the time costs nothing), in the next frame and no
   // more than every quarter second. Pinpointer's own insertions do not count.
   const ANCHORS = provider === 'canlii'
-    ? 'a[name^="par"], a.reflex-paragAnchor, [id^="par"], a[name^="sec"], a[id^="sec"], a[name^="art"], a[id^="art"], a[name^="rule"], a[id^="rule"], [id^="se:"]'
+    ? 'a[name^="par"], a.reflex-paragAnchor, [id^="par"], a[name^="sec"], a[id^="sec"], a[name^="art"], a[id^="art"], a[name^="rule"], a[id^="rule"], [id^="se:"], .viibes-marker-toolbox'
     : provider === 'lexis' ? '[id^="PARA_"], [id^="SECTION_"], [id^="RULE_"], [id^="ARTICLE_"]'
       : '[id^="crsw_paragraph_num_"], [data-section-number], [data-rule-number], [data-article-number]';
   function watchUnits() {
@@ -759,6 +816,7 @@
     if (settings.unitCopyButtons) { queueSync(); watchUnits(); } else removeUnits();
     if (provider === 'canlii') {
       document.documentElement.classList.toggle('lp-no-canlii-name', !settings.canliiHeader);
+      document.documentElement.classList.toggle('lp-cited-by', citedBy());
       if (settings.canliiHeader) mountCrumb(); else unmountCrumb();
     } else {
       document.documentElement.classList.toggle('lp-raw-titles', !settings.cleanTitles);

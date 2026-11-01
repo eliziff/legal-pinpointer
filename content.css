@@ -148,6 +148,32 @@
   margin-top: 8px !important;
 }
 
+/* CanLII's Cited by, the group's third button where a paragraph is cited: a labelled button with the count, as
+   CanLII's own paragraph tools button (not drawn meanwhile, html.lp-cited-by) shows it. */
+.lp-unit > .lp-unit-cited {
+  width: auto !important;
+  min-width: 25px !important;
+  box-sizing: border-box !important;
+  padding: 0 6px !important;
+  border: 1px solid #d1d5db !important;
+  background: #ffffff !important;
+  color: #4b5563 !important;
+  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  white-space: nowrap !important;
+}
+
+.lp-unit > .lp-unit-cited::before {
+  content: "Cited " attr(data-count) !important;
+}
+
+.lp-unit > .lp-unit-cited:hover {
+  border-color: #f0b7b2 !important;
+}
+
+html.lp-cited-by .viibes-marker-toolbox {
+  display: none !important;
+}
+
 .lp-unit > button.done,
 .lp-unit > button.done:hover {
   color: #111827 !important;
