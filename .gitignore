@@ -6,3 +6,6 @@ runtime-validation.json
 vendor/
 /engine-src/target/
 test-results/
+
+# Local paths to private inputs (corpus, test browser): see AGENTS.md
+LOCAL-RESOURCES.md

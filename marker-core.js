@@ -108,7 +108,10 @@
   // The editor: "Filed under" slots, the waterfall for the active slot, the note (and Case Marker's
   // badge). Every change saves itself; it closes on Escape, the close button or a press outside it.
 
-  function openEditor({ anchor, folders, project, data, root = document.body, badge = true, onChange, onClose, inside = () => false }) {
+  // `multiple` (Settings: "Several folders per document", off by default): the "Filed under" slots.
+  // Without it a document has one folder per project: choosing a folder moves it there, and the
+  // slots show only for a document filed in several before the setting was turned off.
+  function openEditor({ anchor, folders, project, data, root = document.body, badge = true, multiple = false, onChange, onClose, inside = () => false }) {
     let slots = filings(data, folders, project), activeSlot = 0, noteTimer = 0, closed = false;
     // Where the anchor is, read before anything is inserted: the page's layout is still clean, so
     // this costs nothing even on a long judgment (after an insertion it would lay the page out).
@@ -135,7 +138,9 @@
     };
     const emit = () => { clearTimeout(noteTimer); onChange(value()); };
     function render() {
-      const strip = [...slots, ''].map((id, index) => {
+      const several = multiple || slots.length > 1;
+      element.querySelector('.lpm-slots').hidden = !several;
+      const strip = (several ? [...slots, ''] : []).map((id, index) => {
         const name = id ? filingNames(folders, [id])[0] : '';
         return `<button type="button" class="lpm-slot" data-slot="${index}" aria-pressed="${index === activeSlot}" aria-label="${id ? `Filed under ${escapeHtml(name)}` : 'Add a folder'}" title="${escapeHtml(name || 'Add a folder')}">`
           + `<span class="lpm-slot-circle"></span><span class="lpm-slot-name">${id ? escapeHtml(folders[id].name) : 'Add folder'}</span></button>`;
@@ -147,6 +152,13 @@
     }
     /** The slot being filled always wins: a repeat leaves the other slot, never strands this one. */
     function put(id) {
+      if (!multiple) {
+        // One folder: the choice replaces every filing (a "None" clears it).
+        slots = id ? [id] : [];
+        activeSlot = 0;
+        render();
+        return emit();
+      }
       const kept = slots.filter((value, index) => index !== activeSlot && value !== id), at = Math.min(activeSlot, kept.length);
       slots = [...kept.slice(0, at), ...(id ? [id] : []), ...kept.slice(at)];
       activeSlot = at;

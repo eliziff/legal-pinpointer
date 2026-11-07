@@ -603,8 +603,10 @@
     };
     document.addEventListener('copy', onCopy, { once: true, capture: true });
     let executed;
+    // The page UI links numbers only in the reader's own copies, never in this one.
+    globalThis.LegalPinpointerWritingClipboard = true;
     try { executed = document.execCommand('copy'); }
-    finally { document.removeEventListener('copy', onCopy, true); }
+    finally { document.removeEventListener('copy', onCopy, true); globalThis.LegalPinpointerWritingClipboard = false; }
     if (executed && copied) return;
     if (navigator.clipboard && typeof navigator.clipboard.write === 'function' && typeof ClipboardItem === 'function') {
       await navigator.clipboard.write([new ClipboardItem({
@@ -944,6 +946,8 @@
     model: (metadataOnly) => inspectPage(metadataOnly),
     current: (model) => { try { assertCurrentModel(model); return true; } catch (_) { return false; } },
     unitAt: (model, target) => nodeForTarget(model, target),
+    /** Where a pinpoint to this node links (its CanLII paragraph or provision where there is one). */
+    linkFor: (model, node) => targetForNode(model, { kind: 'node' }, node),
     onInvalidate: (listener) => invalidationListeners.add(listener),
     copyUnit,
     copyControl,

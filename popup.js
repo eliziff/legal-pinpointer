@@ -6,8 +6,8 @@
   const $ = (id) => document.getElementById(id);
   const SETTINGS = {
     pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
-    unitCopyButtons: true, canliiCitedBy: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
-    sonarWakeTabs: true, providerHeader: true, caseMarker: true, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
+    unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
+    sonarWakeTabs: true, providerHeader: true, caseMarker: true, markerMultipleFolders: false, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
   const MARKER = { canliiFolders: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
   // Folders take the next unused colour of this palette instead of all starting the same.
@@ -426,7 +426,7 @@
     rows = list;
     $('tree').style.height = `${rows.length * ROW}px`;
     $('tree-empty').hidden = Boolean(index.folders.size || index.total || adding !== undefined);
-    $('copy-links').title = `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
+    $('copy-links').title = copyTitle();
     draw(true);
     const editing = rows.findIndex((row) => row.kind === 'add' || (row.kind === 'folder' && row.id === renaming));
     if (editing >= 0) { reveal(editing)?.querySelector('input.tname-input')?.focus(); return; }
@@ -531,7 +531,7 @@
   function label(key, anchor) {
     editor?.close();
     editor = core.openEditor({
-      anchor, folders: marker.folders, project: marker.project, data: projectData(key),
+      anchor, folders: marker.folders, project: marker.project, data: projectData(key), multiple: settings.markerMultipleFolders,
       onChange({ folderIds, note, badge }) {
         const data = projectData(key);
         if (!data) return;
@@ -549,13 +549,15 @@
 
   function openMenu(button) {
     closeMenu();
-    const row = button.closest('.trow'), folderId = row.dataset.folder, key = row.dataset.document;
+    const row = button.closest('.trow'), folderId = row?.dataset.folder, key = row?.dataset.document;
     let items;
-    if (folderId) {
+    if (!row) items = [['copy-links', 'Copy links'], ['copy-notes', 'Copy links with notes']];
+    else if (folderId) {
       const folder = marker.folders[folderId], siblings = (tree().get(folder.parentId || null) || []).map(([siblingId]) => siblingId);
       items = [['rename', 'Rename'], ['sub', 'New folder inside'], ['up', 'Move up', siblings[0] === folderId],
-        ['down', 'Move down', siblings[siblings.length - 1] === folderId], ...(folder.parentId ? [['out', 'Move out']] : []), ['delete', 'Delete']];
-    } else items = [['label', 'Folders and note'], ['remove', 'Remove']];
+        ['down', 'Move down', siblings[siblings.length - 1] === folderId], ...(folder.parentId ? [['out', 'Move out']] : []),
+        ['copy-links', 'Copy links'], ['copy-notes', 'Copy links with notes'], ['delete', 'Delete']];
+    } else items = [['label', 'Folders and note'], ['copy-links', 'Copy link'], ['copy-notes', 'Copy link with note'], ['remove', 'Remove']];
     const menu = $('menu');
     menu.innerHTML = items.map(([action, text, disabled]) => `<button type="button" role="menuitem" data-action="${action}"${disabled ? ' disabled' : ''}>${text}</button>`).join('');
     menu.hidden = false;
@@ -591,6 +593,8 @@
     else if (action === 'delete') deleteFolder(folderId);
     else if (action === 'label') label(key, button.closest('.trow'));
     else if (action === 'remove') removeDocument(key);
+    // A document's menu copies that document; a folder's, everything in it; the header's, the selected folder.
+    else if (action === 'copy-links' || action === 'copy-notes') copyLinks(key ? [key] : within(folderId || selected), action === 'copy-notes');
   });
   $('menu').addEventListener('keydown', (event) => {
     if (event.key === 'Escape') { event.preventDefault(); closeMenu(true); return; }
@@ -603,7 +607,19 @@
 
   // Tree events.
 
+  // A document's link opens in a background tab beside this one; the popup stays open, so several
+  // can be opened in a row.
+  function openInBackground(event) {
+    const link = event.target.closest?.('#tree a.tname[href]');
+    if (!link || (event.type === 'auxclick' && event.button !== 1)) return false;
+    event.preventDefault();
+    activeTab().then((tab) => chrome.tabs.create({ url: link.href, active: false, index: tab.index + 1, openerTabId: tab.id }))
+      .catch(() => chrome.tabs.create({ url: link.href, active: false }));
+    return true;
+  }
+  $('tree').addEventListener('auxclick', openInBackground);
   $('tree').addEventListener('click', (event) => {
+    if (openInBackground(event)) return;
     const button = event.target.closest('button');
     if (!button) return;
     const row = button.closest('.trow'), folderId = row?.dataset.folder;
@@ -612,7 +628,7 @@
     else if (button.hasAttribute('data-select')) {
       // Choosing a folder changes only which row is marked: redraw the rows in view.
       selected = button.dataset.select || null;
-      $('copy-links').title = `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
+      $('copy-links').title = copyTitle();
       draw(true);
     }
   });
@@ -702,11 +718,38 @@
     return `https://www.canlii.org/en/${key.replace(/^\/+/, '')}`;
   }
 
-  $('copy-links').addEventListener('click', async () => {
-    const items = within(selected).map((key) => ({ key, title: documentTitle(key), note: projectData(key)?.note || '' }));
-    if (!items.length) return status('Nothing to copy.', true);
-    const plain = items.map((item) => `${item.title}${item.note ? ` — ${item.note}` : ''}\n${documentUrl(item.key)}`).join('\n');
-    const html = items.map((item) => `<a href="${escapeHtml(documentUrl(item.key))}">${escapeHtml(item.title)}</a>${item.note ? ` — ${escapeHtml(item.note)}` : ''}`).join('<br>');
+  // Copy links (as the original Case Marker's export does): each document's name linked and, with
+  // notes, its folder, badge, note, citation and date under it. One paragraph per document, so a
+  // paste into Word has no breaks the list does not.
+  const copyTitle = () => `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
+  $('copy-links').addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    if ($('menu').target?.button === button && !$('menu').hidden) closeMenu(); else openMenu(button);
+  });
+
+  function noteLines(key) {
+    const data = projectData(key) || {}, meta = marker.markers[key]?.meta || {}, title = documentTitle(key), lines = [];
+    const folders = documentFilings(key).map(pathName);
+    if (folders.length) lines.push(['Folder', folders.join('; ')]);
+    if (data.badge?.text) lines.push(['Badge', data.badge.text]);
+    if (data.note) lines.push(['Note', data.note]);
+    if (meta.citation && !title.includes(meta.citation)) lines.push(['Citation', meta.citation]);
+    if (meta.date) lines.push(['Date', meta.date]);
+    return lines;
+  }
+
+  async function copyLinks(keys, withNotes) {
+    if (!keys.length) return status('Nothing to copy.', true);
+    const items = keys.map((key) => ({ title: documentTitle(key), url: documentUrl(key), lines: withNotes ? noteLines(key) : [] }));
+    const link = (item) => item.url ? `<a href="${escapeHtml(item.url)}">${escapeHtml(item.title)}</a>` : escapeHtml(item.title);
+    let plain, html;
+    if (withNotes) {
+      plain = items.map((item) => [item.title, item.url, ...item.lines.map(([name, value]) => `${name}: ${value}`)].filter(Boolean).join('\n')).join('\n\n');
+      html = items.map((item) => `<p><b>${link(item)}</b>${item.lines.map(([name, value]) => `<br><i>${name}:</i> ${escapeHtml(value)}`).join('')}</p>`).join('');
+    } else {
+      plain = items.map((item) => [item.title, item.url].filter(Boolean).join('\n')).join('\n');
+      html = items.map(link).join('<br>');
+    }
     try {
       // A copy event: Chrome's async write wraps the HTML in a document of its own, which Word
       // pastes as a paragraph of its own.
@@ -717,9 +760,9 @@
       if (!copied) await navigator.clipboard.write([new ClipboardItem({
         'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' })
       })]);
-      status(`Copied ${items.length} link${items.length === 1 ? '' : 's'}`);
+      status(`Copied ${items.length} link${items.length === 1 ? '' : 's'}${withNotes ? ' with notes' : ''}`);
     } catch (error) { status('The browser denied clipboard access.', true); }
-  });
+  }
 
   function renderSlots() {
     const options = ['<option value="">—</option>'], folders = tree();

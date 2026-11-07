@@ -14,3 +14,9 @@
 - Before publishing native binaries, archives or embedded HTML, inspect the actual
   output for personal paths and private inputs. Rust builders should remap source
   paths with `--remap-path-prefix`; source-only scans do not inspect compiled data.
+
+## Local test inputs
+
+- `LOCAL-RESOURCES.md` (gitignored, at the checkout root, when present) says where the
+  local test inputs are and how to run the page checks. Read it before page-UI work;
+  never commit it or name its contents in the repo.

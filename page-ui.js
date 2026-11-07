@@ -21,7 +21,7 @@
     : /(?:^|\.)nextcanada\.westlaw\.com$/.test(hostname) ? 'westlaw' : '';
   if (!provider) return;
 
-  const settings = { unitCopyButtons: true, canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
+  const settings = { unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   const idle = (callback, timeout) => (window.requestIdleCallback
     ? requestIdleCallback(callback, { timeout }) : setTimeout(callback, 50));
 
@@ -61,15 +61,15 @@
   // The document model a copy needs is built at the first sign of one: the pointer on a Pinpointer
   // control, a modifier key (the hotkeys), or text selected. A page that is only read never builds it.
 
-  let metadata = null, warmed = false;
+  let metadata = null, warmed = false, fullModel = null;
   function warm() {
     if (warmed) return;
     warmed = true;
-    idle(() => page.model(false).catch(() => { warmed = false; }), 150);
+    idle(() => page.model(false).then((model) => { fullModel = model; }, () => { warmed = false; }), 150);
   }
-  page.onInvalidate?.(() => { warmed = false; });
+  page.onInvalidate?.(() => { warmed = false; fullModel = null; });
   document.addEventListener('pointerover', (event) => {
-    if (!warmed && event.target.closest?.('[data-lp-ui]')) warm();
+    if (!warmed && (event.target.closest?.('[data-lp-ui]') || (numbersOn() && event.target.closest?.(NUMBER)))) warm();
   }, { capture: true, passive: true });
   document.addEventListener('keydown', (event) => {
     if (!warmed && (event.key === 'Control' || event.key === 'Alt' || event.key === 'Meta')) warm();
@@ -91,7 +91,7 @@
 
   const KIND_LABEL = { paragraph: 'para', page: 'page', section: 's', rule: 'r', article: 'art', pilcrow: '¶', silcrow: '§' };
   const NEAR = 1; // viewports above and below the screen whose units have controls
-  const SIZE = 25, GAP = 2; // a button, and the space between controls
+  const SIZE = 20, GAP = 1; // a button (content.css draws it this size), and the space between controls
   const view = {
     units: [], order: null, sortedTops: null, xs: null, ys: null, modes: null,
     overlay: null, live: new Map(), pool: [], hot: null,
@@ -99,13 +99,21 @@
   };
   let template = null, citedTemplate = null;
 
+  // The buttons style: the pinpoint and the pinpoint with its text. The numbers style: the pinpoint
+  // only for a unit whose number cannot be clicked (its number is the control otherwise). Either
+  // way, CanLII's Cited by follows where the paragraph is cited (setCited).
+  const numbersStyle = () => settings.unitCopyStyle !== 'buttons';
+  const unitButtons = (unit) => (numbersStyle() ? (unit.numbered ? 0 : 1) : 2) + (unit.cited ? 1 : 0);
   function control() {
+    const style = numbersStyle() ? 'numbers' : 'buttons';
+    if (template && template.dataset.style !== style) { template = null; view.pool.length = 0; }
     if (!template) {
       template = document.createElement('span');
       template.className = 'lp-unit';
+      template.dataset.style = style;
       template.setAttribute('role', 'group');
       template.innerHTML = '<button type="button" class="lp-unit-pin" data-lp-action="unit" data-mode="pinpoint"></button>'
-        + '<button type="button" class="lp-unit-quote" data-lp-action="unit" data-mode="quote" data-tip="Copy with text (Ctrl+Shift+X)" aria-label="Copy pinpoint with text"></button>';
+        + (style === 'buttons' ? '<button type="button" class="lp-unit-quote" data-lp-action="unit" data-mode="quote" data-tip="Copy with text (Ctrl+Shift+X)" aria-label="Copy pinpoint with text"></button>' : '');
     }
     return view.pool.pop() || template.cloneNode(true);
   }
@@ -198,10 +206,10 @@
     for (const unit of found) {
       if (!unit.element?.isConnected || seen.has(unit.element)) continue; // two units on one element: the first keeps it
       seen.add(unit.element);
-      units.push({ ...unit, cited: cited ? citedCount(unit.element) : 0 });
+      units.push({ ...unit, cited: cited ? citedCount(unit.element) : 0, numbered: numbersOn() && Boolean(numberIn(unit.element)) });
     }
     const same = units.length === view.units.length
-      && units.every((unit, i) => unit.element === view.units[i].element && unit.cited === view.units[i].cited);
+      && units.every((unit, i) => unit.element === view.units[i].element && unit.cited === view.units[i].cited && unit.numbered === view.units[i].numbered);
     if (same && view.overlay?.isConnected) return;
     for (const node of view.live.values()) node.remove();
     view.pool.push(...view.live.values());
@@ -218,9 +226,9 @@
   // - Everything else lines up in one column: CanLII's button column where the page has one;
   //   otherwise just right of the text column, or just left of it when the right has no room
   //   (a narrow window, or a provider's panel over the margin), or in the text column's edge.
-  // - Controls never pile up: a unit with room below it (before the next control) gets its two
-  //   buttons stacked, one with less room gets them side by side, and one too close to the next
-  //   shows them only while the pointer is on that unit.
+  // - The two buttons are always one column, pinpoint on top (never side by side, so nothing
+  //   changes shape as the window narrows). A unit too close to the next for both shows the
+  //   pinpoint alone, and the second button under it while the pointer is on that unit.
   // Every read is a lookup in the frame's own layout; nothing is written until all are done.
   function measure() {
     view.measureTimer = 0;
@@ -248,6 +256,7 @@
       unitLefts[i] = Math.min(box.left, rect.left) - origin.left;
       if (box.width > 0) { rights.push(box.right - origin.left); lefts.push(Math.min(box.left, rect.left) - origin.left); }
     }
+    for (let k = shown.length - 1; k >= 0; k -= 1) if (!unitButtons(units[shown[k]])) shown.splice(k, 1);
     if (!shown.length) { view.order = null; return; }
     const median = (values) => { const sorted = values.slice().sort((a, b) => a - b); return sorted[sorted.length >> 1] ?? 0; };
     const colRight = median(rights), colLeft = median(lefts);
@@ -271,8 +280,8 @@
       return !hit || hit === document.documentElement || hit === document.body || hit.closest('[data-lp-ui]')
         || !['fixed', 'sticky'].includes(getComputedStyle(hit.closest('*:not(span):not(a):not(i):not(img)') || hit).position);
     };
-    // Controls stay in the margin, never over the text: a margin needs room for one button (the pair stacked), and a
-    // page whose text leaves no such room on either side shows none (the hotkeys still copy).
+    // Controls stay in the margin, never over the text: a margin needs room for one button's width, and a page whose
+    // text leaves no such room on either side shows none (the hotkeys still copy).
     let column, side = 'right';
     if (tools.length) column = median(tools.map((tool) => tool.center)) - SIZE / 2;
     else if (colRight + 12 + SIZE <= clipRight && clear(colRight + 12)) column = colRight + 12;
@@ -285,13 +294,7 @@
       view.order = null;
       return;
     }
-    // A unit's buttons: the two copy buttons, and CanLII's Cited by where the paragraph is cited.
-    const buttons = (i) => (units[i].cited ? 3 : 2);
-    // Whether the margin holds a group side by side; where it does not, they stack, peeking ones too.
-    const most = shown.some((i) => units[i].cited) ? 3 : 2;
-    const wide = side === 'right' ? clipRight - Math.max(column, colRight + 4) >= most * SIZE + (most - 1) * GAP
-      : Math.min(column + SIZE, colLeft - 4) - clipLeft >= most * SIZE + (most - 1) * GAP;
-
+    // A unit's buttons, one column: its count of shown buttons (unitButtons).
     for (const i of shown) {
       // The nearest unused CanLII button level with the unit's start.
       let tool = null;
@@ -303,14 +306,11 @@
     }
     shown.sort((a, b) => ys[a] - ys[b]);
     for (let k = 0; k < shown.length; k += 1) {
-      const i = shown[k], n = buttons(i), room = k + 1 < shown.length ? ys[shown[k + 1]] - ys[i] : Infinity;
-      modes[i] = room >= n * SIZE + n * GAP ? 'stack' : !wide ? 'peek-stack' : room >= SIZE + GAP ? 'pair' : 'peek';
-      const width = modes[i] === 'stack' || modes[i] === 'peek-stack' ? SIZE : n * SIZE + (n - 1) * GAP;
-      // Side by side, a group centred under a CanLII button stays centred; on the left it grows leftward.
-      if (width > SIZE && (tools.length || side === 'left')) xs[i] -= tools.length ? (width - SIZE) / 2 : width - SIZE;
+      const i = shown[k], n = unitButtons(units[i]), room = k + 1 < shown.length ? ys[shown[k + 1]] - ys[i] : Infinity;
+      modes[i] = room >= n * SIZE + n * GAP ? 'stack' : 'peek';
       // Never over its own unit's text, however wide that unit runs: beside it, on the margin's side.
       if (side === 'right') xs[i] = Math.max(xs[i], unitRights[i] + 4);
-      else xs[i] = Math.min(xs[i], unitLefts[i] - 4 - width);
+      else xs[i] = Math.min(xs[i], unitLefts[i] - 4 - SIZE);
     }
     view.xs = xs;
     view.ys = ys;
@@ -348,8 +348,7 @@
       const top = Math.round(view.ys[i]);
       node.style.setProperty('margin', `${top - bottom}px 0 0 ${Math.round(view.xs[i])}px`, 'important');
       node.dataset.place = view.modes[i];
-      const n = view.units[i].cited ? 3 : 2;
-      bottom = top + (view.modes[i] === 'stack' || view.modes[i] === 'peek-stack' ? n * SIZE + n - 1 : SIZE);
+      bottom = top + unitButtons(view.units[i]) * (SIZE + GAP) - GAP; // a peeking group keeps its space (hidden, not removed)
       nodes.push(node);
     }
     view.overlay.replaceChildren(...nodes);
@@ -387,6 +386,7 @@
       const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[unit.kind] || unit.kind} ${unit.locator}`;
       node.firstChild.dataset.tip = label;
       node.firstChild.setAttribute('aria-label', label);
+      node.firstChild.hidden = numbersStyle() && unit.numbered;
       setCited(node, unit.cited);
       view.live.set(i, node);
       changed = true;
@@ -421,6 +421,161 @@
     if (!hoverFrame) hoverFrame = requestAnimationFrame(hoverUnit);
   }, { capture: true, passive: true });
 
+  // ---------------------------------------------------------------------------
+  // Paragraph and provision numbers as the copy control (Settings: "Copy from paragraph numbers",
+  // the default): a click on a number copies its pinpoint, and a reader's own copy of a selection
+  // links every whole number inside it to its paragraph or provision, so a quote carries its links
+  // natively. Nothing is written to the page ahead of time: the pointer cursor is static CSS
+  // (content.css, under html.lp-numbers), clicks are one capture listener, and links exist only
+  // for the moment the browser serializes a copy (added in the copy event, removed right after).
+  // Westlaw's numbers are text at the start of the paragraph, found from the caret under the pointer.
+  const NUMBER = provider === 'canlii' ? '.lp-num, a.reflex-paragAnchor[name]:not(.lp-num *), .SectionNumber, .canlii_section_with_subsection'
+    : provider === 'lexis' ? '[id^="PARA_"]' : '.lp-num';
+
+  // Westlaw writes a paragraph's number as the first text of the paragraph: it is wrapped once in a
+  // span of its own (in idle time, a few hundred paragraphs at a time, before the page's model is
+  // read), so it can be drawn and clicked like the other providers' numbers. Text and layout are
+  // unchanged.
+  function wrapCanliiNumbers() {
+    const anchors = [...document.querySelectorAll('a.reflex-paragAnchor[name]:not(.lp-num *)')];
+    const step = (deadline) => {
+      while (anchors.length && (!deadline || deadline.timeRemaining() > 2)) {
+        const anchor = anchors.shift(), before = anchor.previousSibling, after = anchor.nextSibling;
+        if (before?.nodeType !== 3 || after?.nodeType !== 3 || !/\[\s*$/.test(before.data) || !/^\s*\]/.test(after.data)) continue;
+        const open = before.splitText(before.data.lastIndexOf('['));
+        after.splitText(after.data.indexOf(']') + 1);
+        const span = document.createElement('span');
+        span.className = 'lp-num';
+        anchor.before(span);
+        span.append(open, anchor, after);
+      }
+      if (anchors.length) idle(step, 200);
+      else fullModel = null;
+    };
+    step(null);
+  }
+
+  function wrapWestlawNumbers() {
+    if (provider === 'canlii' && numbersOn()) return wrapCanliiNumbers();
+    if (provider !== 'westlaw' || !numbersOn()) return;
+    const paragraphs = [...document.querySelectorAll('.crsw_labeledParagraph .co_paragraphText:not([data-lp-num])')];
+    const step = (deadline) => {
+      while (paragraphs.length && (!deadline || deadline.timeRemaining() > 2)) {
+        const text = paragraphs.shift();
+        text.setAttribute('data-lp-num', '');
+        const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+        let first = walker.nextNode();
+        while (first && !first.data.trim()) first = walker.nextNode();
+        const match = first?.data.match(/^(\s*)(\d+[.)]?)/);
+        if (!match) continue;
+        const number = first.splitText(match[1].length);
+        number.splitText(match[2].length);
+        const span = document.createElement('span');
+        span.className = 'lp-num';
+        number.replaceWith(span);
+        span.appendChild(number);
+      }
+      if (paragraphs.length) idle(step, 200);
+      else fullModel = null; // the page model is read again with the numbers in place
+    };
+    step(null);
+  }
+  const numbersOn = () => settings.unitCopyButtons && settings.unitCopyStyle !== 'buttons';
+  /** A unit's clickable number: in its element, or (a statute's section number) in its block. */
+  function numberIn(element) {
+    if (!element) return null;
+    if (element.matches?.(NUMBER)) return element;
+    return element.querySelector?.(NUMBER) || element.closest?.('p, li, div')?.querySelector(NUMBER) || null;
+  }
+  const cleanHere = () => `${location.origin}${location.pathname}`;
+
+  function numberAt(event) {
+    return numbersOn() ? event.target.closest?.(NUMBER) || null : null;
+  }
+  /** The element the page's model knows the unit by: a statute's section number comes before its anchor. */
+  function numberTarget(number) {
+    if (number.classList.contains('SectionNumber')) {
+      const block = number.closest('p, div, li') || number.parentElement;
+      const label = number.textContent.replace(/\s+/g, '');
+      return block.querySelector(`a[name="sec${CSS.escape(label)}"]`) || block.querySelector('a[name^="sec"]') || number;
+    }
+    return number;
+  }
+
+  /** The unit a number stands for (a section number that opens with its first subsection is that subsection). */
+  const unitFor = (model, number) => page.unitAt(model, numberTarget(number));
+
+  document.addEventListener('click', (event) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const number = numberAt(event);
+    // A click that ends a selection is the selection's.
+    if (!number || !getSelection().isCollapsed) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    run(page.model(false).then((model) => {
+      fullModel = model;
+      const node = unitFor(model, number);
+      if (!node) throw new Error('This passage is no longer on the page.');
+      return page.copyUnit(model, node, 'pinpoint');
+    }).then(() => {
+      number.classList.add('lp-number-done');
+      setTimeout(() => number.classList.remove('lp-number-done'), 900);
+    }), null);
+  }, true);
+
+  // Where a number links: its unit's pinpoint target from the page's model; on CanLII, before the
+  // model is built, the document's own anchor.
+  function numberUrl(number) {
+    const target = numberTarget(number);
+    if (fullModel && page.current(fullModel)) {
+      const node = unitFor(fullModel, number);
+      if (node) { try { return page.linkFor(fullModel, node); } catch (_) { /* fall through */ } }
+    }
+    if (provider !== 'canlii') return '';
+    if (target.classList?.contains('lp-num') && target.querySelector('a[name]')) return `${cleanHere()}#${encodeURIComponent(target.querySelector('a[name]').getAttribute('name'))}`;
+    const section = target.getAttribute?.('section'), subsection = target.getAttribute?.('subsection');
+    const own = section && subsection && subsection !== 'null' ? `sec${section}subsec${subsection}` : '';
+    const anchor = (own && document.getElementsByName(own).length ? own : '') || target.getAttribute?.('name')
+      || target.previousElementSibling?.getAttribute?.('name') || '';
+    return anchor ? `${cleanHere()}#${encodeURIComponent(anchor)}` : '';
+  }
+
+  const LINKABLE = NUMBER;
+  document.addEventListener('copy', () => {
+    if (!numbersOn() || !LINKABLE || globalThis.LegalPinpointerWritingClipboard) return;
+    const selection = getSelection();
+    if (selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const common = range.commonAncestorContainer;
+    const root = common.nodeType === 1 ? common : common.parentElement;
+    if (!root || root.closest('[data-lp-ui]')) return;
+    // Every link is worked out before any is added: the page's model is current only while the page is untouched.
+    const links = [];
+    for (const number of root.querySelectorAll(LINKABLE)) {
+      // Only numbers wholly inside the selection; a boundary inside one stays as it is.
+      if (!range.intersectsNode(number) || number.contains(range.startContainer) || number.contains(range.endContainer)) continue;
+      if (number.closest('a[href]') || number.querySelector('a[href]')) continue;
+      const url = numberUrl(number);
+      if (url) links.push([number, url]);
+      if (links.length >= 5000) break;
+    }
+    const undo = links.map(([number, url]) => {
+      // A number that is (or holds) the page's own anchor: the anchor takes the link.
+      const anchor = number.tagName === 'A' ? number : number.querySelector(':scope > a[name]:not([href])');
+      if (anchor) {
+        anchor.setAttribute('href', url);
+        return () => anchor.removeAttribute('href');
+      }
+      const link = document.createElement('a');
+      link.href = url;
+      while (number.firstChild) link.appendChild(number.firstChild);
+      number.appendChild(link);
+      return () => { while (link.firstChild) number.insertBefore(link.firstChild, link); link.remove(); };
+    });
+    // The browser serializes the selection after this event; the page is back as it was before it paints.
+    if (undo.length) setTimeout(() => { for (const restore of undo) restore(); }, 0);
+  }, true);
+
   // One tooltip for every control, shown after a short hover.
   let tip = null, tipTimer = 0;
   function hideTip() {
@@ -428,8 +583,10 @@
     if (tip) tip.hidden = true;
   }
   document.addEventListener('pointerover', (event) => {
-    const button = event.target;
-    if (!button.parentElement?.classList?.contains('lp-unit') || !button.dataset.tip) return hideTip();
+    const number = numbersOn() ? event.target.closest?.(NUMBER) : null;
+    const button = number || event.target;
+    const text = number ? 'Copy the pinpoint' : button.dataset?.tip;
+    if (!number && (!button.parentElement?.classList?.contains('lp-unit') || !text)) return hideTip();
     clearTimeout(tipTimer);
     tipTimer = setTimeout(() => {
       if (!tip) {
@@ -439,7 +596,7 @@
         tip.setAttribute('role', 'tooltip');
         document.documentElement.appendChild(tip);
       }
-      tip.textContent = button.dataset.tip;
+      tip.textContent = text;
       const rect = button.getBoundingClientRect();
       tip.hidden = false;
       tip.style.left = `${Math.max(6, Math.round(rect.left + rect.width / 2 - tip.offsetWidth / 2))}px`;
@@ -494,7 +651,9 @@
 
   // ---------------------------------------------------------------------------
   // CanLII: the document's name in place of the last breadcrumb in CanLII's sticky header. The
-  // breadcrumbs already fill the header's free width (content.css), so the name only fills it in.
+  // breadcrumbs already fill the header's free width (content.css); the name wraps onto as many
+  // lines as it needs, and a header grown taller than CanLII's own 80px keeps CanLII's side panels
+  // (toolbar, sidebar, heatmap: sticky at --header-default-size) below it.
 
   let crumb = null;
 
@@ -521,24 +680,29 @@
     // The tab, too, is titled with the full style of cause or statute name.
     crumb.tabTitle ??= document.title;
     if (document.title !== text) document.title = text;
-    fitCrumb();
+    fitHeader();
   }
 
-  // A name too long for two lines in a narrow window gets three smaller ones, in the same height.
-  function fitCrumb() {
-    if (!crumb) return;
-    crumb.name.classList.remove('lp-dense');
-    if (crumb.name.scrollHeight > crumb.name.clientHeight + 1) crumb.name.classList.add('lp-dense');
+  let headerObserver = null;
+  function fitHeader() {
+    const header = document.getElementById('canlii-header');
+    if (!header || headerObserver) return;
+    headerObserver = new ResizeObserver(([entry]) => {
+      const height = Math.ceil(entry.borderBoxSize?.[0]?.blockSize ?? header.getBoundingClientRect().height);
+      if (height > 80) document.documentElement.style.setProperty('--header-default-size', `${height}px`);
+      else document.documentElement.style.removeProperty('--header-default-size');
+    });
+    headerObserver.observe(header);
   }
-  let fitTimer = 0;
-  addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => requestAnimationFrame(fitCrumb), 150); }, { passive: true });
 
   function unmountCrumb() {
     if (!crumb) return;
     crumb.button.remove();
     crumb.name.textContent = crumb.original;
     crumb.name.removeAttribute('title');
-    crumb.name.classList.remove('lp-dense');
+    headerObserver?.disconnect();
+    headerObserver = null;
+    document.documentElement.style.removeProperty('--header-default-size');
     if (crumb.tabTitle !== undefined) document.title = crumb.tabTitle;
     crumb = null;
   }
@@ -680,7 +844,12 @@
   function watchTools() {
     toolsObserver?.disconnect();
     toolsVisible = true;
-    toolsObserver = new IntersectionObserver(([entry]) => { toolsVisible = entry.isIntersecting; floatVisibility(); });
+    // A title with no box at all (a hidden copy, a pane not shown yet) counts as in view: the bar is
+    // for a title scrolled away, never one the provider is not drawing.
+    toolsObserver = new IntersectionObserver(([entry]) => {
+      toolsVisible = entry.isIntersecting || !entry.target.getClientRects().length;
+      floatVisibility();
+    });
     toolsObserver.observe(tools.title);
   }
 
@@ -690,13 +859,13 @@
   // the page, the provider's CSS never reaches it, and it covers nothing while the title shows.
   const BAR_CSS = `
     :host { all: initial; }
-    .bar { position: fixed; top: 0; left: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; height: 38px;
-      padding: 0 8px; border-bottom: 1px solid #e5e7eb; background: #fff; color: #111827;
+    .bar { position: fixed; top: 0; left: 0; display: flex; align-items: center; gap: 8px; box-sizing: border-box; min-height: 38px;
+      padding: 5px 8px; border-bottom: 1px solid #e5e7eb; background: #fff; color: #111827;
       box-shadow: 0 1px 3px rgb(0 0 0 / 6%), 0 6px 16px -10px rgb(0 0 0 / 18%);
       font: 600 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
       opacity: 0; transform: translateY(-100%); pointer-events: none; transition: opacity 120ms, transform 140ms ease-out; }
     .bar.ready { opacity: 1; transform: none; pointer-events: auto; }
-    .cite { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; cursor: text; }
+    .cite { flex: 1; min-width: 0; overflow-wrap: break-word; user-select: text; cursor: text; }
     a { display: grid; flex: none; place-items: center; box-sizing: border-box; width: 26px; height: 26px; border: 1px solid #e5e7eb;
       border-radius: 6px; background: #fff; cursor: pointer; transition: border-color 80ms, box-shadow 80ms; }
     a::before { content: ""; width: 16px; height: 16px; background: ${CANLII_ICON} center / contain no-repeat; }
@@ -766,6 +935,13 @@
     bar.element.classList.toggle('ready', ready);
   }
   addEventListener('resize', () => { if (bar?.element.classList.contains('ready')) placeBar(); }, { passive: true });
+  // A provider's header that grows or shrinks as the page scrolls (Lexis): placed again once scrolling settles.
+  let settleTimer = 0;
+  addEventListener('scroll', () => {
+    if (!bar?.element.classList.contains('ready')) return;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => requestAnimationFrame(placeBar), 150);
+  }, { capture: true, passive: true });
 
   function paintBar(current, fallback = '') {
     mountBar();
@@ -813,7 +989,14 @@
   let applying = 0;
   async function apply() {
     const ticket = ++applying;
-    if (settings.unitCopyButtons) { queueSync(); watchUnits(); } else removeUnits();
+    document.documentElement.classList.toggle('lp-numbers', numbersOn());
+    if (settings.unitCopyButtons) {
+      // A changed style redraws every control from its own template.
+      if (view.style !== settings.unitCopyStyle) { removeUnits(); view.style = settings.unitCopyStyle; }
+      wrapWestlawNumbers();
+      queueSync();
+      watchUnits();
+    } else removeUnits();
     if (provider === 'canlii') {
       document.documentElement.classList.toggle('lp-no-canlii-name', !settings.canliiHeader);
       document.documentElement.classList.toggle('lp-cited-by', citedBy());
@@ -824,6 +1007,8 @@
       if (settings.cleanTitles || settings.canliiButton || settings.caseMarker || settings.providerHeader) mountTools(); else unmountTools();
       if (!settings.canliiButton) unmountFloating();
       if (!settings.providerHeader) unmountBar();
+      // The bar is there at once with the title; the citation replaces it when the model is in.
+      else if (tools && !bar) { mountBar(); bar.cite.textContent = titleText(); bar.canlii.hidden = !settings.canliiButton; barVisibility(); }
       if (tools || settings.canliiButton) {
         try {
           const current = metadata && page.current(metadata) ? metadata : (metadata = await page.model(true));

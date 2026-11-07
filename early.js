@@ -21,12 +21,14 @@
 
   // The page UI's settings, read now so they are in hand by the time page-ui.js runs (at
   // document_end, when a storage read would wait behind the page's own start-up scripts).
-  const PAGE_SETTINGS = { unitCopyButtons: true, canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
+  const PAGE_SETTINGS = { unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   globalThis.LegalPinpointerEarlySettings = new Promise((resolve) => chrome.storage.local.get(PAGE_SETTINGS, (stored) => {
     if (top && !/canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-raw-titles', stored.cleanTitles === false);
     if (top && /canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-no-canlii-name', stored.canliiHeader === false);
     // CanLII's paragraph tools button is not drawn while its Cited by sits with the copy buttons (page-ui.js).
     if (top && /canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-cited-by', stored.canliiCitedBy !== false && stored.unitCopyButtons !== false);
+    // Paragraph and section numbers are the copy controls (page-ui.js, content.css).
+    if (top) document.documentElement.classList.toggle('lp-numbers', stored.unitCopyButtons !== false && stored.unitCopyStyle !== 'buttons');
     globalThis.LegalPinpointerEarlySettingsValue = stored;
     resolve(stored);
   }));

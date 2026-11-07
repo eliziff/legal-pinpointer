@@ -36,6 +36,7 @@
       </form>
       <div id="marker-settings" class="card mt-2" hidden>
         <label class="setting"><span><b>Circles on pages</b><small>On CanLII search results and titles, and the Westlaw, Lexis and court titles</small></span><input type="checkbox" class="switch" data-setting="caseMarker"></label>
+        <label class="setting"><span><b>Several folders per document</b><small>Off: a document sits in one folder per project</small></span><input type="checkbox" class="switch" data-setting="markerMultipleFolders"></label>
         <label class="setting-field"><span>Hover + C files into</span><select class="field h-7 max-w-44 text-xs" data-slot="canliiHotkeySlot1"></select></label>
         <label class="setting-field"><span>Hover + V files into</span><select class="field h-7 max-w-44 text-xs" data-slot="canliiHotkeySlot2"></select></label>
         <div class="setting-field"><span>Data</span><span class="flex gap-1"><button type="button" class="btn btn-outline btn-sm" id="export">Export</button><button type="button" class="btn btn-outline btn-sm" id="import">Import</button></span></div>
@@ -46,7 +47,7 @@
         <select id="viewer-sort" class="field h-7 px-1.5 text-xs" aria-label="Sort documents">
           <option value="saved">Saved order</option><option value="alpha">A–Z</option><option value="newest">Newest</option>
         </select>
-        <button type="button" class="btn btn-ghost btn-sm" id="copy-links"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>Copy links</button>
+        <button type="button" class="btn btn-ghost btn-icon" id="copy-links" data-menu aria-haspopup="menu" title="Copy the links in all documents" aria-label="Copy links"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
       </div>
       <div id="tree" class="relative min-w-0" role="tree" aria-label="Folders"></div>
       <p id="tree-empty" class="tempty" hidden>No folders yet. Add one, then click a circle on CanLII to file a case.</p>
@@ -87,10 +88,13 @@
       </div>
       <h2 class="eyebrow">On the page</h2>
       <div class="card">
-        <label class="setting"><span><b>Copy buttons on paragraphs</b><small>Pinpoint and pinpoint-with-text beside each paragraph or section, like Ctrl+X and Ctrl+Shift+X; with text selected, they copy the selection</small></span><input type="checkbox" class="switch" data-setting="unitCopyButtons"></label>
-        <label class="setting"><span><b>Cited by with the copy buttons</b><small>On CanLII, a cited paragraph’s Cited by opens in a new tab from beside its copy buttons, in place of CanLII’s paragraph tools button</small></span><input type="checkbox" class="switch" data-setting="canliiCitedBy"></label>
+        <label class="setting"><span><b>Copy from paragraph numbers</b><small>Click a paragraph or section number to copy its pinpoint (like Ctrl+X); text you copy keeps its numbers linked</small></span><input type="checkbox" class="switch" data-setting="unitCopyButtons"></label>
+        <label class="setting-field"><span>Copy controls</span><select class="field h-7 text-xs" data-setting-select="unitCopyStyle">
+          <option value="numbers">The numbers themselves</option><option value="buttons">Buttons in the margin</option>
+        </select></label>
+        <label class="setting"><span><b>Cited by beside the paragraph</b><small>On CanLII, a cited paragraph’s Cited by opens in a new tab from the margin, in place of CanLII’s paragraph tools button</small></span><input type="checkbox" class="switch" data-setting="canliiCitedBy"></label>
         <label class="setting"><span><b>Name in CanLII’s header</b><small>The full style of cause stays visible as you scroll, with a copy-link button, and titles the tab</small></span><input type="checkbox" class="switch" data-setting="canliiHeader"></label>
-        <label class="setting"><span><b>Citation bar on Westlaw &amp; Lexis</b><small>A bar frozen at the top with the citation, Copy link and the CanLII button</small></span><input type="checkbox" class="switch" data-setting="providerHeader"></label>
+        <label class="setting"><span><b>Citation bar on Westlaw, Lexis &amp; court sites</b><small>A bar frozen at the top with the citation, Copy link and the CanLII button</small></span><input type="checkbox" class="switch" data-setting="providerHeader"></label>
         <label class="setting"><span><b>Clean titles on Westlaw &amp; Lexis</b><small>A roomy, selectable title block with a copy-link button</small></span><input type="checkbox" class="switch" data-setting="cleanTitles"></label>
         <label class="setting"><span><b>CanLII button on Westlaw &amp; Lexis</b><small>Lit when a CanLII version is found</small></span><input type="checkbox" class="switch" data-setting="canliiButton"></label>
         <label class="setting"><span><b>Hide selection menus</b><small>Westlaw, Lexis and Practical Law’s highlight/annotate pop-ups</small></span><input type="checkbox" class="switch" data-setting="suppressSelectionMenus"></label>

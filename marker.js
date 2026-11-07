@@ -1,8 +1,9 @@
 'use strict';
 
 // Case Marker: coloured circles on CanLII search results and document titles, on the Westlaw and
-// Lexis title, and on court decision pages (Lexum/Decisia), filed into any number of the current
-// project's nested folders (a circle shows its deepest filing's path as nested rings; the picker is
+// Lexis title, and on court decision pages (Lexum/Decisia), filed into one of the current project's
+// nested folders, or several with the "Several folders per document" setting (a circle shows its
+// deepest filing's path as nested rings; the picker is
 // marker-core.js, Beaver's label editor). One identity across
 // providers: a document's CanLII path ("ca/scc/doc/2016/2016scc27/2016scc27.html"), which Westlaw,
 // Lexis and court pages resolve to, so a case filed on one shows as filed on the others; a decision
@@ -23,8 +24,8 @@
   if (window !== window.top && !onCourtSite) return;
 
   const core = globalThis.LegalPinpointerMarkerCore;
-  const KEYS = ['caseMarker', 'canliiFolders', 'canliiProjects', 'canliiCurrentProject', 'canliiHotkeySlot1', 'canliiHotkeySlot2'];
-  const state = { enabled: true, folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
+  const KEYS = ['caseMarker', 'canliiFolders', 'canliiProjects', 'canliiCurrentProject', 'canliiHotkeySlot1', 'canliiHotkeySlot2', 'markerMultipleFolders'];
+  const state = { enabled: true, folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null, multiple: false };
   const wraps = new Map(); // key -> Set of circle wraps on this page
   const labels = new Map(); // key -> the name and citation shown on this page
   const fetched = new Map(); // key -> the read of its stored document (one read per batch of keys)
@@ -50,6 +51,7 @@
       : Object.entries(state.projects).sort((a, b) => (a[1].order || 0) - (b[1].order || 0))[0][0];
     state.slot1 = stored.canliiHotkeySlot1 || null;
     state.slot2 = stored.canliiHotkeySlot2 || null;
+    state.multiple = stored.markerMultipleFolders === true;
   }
 
   // One document's write: its own storage key, nothing else. Each write's echo is skipped, so an
@@ -191,6 +193,7 @@
         }, { type: result.getAttribute('data-lbh-type') || '' });
       }
     }
+    watchPanel();
     const key = docKey(location.href);
     const title = isDocument(key) && document.querySelector('#title-container h1.main-title, h1.main-title');
     if (title && !seen.has(title)) {
@@ -199,6 +202,31 @@
         date: document.querySelector('meta[name="lbh-decision-date"]')?.content || '' };
       attach(key, title.textContent, (wrap) => { wrap.classList.add('lpm-title'); title.prepend(wrap); }, meta);
     }
+  }
+
+  // CanLII's side panels on a document page (Treatment, i.e. who cites it, Cited documents,
+  // History): each document link gets a small circle as the panel loads its list. Only the panel is
+  // watched, from the moment it is parsed; the document's own text is never scanned.
+  let panelObserver = null;
+  function scanPanel(panel) {
+    if (!state.enabled) return;
+    for (const link of panel.querySelectorAll('a[href]')) {
+      if (seen.has(link) || link.closest('.lpm-wrap')) continue;
+      seen.add(link);
+      const key = docKey(link.href);
+      if (!/^https:\/\/(?:www\.)?canlii\.org\//.test(link.href) || !isDocument(key)) continue;
+      const label = clean(link.textContent);
+      if (!label) continue;
+      attach(key, label, (wrap) => { wrap.classList.add('lpm-inline'); link.before(wrap); });
+    }
+  }
+  function watchPanel() {
+    if (panelObserver || !isDocument(docKey(location.href))) return;
+    const panel = document.querySelector('.canlii-sidebar');
+    if (!panel) return;
+    scanPanel(panel);
+    panelObserver = new MutationObserver(() => scanPanel(panel));
+    panelObserver.observe(panel, { childList: true, subtree: true });
   }
 
   // A court's Lexum/Decisia decision page: the circle starts on the page's own identity and moves to
@@ -265,6 +293,8 @@
   globalThis.LegalPinpointerCaseMarker = { attachExternal, identity, enabled: () => state.enabled };
 
   function removeAll() {
+    panelObserver?.disconnect();
+    panelObserver = null;
     for (const set of wraps.values()) for (const wrap of set) wrap.remove();
     wraps.clear();
     seen = new WeakSet();
@@ -285,7 +315,7 @@
     await want(key);
     if (editorKey !== key) return;
     editor = core.openEditor({
-      anchor, folders: state.folders, project: state.project, data: entry(key) || {},
+      anchor, folders: state.folders, project: state.project, data: entry(key) || {}, multiple: state.multiple,
       // A press on a circle is the circle's own: it toggles this editor or opens another.
       inside: (event) => Boolean(circleIn(event)),
       onChange({ folderIds, note, badge }) {
@@ -354,7 +384,7 @@
     }
     if (!KEYS.some((key) => changes[key])) return;
     const stored = { caseMarker: state.enabled, canliiFolders: state.folders, canliiProjects: state.projects,
-      canliiCurrentProject: state.project, canliiHotkeySlot1: state.slot1, canliiHotkeySlot2: state.slot2 };
+      canliiCurrentProject: state.project, canliiHotkeySlot1: state.slot1, canliiHotkeySlot2: state.slot2, markerMultipleFolders: state.multiple };
     for (const key of KEYS) if (changes[key]) stored[key] = changes[key].newValue;
     const wasEnabled = state.enabled;
     load(stored);
@@ -382,6 +412,8 @@
   const watch = () => { if (!watching) { watching = true; observer.observe(document, { childList: true, subtree: true }); } };
   watch();
   addEventListener('hashchange', () => { if (location.hash.startsWith('#search/')) { watch(); scan(); } });
+  // The side panel, should it be parsed after the title.
+  if (onCanlii) addEventListener('DOMContentLoaded', () => { if (state.enabled) watchPanel(); }, { once: true });
   chrome.storage.local.get(KEYS, (stored) => {
     load(stored);
     refreshAll();

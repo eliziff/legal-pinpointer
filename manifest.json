@@ -71,6 +71,21 @@
     },
     {
       "matches": [
+        "https://*.gc.ca/*/item/*",
+        "https://decisia.lexum.com/*/item/*",
+        "https://decisions.scc-csc.ca/*/item/*",
+        "https://coadecisions.ontariocourts.ca/*/item/*",
+        "https://decisions.cmac-cacm.ca/*/item/*",
+        "https://decisions.sct-trp.ca/*/item/*"
+      ],
+      "js": [
+        "court-ui.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true
+    },
+    {
+      "matches": [
         "https://*.westlaw.com/*",
         "https://westlaw.com/*",
         "https://*.westlawcanada.com/*",

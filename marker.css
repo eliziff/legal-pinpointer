@@ -12,6 +12,23 @@
   contain: layout size style;
 }
 
+/* Beside a document link in CanLII's side panels (Treatment, Cited documents, History): text-sized. */
+.lpm-wrap.lpm-inline {
+  width: 14px;
+  height: 14px;
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+
+.lpm-inline .lpm-circle {
+  width: 14px;
+  height: 14px;
+}
+
+.lpm-inline .lpm-circle.lpm-empty {
+  box-shadow: inset 0 0 0 1.5px #c3cbd3;
+}
+
 .lpm-wrap.lpm-index {
   margin: 0 0 4px;
 }
@@ -183,6 +200,15 @@
   padding: 6px 36px 4px 0;
   overflow-x: auto;
   border-bottom: 1px solid #e5e7eb;
+}
+
+/* One folder per document (the default): no slots; the chips keep clear of the close button. */
+.lpm-slots[hidden] {
+  display: none;
+}
+
+.lpm-slots[hidden] + .lpm-waterfall {
+  padding-inline-end: 32px;
 }
 
 .lpm-picker .lpm-slot {
