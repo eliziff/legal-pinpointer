@@ -392,11 +392,24 @@
     return aliases.join(' | ');
   }
 
+  // A secondary source's title can be its whole path of subdivisions ("Work > Title > Part >
+  // Heading"). Settings, Secondary sources cite: the last subdivision (default), the first and the
+  // last, or the full path. A title without subdivisions is left as it is.
+  function secondaryTitle(value) {
+    const parts = String(value || '').split(/\s+(?:>|\u203a|\u00bb)\s+/).map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) return String(value || '').trim();
+    const depth = globalThis.LegalPinpointerSettings?.secondaryTitleDepth || 'last';
+    if (depth === 'full') return parts.join(', ');
+    if (depth === 'intermediate') return `${parts[0]}, ${parts[parts.length - 1]}`;
+    return parts[parts.length - 1];
+  }
+
   async function lexisSecondaryCitation(document, fallbackTitle) {
     const information = Array.from(document.querySelectorAll('.SS_DocumentHeader .SS_DocumentInfo'))
       .map(textOf)
       .filter(Boolean);
-    const sourceTitle = information[0] || '';
+    fallbackTitle = secondaryTitle(fallbackTitle);
+    const sourceTitle = secondaryTitle(information[0] || '');
     const author = information[1] || '';
     if (!sourceTitle) return core.makeCitation('secondary', fallbackTitle, '');
     const titleHtml = `<i>${core.escapeHtml(sourceTitle)}</i>`;

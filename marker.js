@@ -265,6 +265,18 @@
         const canliiKey = response?.ok && response.canliiUrl ? docKey(response.canliiUrl) : '';
         if (!canliiKey || !isDocument(canliiKey)) return;
         const label = labels.get(key);
+        Promise.all([want(key), want(canliiKey)]).then(() => {
+          const filed = state.markers[key];
+          if (!filed) return;
+          const target = state.markers[canliiKey] ||= {};
+          target.byProject = { ...(filed.byProject || {}), ...(target.byProject || {}) };
+          for (const field of ['displayText', 'fullDisplayText', 'year', 'meta']) if (filed[field] && !target[field]) target[field] = filed[field];
+          delete state.markers[key];
+          save(canliiKey);
+          save(key);
+          refresh(canliiKey);
+        });
+        if (editorKey === key) editorKey = canliiKey;
         for (const wrap of wraps.get(key) || []) {
           wrap.dataset.key = canliiKey;
           if (label) labels.set(canliiKey, label);
@@ -325,6 +337,10 @@
   async function showPicker(key, anchor) {
     hidePicker();
     editorKey = key;
+    // A court page's circle moves from the page's identity to the decision's CanLII identity once
+    // that is known: every change is saved under the identity the circle has at that moment.
+    const wrap = anchor.closest('.lpm-wrap');
+    const current = () => wrap?.dataset.key || key;
     // Its stored document is normally read long before a click; never edit ahead of it.
     await want(key);
     if (editorKey !== key) return;
@@ -333,13 +349,14 @@
       // A press on a circle is the circle's own: it toggles this editor or opens another.
       inside: (event) => Boolean(circleIn(event)),
       onChange({ folderIds, note, badge }) {
-        const data = entry(key, true);
+        const at = current();
+        const data = entry(at, true);
         core.setFilings(data, folderIds, state.folders);
         if (note) data.note = note; else delete data.note;
         if (badge) data.badge = badge; else delete data.badge;
-        prune(key);
-        save(key);
-        refresh(key);
+        prune(at);
+        save(at);
+        refresh(at);
       },
       onClose() { editor = editorKey = null; }
     });

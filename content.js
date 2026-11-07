@@ -36,8 +36,10 @@
   // Settings are read once and kept current, so no copy waits on a storage round trip.
   const SETTINGS = {
     pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
-    statuteCopyIndent: true
+    statuteCopyIndent: true, secondaryTitleDepth: 'last'
   };
+  // providers.js reads the secondary-source title setting from here.
+  globalThis.LegalPinpointerSettings = SETTINGS;
   const settingsReady = new Promise((resolve) => chrome.storage.local.get(SETTINGS, (stored) => {
     Object.assign(SETTINGS, stored);
     resolve(SETTINGS);
