@@ -556,10 +556,20 @@
       : node.locator;
   }
 
+  // How deep a provision sits, as the page draws it: a subsection ("(1)", "(1.1)") stands at its
+  // section's level ("3(1)" and "(2)" line up), and each paragraph, subparagraph and clause below it
+  // ("(a)", "(i)", "(A)") one level further in.
+  function provisionLevel(locator) {
+    const parsed = core.parseLocator(locator);
+    return parsed ? parsed.suffixes.filter((suffix) => !/^\d+(?:\.\d+)*$/.test(suffix)).length : 0;
+  }
+
   function quoteMarkup(model, sourceInfo, range, nodes) {
     const provision = ['section', 'rule', 'article', 'silcrow'].includes(model.structure.kind);
-    // Indent relative to the shallowest quoted unit: a lone (b)(i) is flush, its children nest.
-    const baseDepth = provision ? Math.min(...nodes.map((node) => core.provisionDepth(node.locator))) : 0;
+    const indented = provision && SETTINGS.statuteCopyIndent;
+    // Levels relative to the shallowest quoted unit: a lone (b)(i) is flush, its children nest.
+    const levels = nodes.map((node) => (provision ? provisionLevel(node.locator) : 0));
+    const baseLevel = provision ? Math.min(...levels) : 0;
     const pieces = nodes.map((node, index) => {
       const unitRange = intersectNodeUnit(model, range, node);
       if (!unitRange) return null;
@@ -567,33 +577,46 @@
       const leading = index === 0 && markerState.omitted;
       const content = quoteContent(unitRange, markerState.strip);
       const marker = quoteMarker(model.structure.kind, node);
-      const depth = provision ? core.provisionDepth(node.locator) - baseDepth : 0;
-      const lead = leading ? ' \u2026' : '';
+      const depth = levels[index] - baseLevel;
+      const lead = leading ? ' …' : '';
       const bodyPlain = content.plain ? ` ${content.plain}` : '';
       const bodyHtml = content.html ? ` ${content.html}` : '';
-      const markerHtml = anchorHtml(marker, targetForNode(model, sourceInfo, node));
-      const markerColumn = Math.max(2, Math.ceil((Array.from(marker).length + 1) * 5) / 10);
-      // A provision is a paragraph of its own with a hanging indent: its number in the margin, its text
-      // (and every wrapped line) at the indent, deeper provisions further in. Word keeps a paragraph's
-      // indent only in its paragraph mark, so this is the one copy that ends its paste on a new line;
-      // the tab after the number lines the text up on the indent in Word.
-      // Setting off (statuteCopyIndent): the inline form, which adds no break but which Word lays out flat.
-      const text = `${lead.trimStart()}${leading && bodyHtml ? ' ' : ''}${bodyHtml.trimStart()}`;
-      const provisionHtml = SETTINGS.statuteCopyIndent
-        ? `<p style="margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em">${markerHtml}<span style="mso-tab-count:1">\t</span>${text}</p>`
-        : `<span style="display:inline-block;margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em"><span style="display:inline-block;width:${markerColumn}em;text-indent:0">${markerHtml}&nbsp;</span>${text}</span>`;
+      // A section whose anchor sits on its first subsection holds no text of its own: that
+      // subsection's number ("45 (1)") already carries it.
+      if (indented && !content.plain.trim() && !leading && index + 1 < nodes.length) return null;
       return {
-        plain: `${'\t'.repeat(depth)}${marker}${lead}${bodyPlain}`,
-        html: `${'&emsp;'.repeat(depth)}${markerHtml}${lead}${bodyHtml}`,
-        provisionHtml
+        marker, depth, leading, lead, bodyPlain, bodyHtml,
+        markerHtml: anchorHtml(marker, targetForNode(model, sourceInfo, node))
       };
     }).filter(Boolean);
-    const quote = {
-      plain: pieces.map((piece) => piece.plain).join('\n'),
-      html: provision && SETTINGS.statuteCopyIndent ? pieces.map((piece) => piece.provisionHtml).join('')
-        : pieces.map((piece) => provision ? piece.provisionHtml : piece.html).join('<br>')
+
+    if (indented) {
+      // One column for the whole quote, wide enough for its widest number ("45 (1)"), so every level
+      // steps in by the same amount and a child's number stands exactly under its parent's text, as
+      // on the page. Each provision is a paragraph with a hanging indent: its number in the column, a
+      // tab, then the text, wrapped lines kept at the text. Word keeps an indent only in a paragraph's
+      // mark, so this copy ends its paste on a new line; the tab lines the text up in Word.
+      const width = (label) => Array.from(label).reduce((sum, ch) => sum + (/[\s]/.test(ch) ? 0.28 : /[().,]/.test(ch) ? 0.33 : 0.56), 0);
+      const column = Math.min(5, Math.max(2.5, Math.ceil((Math.max(...pieces.map((piece) => width(piece.marker))) + 0.9) * 4) / 4));
+      return {
+        plain: pieces.map((piece) => `${'\t'.repeat(piece.depth)}${piece.marker}\t${piece.lead.trimStart()}${piece.bodyPlain.trimStart()}`).join('\n'),
+        html: pieces.map((piece) => {
+          const text = `${piece.lead.trimStart()}${piece.leading && piece.bodyHtml ? ' ' : ''}${piece.bodyHtml.trimStart()}`;
+          return `<p style="margin:0 0 0 ${(piece.depth + 1) * column}em;text-indent:-${column}em">${piece.markerHtml}<span style="mso-tab-count:1">\t</span>${text}</p>`;
+        }).join('')
+      };
+    }
+    // Setting off (statuteCopyIndent), and every other kind of document: the inline form, which adds
+    // no break of its own.
+    return {
+      plain: pieces.map((piece) => `${'\t'.repeat(piece.depth)}${piece.marker}${piece.lead}${piece.bodyPlain}`).join('\n'),
+      html: pieces.map((piece) => {
+        if (!provision) return `${piece.markerHtml}${piece.lead}${piece.bodyHtml}`;
+        const markerColumn = Math.max(2, Math.ceil((Array.from(piece.marker).length + 1) * 5) / 10);
+        const text = `${piece.lead.trimStart()}${piece.leading && piece.bodyHtml ? ' ' : ''}${piece.bodyHtml.trimStart()}`;
+        return `<span style="display:inline-block;margin:0 0 0 ${piece.depth * 2 + markerColumn}em;text-indent:-${markerColumn}em"><span style="display:inline-block;width:${markerColumn}em;text-indent:0">${piece.markerHtml}&nbsp;</span>${text}</span>`;
+      }).join('<br>')
     };
-    return quote;
   }
 
   // A copy event, never the async clipboard first: Chrome's async write wraps the HTML in a document
