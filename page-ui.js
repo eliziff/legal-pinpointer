@@ -541,11 +541,21 @@
   }
 
   const LINKABLE = NUMBER;
-  document.addEventListener('copy', () => {
-    if (!numbersOn() || !LINKABLE || globalThis.LegalPinpointerWritingClipboard) return;
+  document.addEventListener('copy', (event) => {
+    if (globalThis.LegalPinpointerWritingClipboard) return;
     const selection = getSelection();
     if (selection.isCollapsed || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
+    // Statute text: its provisions as indented paragraphs, as the quote copy writes them (content.js).
+    const statute = fullModel && page.current(fullModel) ? page.statuteCopy?.(fullModel, range) : null;
+    if (statute) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.clipboardData.setData('text/plain', statute.plain);
+      event.clipboardData.setData('text/html', statute.html);
+      return;
+    }
+    if (!numbersOn() || !LINKABLE) return;
     const common = range.commonAncestorContainer;
     const root = common.nodeType === 1 ? common : common.parentElement;
     if (!root || root.closest('[data-lp-ui]')) return;

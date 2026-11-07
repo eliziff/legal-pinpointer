@@ -35,7 +35,8 @@
 
   // Settings are read once and kept current, so no copy waits on a storage round trip.
   const SETTINGS = {
-    pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true
+    pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
+    statuteCopyIndent: true
   };
   const settingsReady = new Promise((resolve) => chrome.storage.local.get(SETTINGS, (stored) => {
     Object.assign(SETTINGS, stored);
@@ -570,7 +571,15 @@
       const bodyHtml = content.html ? ` ${content.html}` : '';
       const markerHtml = anchorHtml(marker, targetForNode(model, sourceInfo, node));
       const markerColumn = Math.max(2, Math.ceil((Array.from(marker).length + 1) * 5) / 10);
-      const provisionHtml = `<span style="display:inline-block;margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em"><span style="display:inline-block;width:${markerColumn}em;text-indent:0">${markerHtml}&nbsp;</span>${lead.trimStart()}${leading && bodyHtml ? ' ' : ''}${bodyHtml.trimStart()}</span>`;
+      // A provision is a paragraph of its own with a hanging indent: its number in the margin, its text
+      // (and every wrapped line) at the indent, deeper provisions further in. Word keeps a paragraph's
+      // indent only in its paragraph mark, so this is the one copy that ends its paste on a new line;
+      // the tab after the number lines the text up on the indent in Word.
+      // Setting off (statuteCopyIndent): the inline form, which adds no break but which Word lays out flat.
+      const text = `${lead.trimStart()}${leading && bodyHtml ? ' ' : ''}${bodyHtml.trimStart()}`;
+      const provisionHtml = SETTINGS.statuteCopyIndent
+        ? `<p style="margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em">${markerHtml}<span style="mso-tab-count:1">\t</span>${text}</p>`
+        : `<span style="display:inline-block;margin:0 0 0 ${depth * 2 + markerColumn}em;text-indent:-${markerColumn}em"><span style="display:inline-block;width:${markerColumn}em;text-indent:0">${markerHtml}&nbsp;</span>${text}</span>`;
       return {
         plain: `${'\t'.repeat(depth)}${marker}${lead}${bodyPlain}`,
         html: `${'&emsp;'.repeat(depth)}${markerHtml}${lead}${bodyHtml}`,
@@ -579,7 +588,8 @@
     }).filter(Boolean);
     const quote = {
       plain: pieces.map((piece) => piece.plain).join('\n'),
-      html: pieces.map((piece) => provision ? piece.provisionHtml : piece.html).join('<br>')
+      html: provision && SETTINGS.statuteCopyIndent ? pieces.map((piece) => piece.provisionHtml).join('')
+        : pieces.map((piece) => provision ? piece.provisionHtml : piece.html).join('<br>')
     };
     return quote;
   }
@@ -933,6 +943,22 @@
     return copyRange(model, range, mode, node);
   }
 
+  /** A reader's own copy (Ctrl+C) of statute text, as the quote copy writes it: each provision it
+   *  takes in as an indented paragraph, its number linked. Null (the browser's own copy) when the
+   *  setting is off, the page has no provisions, the model is stale, or the selection starts no
+   *  provision: a few words copied from inside one provision stay plain text. */
+  function statuteCopy(model, range) {
+    if (!SETTINGS.statuteCopyIndent || !model?.structure?.nodes?.length || !range || range.collapsed) return null;
+    if (!['section', 'rule', 'article', 'silcrow'].includes(model.structure.kind)) return null;
+    if (ownOverlay(range.startContainer) || ownOverlay(range.endContainer)) return null;
+    try { assertCurrentModel(model); } catch (_) { return null; }
+    if (!model.root.contains(range.commonAncestorContainer)) return null;
+    const nodes = nodesForRange(model, range, true);
+    if (!nodes.length || !nodes.some((node) => node.element?.isConnected && range.isPointInRange(node.element, 0))) return null;
+    const quote = quoteMarkup(model, { kind: 'selection', range, url: '' }, range, nodes);
+    return quote.plain ? quote : null;
+  }
+
   async function copyPayload(payload, message) {
     await clipboardWrite(payload);
     rememberedFragment = null;
@@ -948,6 +974,7 @@
     unitAt: (model, target) => nodeForTarget(model, target),
     /** Where a pinpoint to this node links (its CanLII paragraph or provision where there is one). */
     linkFor: (model, node) => targetForNode(model, { kind: 'node' }, node),
+    statuteCopy,
     onInvalidate: (listener) => invalidationListeners.add(listener),
     copyUnit,
     copyControl,

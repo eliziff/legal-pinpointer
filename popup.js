@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
   const SETTINGS = {
     pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true,
-    unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
+    unitCopyButtons: true, unitCopyStyle: 'numbers', statuteCopyIndent: true, canliiCitedBy: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
     sonarWakeTabs: true, providerHeader: true, caseMarker: true, markerMultipleFolders: false, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
   const MARKER = { canliiFolders: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
