@@ -48,6 +48,17 @@
     },
     {
       "matches": [
+        "https://www.canlii.org/*",
+        "https://canlii.org/*"
+      ],
+      "js": [
+        "canlii-suggest.js"
+      ],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
         "https://www.canlii.org/*/doc/*",
         "https://www.canlii.org/*/laws/*",
         "https://canlii.org/*/doc/*",

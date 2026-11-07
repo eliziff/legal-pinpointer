@@ -44,11 +44,11 @@
   // Routed by early.js before any page listener sees the press.
   actions?.set('unit', (button) => {
     const control = button.parentElement;
-    if (control?.lpElement) run(page.copyControl(control.lpElement, control.lpLocator, button.dataset.mode), button);
+    if (control?.lpElement) run(page.copyControl(control.lpElement, control.lpLocator, button.dataset.mode), null);
   });
   actions?.set('citedby', (button) => {
     const control = button.parentElement;
-    if (control?.lpElement) run(openCitedBy(control.lpElement), button);
+    if (control?.lpTools) run(openCitedBy(control.lpTools), button);
   });
   actions?.set('citation', (button) => run(page.copyCitation(), button));
   actions?.set('canlii', (link) => {
@@ -120,15 +120,26 @@
 
   // CanLII's paragraph tools: the menu its pen icon opens holds the paragraph's Cited by (the decisions citing it),
   // and the icon carries how many there are. With canliiCitedBy, that is a third button in the paragraph's group
-  // (the icon itself is not drawn: html.lp-cited-by, content.css), opening CanLII's own Cited by link in a new tab.
+  // (the icon itself is not drawn unless html.lp-no-cited-by, content.css), opening CanLII's own Cited by link in a new tab.
   const citedBy = () => provider === 'canlii' && settings.canliiCitedBy && settings.unitCopyButtons;
+  // A judgment's paragraph sits in its wrapper with the tools; a statute's provision anchors come
+  // before its section's wrapper (and marginal note), so a section's tools are found by the section
+  // number CanLII gives them (data-with-parag), read once per page into a map, for its first unit.
+  const TOOLS = ':scope > .viibes-marker-toolbox [data-bs-toggle="dropdown"]';
   function canliiTools(element) {
-    return element.closest?.('.paragWrapper')?.querySelector(':scope > .viibes-marker-toolbox [data-bs-toggle="dropdown"]') || null;
+    return element.closest?.('.paragWrapper')?.querySelector(TOOLS) || null;
   }
-  function citedCount(element) {
-    const count = Number(canliiTools(element)?.dataset.noteupCount || 0);
-    return count > 0 ? count : 0;
+  let toolsCache = null;
+  function sectionTools() {
+    if (toolsCache && [...toolsCache.values()].slice(0, 3).every((trigger) => trigger.isConnected)) return toolsCache;
+    const map = toolsCache = new Map();
+    for (const box of document.querySelectorAll('.viibes-marker-toolbox[data-with-parag]')) {
+      const trigger = box.querySelector('[data-bs-toggle="dropdown"]');
+      if (trigger && !map.has(box.dataset.withParag)) map.set(box.dataset.withParag, trigger);
+    }
+    return map;
   }
+  const citedCount = (trigger) => Math.max(0, Number(trigger?.dataset.noteupCount || 0));
   function setCited(node, count) {
     let button = node.querySelector(':scope > .lp-unit-cited');
     if (!count) { button?.remove(); return; }
@@ -141,7 +152,7 @@
       }
       button = node.appendChild(citedTemplate.cloneNode());
     }
-    const shown = canliiTools(node.lpElement)?.dataset.noteupCountDisplay || String(count);
+    const shown = node.lpTools?.dataset.noteupCountDisplay || String(count);
     button.dataset.count = shown;
     const label = `Cited by ${shown} (CanLII, in a new tab)`;
     button.dataset.tip = label;
@@ -149,8 +160,7 @@
   }
   // CanLII fills a paragraph's menu with its links when the menu opens; the Cited by link is taken from there, so it
   // is CanLII's own address, whatever form CanLII gives it.
-  async function openCitedBy(element) {
-    const trigger = canliiTools(element);
+  async function openCitedBy(trigger) {
     const menu = trigger?.parentElement.querySelector('.dropdown-menu');
     if (!menu) throw new Error('CanLII lists no Cited by for this paragraph.');
     const find = () => Array.from(menu.querySelectorAll('a[href]'))
@@ -200,13 +210,24 @@
   function syncUnits() {
     view.syncFrame = 0;
     if (!settings.unitCopyButtons) return;
+    wrapWestlawNumbers();
     let found;
     try { found = providers.quickUnits(document, location); } catch (_) { return; }
-    const units = [], seen = new Set(), cited = citedBy();
+    const units = [], seen = new Set(), cited = citedBy(), stated = provider === 'canlii' ? numberedLocators() : null;
+    const bySection = cited ? sectionTools() : null, sectionsUsed = new Set();
     for (const unit of found) {
       if (!unit.element?.isConnected || seen.has(unit.element)) continue; // two units on one element: the first keeps it
       seen.add(unit.element);
-      units.push({ ...unit, cited: cited ? citedCount(unit.element) : 0, numbered: numbersOn() && Boolean(numberIn(unit.element)) });
+      let tools = cited ? canliiTools(unit.element) : null;
+      if (cited && !tools && unit.kind !== 'paragraph') {
+        const section = String(unit.locator).split('(')[0];
+        if (!sectionsUsed.has(section)) { sectionsUsed.add(section); tools = bySection.get(section) || null; }
+      }
+      const label = stated?.get(unit.locator) || null;
+      const record = { ...unit, tools, label, cited: citedCount(tools), numbered: numbersOn() && Boolean(label || numberIn(unit.element)) };
+      // Only units with something in the margin are kept and measured: with the numbers as the
+      // controls, that is the cited ones and the odd unnumbered one, not every provision.
+      if (unitButtons(record)) units.push(record);
     }
     const same = units.length === view.units.length
       && units.every((unit, i) => unit.element === view.units[i].element && unit.cited === view.units[i].cited && unit.numbered === view.units[i].numbered);
@@ -241,7 +262,8 @@
     for (let i = 0; i < count; i += 1) {
       // Hidden (a collapsed section) has no place; an empty anchor (CanLII's <a name>) has a
       // zero-size box, but its position is the provision's.
-      const element = units[i].element;
+      const anchor = units[i].element, label = units[i].label?.isConnected ? units[i].label : null;
+      const element = label && (label.checkVisibility ? label.checkVisibility() : label.getClientRects().length) ? label : anchor;
       if (element.checkVisibility ? !element.checkVisibility() : !element.getClientRects().length) continue;
       const rect = element.getBoundingClientRect();
       ys[i] = rect.top - origin.top;
@@ -277,14 +299,19 @@
     const clear = (x) => {
       // A provider's fixed panel over the margin (Westlaw's right rail) covers the spot.
       const hit = document.elementFromPoint(x + origin.left + SIZE / 2, Math.min(innerHeight - 10, Math.max(10, innerHeight / 2)));
-      return !hit || hit === document.documentElement || hit === document.body || hit.closest('[data-lp-ui]')
-        || !['fixed', 'sticky'].includes(getComputedStyle(hit.closest('*:not(span):not(a):not(i):not(img)') || hit).position);
+      if (!hit || hit === document.documentElement || hit === document.body || hit.closest('[data-lp-ui]')) return true;
+      const box = hit.closest('*:not(span):not(a):not(i):not(img)') || hit;
+      if (!['fixed', 'sticky'].includes(getComputedStyle(box).position)) return true;
+      const area = box.getBoundingClientRect();
+      return area.width >= innerWidth * 0.9 && area.height >= innerHeight * 0.9;
     };
     // Controls stay in the margin, never over the text: a margin needs room for one button's width, and a page whose
     // text leaves no such room on either side shows none (the hotkeys still copy).
+    const MARGIN = provider === 'canlii' ? 16 : 12;
     let column, side = 'right';
     if (tools.length) column = median(tools.map((tool) => tool.center)) - SIZE / 2;
-    else if (colRight + 12 + SIZE <= clipRight && clear(colRight + 12)) column = colRight + 12;
+    // CanLII draws its citation-weight bar just right of the text: the controls keep clear of it.
+    else if (colRight + MARGIN + SIZE <= clipRight && clear(colRight + MARGIN)) column = colRight + MARGIN;
     else if (colLeft - 12 - SIZE >= clipLeft) { column = colLeft - 12 - SIZE; side = 'left'; }
     else {
       // Controls placed while there was a margin (before the window narrowed) come down too.
@@ -383,6 +410,7 @@
       node.classList.remove('hot');
       node.lpElement = unit.element;
       node.lpLocator = unit.locator;
+      node.lpTools = unit.tools;
       const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[unit.kind] || unit.kind} ${unit.locator}`;
       node.firstChild.dataset.tip = label;
       node.firstChild.setAttribute('aria-label', label);
@@ -424,86 +452,103 @@
   // ---------------------------------------------------------------------------
   // Paragraph and provision numbers as the copy control (Settings: "Copy from paragraph numbers",
   // the default): a click on a number copies its pinpoint, and a reader's own copy of a selection
-  // links every whole number inside it to its paragraph or provision, so a quote carries its links
-  // natively. Nothing is written to the page ahead of time: the pointer cursor is static CSS
-  // (content.css, under html.lp-numbers), clicks are one capture listener, and links exist only
-  // for the moment the browser serializes a copy (added in the copy event, removed right after).
-  // Westlaw's numbers are text at the start of the paragraph, found from the caret under the pointer.
-  const NUMBER = provider === 'canlii' ? '.lp-num, a.reflex-paragAnchor[name]:not(.lp-num *), .SectionNumber, .canlii_section_with_subsection'
+  // links every whole number inside it to its paragraph or provision, so a quote carries its links.
+  //
+  // The numbers are the provider's own elements, drawn as buttons by the stylesheet from the first
+  // paint (content.css), so nothing is written to the page and nothing changes once it is in:
+  // CanLII's statute labels (canlii_section "45", canlii_section_with_subsection and
+  // canlii_subsection "(1)" with section and subsection attributes, federal sectionLabel and
+  // lawlabel "(a)") and a judgment's paragraph anchor (the "5" of "[5]"), and Lexis's PARA_ spans.
+  // Westlaw alone writes a number as plain text at the start of its paragraph: that number is put in
+  // a span of its own (span.lp-num) just before its paragraph's controls are placed.
+  const NUMBER = provider === 'canlii'
+    ? 'a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel'
     : provider === 'lexis' ? '[id^="PARA_"]' : '.lp-num';
-
-  // Westlaw writes a paragraph's number as the first text of the paragraph: it is wrapped once in a
-  // span of its own (in idle time, a few hundred paragraphs at a time, before the page's model is
-  // read), so it can be drawn and clicked like the other providers' numbers. Text and layout are
-  // unchanged.
-  function wrapCanliiNumbers() {
-    const anchors = [...document.querySelectorAll('a.reflex-paragAnchor[name]:not(.lp-num *)')];
-    const step = (deadline) => {
-      while (anchors.length && (!deadline || deadline.timeRemaining() > 2)) {
-        const anchor = anchors.shift(), before = anchor.previousSibling, after = anchor.nextSibling;
-        if (before?.nodeType !== 3 || after?.nodeType !== 3 || !/\[\s*$/.test(before.data) || !/^\s*\]/.test(after.data)) continue;
-        const open = before.splitText(before.data.lastIndexOf('['));
-        after.splitText(after.data.indexOf(']') + 1);
-        const span = document.createElement('span');
-        span.className = 'lp-num';
-        anchor.before(span);
-        span.append(open, anchor, after);
-      }
-      if (anchors.length) idle(step, 200);
-      else fullModel = null;
-    };
-    step(null);
-  }
+  const numbersOn = () => settings.unitCopyButtons && settings.unitCopyStyle !== 'buttons';
+  const LABELS = '.canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel';
+  const SECTION_LABEL = '.canlii_section, span.sectionLabel, .SectionNumber';
 
   function wrapWestlawNumbers() {
-    if (provider === 'canlii' && numbersOn()) return wrapCanliiNumbers();
     if (provider !== 'westlaw' || !numbersOn()) return;
-    const paragraphs = [...document.querySelectorAll('.crsw_labeledParagraph .co_paragraphText:not([data-lp-num])')];
-    const step = (deadline) => {
-      while (paragraphs.length && (!deadline || deadline.timeRemaining() > 2)) {
-        const text = paragraphs.shift();
-        text.setAttribute('data-lp-num', '');
-        const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
-        let first = walker.nextNode();
-        while (first && !first.data.trim()) first = walker.nextNode();
-        const match = first?.data.match(/^(\s*)(\d+[.)]?)/);
-        if (!match) continue;
-        const number = first.splitText(match[1].length);
-        number.splitText(match[2].length);
-        const span = document.createElement('span');
-        span.className = 'lp-num';
-        number.replaceWith(span);
-        span.appendChild(number);
-      }
-      if (paragraphs.length) idle(step, 200);
-      else fullModel = null; // the page model is read again with the numbers in place
-    };
-    step(null);
+    for (const text of document.querySelectorAll('.crsw_labeledParagraph .co_paragraphText:not([data-lp-num])')) {
+      text.setAttribute('data-lp-num', '');
+      const walker = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
+      let first = walker.nextNode();
+      while (first && !first.data.trim()) first = walker.nextNode();
+      const match = first?.data.match(/^(\s*)(\d+[.)]?)/);
+      if (!match) continue;
+      const number = first.splitText(match[1].length);
+      number.splitText(match[2].length);
+      const span = document.createElement('span');
+      span.className = 'lp-num';
+      number.replaceWith(span);
+      span.appendChild(number);
+    }
   }
-  const numbersOn = () => settings.unitCopyButtons && settings.unitCopyStyle !== 'buttons';
-  /** A unit's clickable number: in its element, or (a statute's section number) in its block. */
+
+  /** The locator a number's own markup states (CanLII statutes), or ''. */
+  function statedLocator(number) {
+    const label = number.matches('[section]') ? number : number.querySelector('[section][subsection]:not([subsection="null"])') || number.querySelector('[section]');
+    if (label) {
+      const section = label.getAttribute('section'), subsection = label.getAttribute('subsection');
+      return subsection && subsection !== 'null' ? `${section}(${subsection})` : section;
+    }
+    const text = number.textContent.replace(/\s+/g, '');
+    return provider === 'canlii' && number.matches(SECTION_LABEL) ? text : '';
+  }
+  /** A statute's numbers by the locator they state (one pass): which units have a number of their
+   *  own (no margin pinpoint button) and where it is (the unit's controls sit on its line). */
+  let numberedCache = null;
+  function numberedLocators() {
+    if (numberedCache && [...numberedCache.values()].slice(0, 3).every((label) => label.isConnected)) return numberedCache;
+    const found = numberedCache = new Map();
+    if (provider !== 'canlii') return found;
+    // Sections and subsections only: a paragraph's "(a)" (lawlabel, the bulk of a big Act's labels) decides nothing here.
+    for (const label of document.querySelectorAll('[section], span.sectionLabel, .SectionNumber')) {
+      const section = label.getAttribute('section'), subsection = label.getAttribute('subsection');
+      const locator = section ? (subsection && subsection !== 'null' ? `${section}(${subsection})` : section)
+        : label.matches(SECTION_LABEL) ? label.textContent.replace(/\s+/g, '') : '';
+      if (locator && !found.has(locator)) found.set(locator, label);
+    }
+    return found;
+  }
+  /** A unit's clickable number, in its element (judgments, Lexis, Westlaw). */
   function numberIn(element) {
     if (!element) return null;
-    if (element.matches?.(NUMBER)) return element;
-    return element.querySelector?.(NUMBER) || element.closest?.('p, li, div')?.querySelector(NUMBER) || null;
+    return element.matches?.(NUMBER) ? element : element.querySelector?.(NUMBER) || null;
   }
   const cleanHere = () => `${location.origin}${location.pathname}`;
 
   function numberAt(event) {
     return numbersOn() ? event.target.closest?.(NUMBER) || null : null;
   }
-  /** The element the page's model knows the unit by: a statute's section number comes before its anchor. */
-  function numberTarget(number) {
-    if (number.classList.contains('SectionNumber')) {
-      const block = number.closest('p, div, li') || number.parentElement;
-      const label = number.textContent.replace(/\s+/g, '');
-      return block.querySelector(`a[name="sec${CSS.escape(label)}"]`) || block.querySelector('a[name^="sec"]') || number;
-    }
-    return number;
-  }
 
-  /** The unit a number stands for (a section number that opens with its first subsection is that subsection). */
-  const unitFor = (model, number) => page.unitAt(model, numberTarget(number));
+  /** The unit a number stands for: the locator its markup states (a statute's "45 (1)" is s 45(1),
+   *  "(a)" the paragraph after its subsection), else the unit it sits in. */
+  const locatorTables = new WeakMap();
+  function unitFor(model, number) {
+    const nodes = model.structure?.nodes || [];
+    const stated = statedLocator(number);
+    if (stated) {
+      // One table per model, so linking a long selection's numbers is not a search per number.
+      let byLocator = locatorTables.get(model);
+      if (!byLocator) {
+        locatorTables.set(model, byLocator = new Map());
+        for (const candidate of nodes) if (candidate.element?.isConnected && !byLocator.has(candidate.locator)) byLocator.set(candidate.locator, candidate);
+      }
+      const node = byLocator.get(stated);
+      if (node) return node;
+    }
+    const inside = page.unitAt(model, number);
+    const own = number.textContent.replace(/\s+/g, '').match(/^\(([^()]+)\)$/);
+    if (inside && own) {
+      // A paragraph label: the first unit after the one it sits in whose locator ends in it.
+      const start = nodes.indexOf(inside);
+      const child = nodes.slice(start).find((candidate) => candidate.locator.endsWith(`(${own[1]})`) && candidate.locator.startsWith(inside.locator.split('(')[0]));
+      if (child) return child;
+    }
+    return inside;
+  }
 
   document.addEventListener('click', (event) => {
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -512,32 +557,30 @@
     if (!number || !getSelection().isCollapsed) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    run(page.model(false).then((model) => {
+    run(page.model(false).then(async (model) => {
       fullModel = model;
-      const node = unitFor(model, number);
-      if (!node) throw new Error('This passage is no longer on the page.');
-      return page.copyUnit(model, node, 'pinpoint');
-    }).then(() => {
-      number.classList.add('lp-number-done');
-      setTimeout(() => number.classList.remove('lp-number-done'), 900);
+      // The unit the number states first; where that unit holds no text of its own (a statute's s 45
+      // and s 45(1) anchors sit at one spot), the unit the number sits in, which copies as s 45(1).
+      const candidates = [unitFor(model, number), page.unitAt(model, number)].filter((node, i, all) => node && all.indexOf(node) === i);
+      if (!candidates.length) throw new Error('This passage is no longer on the page.');
+      for (const [i, node] of candidates.entries()) {
+        try { return await page.copyUnit(model, node, 'pinpoint'); } catch (error) { if (i === candidates.length - 1) throw error; }
+      }
     }), null);
   }, true);
 
   // Where a number links: its unit's pinpoint target from the page's model; on CanLII, before the
   // model is built, the document's own anchor.
   function numberUrl(number) {
-    const target = numberTarget(number);
     if (fullModel && page.current(fullModel)) {
       const node = unitFor(fullModel, number);
       if (node) { try { return page.linkFor(fullModel, node); } catch (_) { /* fall through */ } }
     }
     if (provider !== 'canlii') return '';
-    if (target.classList?.contains('lp-num') && target.querySelector('a[name]')) return `${cleanHere()}#${encodeURIComponent(target.querySelector('a[name]').getAttribute('name'))}`;
-    const section = target.getAttribute?.('section'), subsection = target.getAttribute?.('subsection');
-    const own = section && subsection && subsection !== 'null' ? `sec${section}subsec${subsection}` : '';
-    const anchor = (own && document.getElementsByName(own).length ? own : '') || target.getAttribute?.('name')
-      || target.previousElementSibling?.getAttribute?.('name') || '';
-    return anchor ? `${cleanHere()}#${encodeURIComponent(anchor)}` : '';
+    const stated = statedLocator(number);
+    const anchor = number.querySelector?.('a[name]')?.getAttribute('name')
+      || (stated ? `sec${stated.replace(/\((.+?)\)/, 'subsec$1')}` : '');
+    return anchor && document.getElementsByName(anchor).length ? `${cleanHere()}#${encodeURIComponent(anchor)}` : '';
   }
 
   const LINKABLE = NUMBER;
@@ -564,7 +607,7 @@
     for (const number of root.querySelectorAll(LINKABLE)) {
       // Only numbers wholly inside the selection; a boundary inside one stays as it is.
       if (!range.intersectsNode(number) || number.contains(range.startContainer) || number.contains(range.endContainer)) continue;
-      if (number.closest('a[href]') || number.querySelector('a[href]')) continue;
+      if (number.closest('a[href]') || number.querySelector('a[href]') || number.querySelector(NUMBER)) continue; // a label holding a label: the inner one
       const url = numberUrl(number);
       if (url) links.push([number, url]);
       if (links.length >= 5000) break;
@@ -584,8 +627,9 @@
     });
     // The numbers' button look is the page's, not the text's: off while the browser copies the
     // selection's styles, so a paste shows the numbers as the page's own text (linked).
-    document.documentElement.classList.remove('lp-numbers');
-    undo.push(() => document.documentElement.classList.toggle('lp-numbers', numbersOn()));
+    // Only the copied region is restyled (a class on its common ancestor), never the whole page.
+    root.classList.add('lp-copying');
+    undo.push(() => root.classList.remove('lp-copying'));
     // The browser serializes the selection after this event; the page is back as it was before it paints.
     setTimeout(() => { for (const restore of undo) restore(); }, 0);
   }, true);
@@ -634,7 +678,7 @@
       if (view.syncTimer || !settings.unitCopyButtons) return;
       for (const record of records) {
         for (const node of record.addedNodes) {
-          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui') || !(node.matches(ANCHORS) || node.querySelector(ANCHORS))) continue;
+          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui') || node.classList.contains('lp-num') || !(node.matches(ANCHORS) || node.querySelector(ANCHORS))) continue;
           view.syncTimer = setTimeout(() => { view.syncTimer = 0; queueSync(); }, view.units.length ? 250 : 0);
           return;
         }
@@ -1003,17 +1047,16 @@
   let applying = 0;
   async function apply() {
     const ticket = ++applying;
-    document.documentElement.classList.toggle('lp-numbers', numbersOn());
+    document.documentElement.classList.toggle('lp-no-numbers', !numbersOn());
     if (settings.unitCopyButtons) {
       // A changed style redraws every control from its own template.
       if (view.style !== settings.unitCopyStyle) { removeUnits(); view.style = settings.unitCopyStyle; }
-      wrapWestlawNumbers();
       queueSync();
       watchUnits();
     } else removeUnits();
     if (provider === 'canlii') {
       document.documentElement.classList.toggle('lp-no-canlii-name', !settings.canliiHeader);
-      document.documentElement.classList.toggle('lp-cited-by', citedBy());
+      document.documentElement.classList.toggle('lp-no-cited-by', !citedBy());
       if (settings.canliiHeader) mountCrumb(); else unmountCrumb();
     } else {
       document.documentElement.classList.toggle('lp-raw-titles', !settings.cleanTitles);

@@ -489,8 +489,13 @@
     query = $('query').value; if (!event.isComposing) schedule();
   });
   $('query').addEventListener('compositionend', () => { if (route === 'tabs') { query = $('query').value; schedule(); } });
-  $('search-form').addEventListener('submit', event => { event.preventDefault(); if (route === 'canlii') externalSearch();
-    else if (refreshPending || result?.stale || !result) schedule(0, true); else focusFirst(); });
+  // Enter searches. The form has three text boxes and no submit button, so a browser never submits
+  // it on Enter by itself: every box's Enter comes here (keydown below), as does any other submit.
+  function submitSearch() {
+    if (route === 'canlii') externalSearch();
+    else if (refreshPending || result?.stale || !result) schedule(0, true); else focusFirst();
+  }
+  $('search-form').addEventListener('submit', event => { event.preventDefault(); submitSearch(); });
   $('scope').onclick = event => {
     const next = event.target.closest('[data-scope]')?.dataset.scope;
     if (next && next !== scope) { scope = next; labels(); schedule(0); }
@@ -527,8 +532,8 @@
   $('issues').onclick = () => $('issue-popover').showPopover();
   document.addEventListener('keydown', event => {
     if (event.isComposing) return;
-    if (event.key === 'Enter' && route === 'canlii' && document.activeElement?.closest('#canlii-fields')) {
-      event.preventDefault(); externalSearch();
+    if (event.key === 'Enter' && (document.activeElement === $('query') || (route === 'canlii' && document.activeElement?.closest('#canlii-fields')))) {
+      event.preventDefault(); submitSearch();
     } else if (event.key === 'Escape') {
       if (document.querySelector(':popover-open')) return; // Escape closes the popover first.
       event.preventDefault(); close();

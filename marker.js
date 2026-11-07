@@ -193,7 +193,7 @@
         }, { type: result.getAttribute('data-lbh-type') || '' });
       }
     }
-    watchPanel();
+    if (document.readyState !== 'loading') watchPanel(); // never while the page is parsed
     const key = docKey(location.href);
     const title = isDocument(key) && document.querySelector('#title-container h1.main-title, h1.main-title');
     if (title && !seen.has(title)) {
@@ -205,28 +205,41 @@
   }
 
   // CanLII's side panels on a document page (Treatment, i.e. who cites it, Cited documents,
-  // History): each document link gets a small circle as the panel loads its list. Only the panel is
-  // watched, from the moment it is parsed; the document's own text is never scanned.
-  let panelObserver = null;
-  function scanPanel(panel) {
+  // History): each document link gets a small circle, but only while the panel is open (CanLII's
+  // cs-open) and never for a link back to this document. Nothing is watched while the page is
+  // parsed (a watcher on the panel's contents then slowed the parsing of a long statute by most of a
+  // second): from DOMContentLoaded only the panel's class is watched, and its contents only while
+  // it is open.
+  let panelObserver = null, contentObserver = null;
+  function scanPanel(panel, here) {
     if (!state.enabled) return;
     for (const link of panel.querySelectorAll('a[href]')) {
       if (seen.has(link) || link.closest('.lpm-wrap')) continue;
       seen.add(link);
       const key = docKey(link.href);
-      if (!/^https:\/\/(?:www\.)?canlii\.org\//.test(link.href) || !isDocument(key)) continue;
+      if (key === here || !/^https:\/\/(?:www\.)?canlii\.org\//.test(link.href) || !isDocument(key)) continue;
       const label = clean(link.textContent);
       if (!label) continue;
       attach(key, label, (wrap) => { wrap.classList.add('lpm-inline'); link.before(wrap); });
     }
   }
   function watchPanel() {
-    if (panelObserver || !isDocument(docKey(location.href))) return;
+    const here = docKey(location.href);
+    if (panelObserver || !isDocument(here)) return;
     const panel = document.querySelector('.canlii-sidebar');
     if (!panel) return;
-    scanPanel(panel);
-    panelObserver = new MutationObserver(() => scanPanel(panel));
-    panelObserver.observe(panel, { childList: true, subtree: true });
+    const opened = () => {
+      if (panel.classList.contains('cs-open')) {
+        scanPanel(panel, here);
+        if (!contentObserver) {
+          contentObserver = new MutationObserver(() => scanPanel(panel, here));
+          contentObserver.observe(panel, { childList: true, subtree: true });
+        }
+      } else if (contentObserver) { contentObserver.disconnect(); contentObserver = null; }
+    };
+    panelObserver = new MutationObserver(opened);
+    panelObserver.observe(panel, { attributes: true, attributeFilter: ['class'] });
+    opened();
   }
 
   // A court's Lexum/Decisia decision page: the circle starts on the page's own identity and moves to
@@ -294,7 +307,8 @@
 
   function removeAll() {
     panelObserver?.disconnect();
-    panelObserver = null;
+    contentObserver?.disconnect();
+    panelObserver = contentObserver = null;
     for (const set of wraps.values()) for (const wrap of set) wrap.remove();
     wraps.clear();
     seen = new WeakSet();
