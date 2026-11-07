@@ -572,8 +572,12 @@
       number.appendChild(link);
       return () => { while (link.firstChild) number.insertBefore(link.firstChild, link); link.remove(); };
     });
+    // The numbers' button look is the page's, not the text's: off while the browser copies the
+    // selection's styles, so a paste shows the numbers as the page's own text (linked).
+    document.documentElement.classList.remove('lp-numbers');
+    undo.push(() => document.documentElement.classList.toggle('lp-numbers', numbersOn()));
     // The browser serializes the selection after this event; the page is back as it was before it paints.
-    if (undo.length) setTimeout(() => { for (const restore of undo) restore(); }, 0);
+    setTimeout(() => { for (const restore of undo) restore(); }, 0);
   }, true);
 
   // One tooltip for every control, shown after a short hover.
