@@ -61,7 +61,8 @@
   all: initial !important;
   display: flex !important;
   flex-direction: column !important;
-  width: 20px !important;
+  align-items: flex-start !important;
+  width: max-content !important;
   gap: 1px !important;
   user-select: none !important;
   -webkit-user-select: none !important;
@@ -88,8 +89,7 @@
   box-shadow: 0 1px 3px rgb(0 0 0 / 16%) !important;
 }
 
-/* The margin's buttons, in the look of Pinpointer's other page tools (the title tools, the citation
-   bar): white, a hairline border, ink, a soft red on hover. No fill at rest, no shadow, and nothing
+/* The margin's controls: quiet type, no border or fill at rest, a soft red wash on hover. Nothing
    changes size or shape on a copy: the toast says it was copied. */
 .lp-unit > button {
   all: initial !important;
@@ -97,29 +97,31 @@
   flex: none !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 3px !important;
   box-sizing: border-box !important;
   min-width: 20px !important;
   height: 20px !important;
   padding: 0 5px !important;
-  border: 1px solid #e5e7eb !important;
-  border-radius: 6px !important;
-  background: #ffffff !important;
-  color: #4b5563 !important;
+  border-radius: 5px !important;
+  color: #9ca3af !important;
   cursor: pointer !important;
-  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  font: 500 11px/1 system-ui, -apple-system, "Segoe UI", sans-serif !important;
   font-variant-numeric: tabular-nums !important;
+  letter-spacing: 0.01em !important;
   white-space: nowrap !important;
+  transition: background-color 120ms, color 120ms !important;
+}
+
+.lp-unit.hot > button {
+  color: #6b7280 !important;
 }
 
 .lp-unit > button:hover {
-  border-color: #f3b4ae !important;
-  background: #fff1f0 !important;
+  background: rgb(213 43 30 / 8%) !important;
   color: #b72016 !important;
 }
 
 .lp-unit > button:focus-visible {
-  outline: 2px solid #d52b1e !important;
+  outline: 2px solid rgb(213 43 30 / 45%) !important;
   outline-offset: 1px !important;
 }
 
@@ -146,29 +148,17 @@
   font: 600 15px/1 Georgia, "Times New Roman", serif !important;
 }
 
-/* CanLII's Cited by (the decisions citing this paragraph): a red quote mark and the count; the
-   tooltip says "Cited by". */
+/* CanLII's citing documents for a paragraph: the count alone, in small grey figures on the
+   paragraph's first line (the tooltip names it); red on hover, like the numbers. */
 .lp-unit > .lp-unit-cited {
-  border-color: transparent !important;
-  background: transparent !important;
-  color: #374151 !important;
-}
-
-.lp-unit > .lp-unit-cited:hover {
-  border-color: #f3b4ae !important;
-  background: #fff1f0 !important;
-  color: #b72016 !important;
-}
-
-.lp-unit > .lp-unit-cited::before {
-  content: "" !important;
-  display: inline-block !important;
-  flex: none !important;
-  width: 10px !important;
-  height: 10px !important;
-  background: #d52b1e !important;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Cpath d='M4 11.5C4 7.9 6.4 5.3 9.8 4.6l.6 1.5C8.6 6.8 7.6 8.2 7.5 10H10v7H4z'/%3E%3Cpath d='M13.5 11.5c0-3.6 2.4-6.2 5.8-6.9l.6 1.5c-1.8.7-2.8 2.1-2.9 3.9h2.5v7h-6z'/%3E%3C/svg%3E") center / contain no-repeat !important;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Cpath d='M4 11.5C4 7.9 6.4 5.3 9.8 4.6l.6 1.5C8.6 6.8 7.6 8.2 7.5 10H10v7H4z'/%3E%3Cpath d='M13.5 11.5c0-3.6 2.4-6.2 5.8-6.9l.6 1.5c-1.8.7-2.8 2.1-2.9 3.9h2.5v7h-6z'/%3E%3C/svg%3E") center / contain no-repeat !important;
+  min-width: 0 !important;
+  height: auto !important;
+  padding: 2px 4px !important;
+  margin-top: 2px !important;
+  border-radius: 4px !important;
+  color: #8b929c !important;
+  font-size: 11.5px !important;
+  font-weight: 500 !important;
 }
 
 .lp-unit > .lp-unit-cited::after {
@@ -180,54 +170,63 @@ html:not(.lp-no-cited-by) .viibes-marker-toolbox {
 }
 
 /* Paragraph and provision numbers as the copy control (page-ui.js): the providers' own number
-   elements, drawn from the first paint as soft tags (a light translucent tint, red on hover). The tag
-   reaches past the number by padding that a negative margin cancels, so no text moves (the line lays
-   out exactly as without the extension) and nothing is added to the page. A judgment's "[5]" has its
-   brackets outside the anchor: the anchor's tag reaches over them, and being translucent, shows them.
-   Background only, the cheapest thing to paint on thousands of numbers. html.lp-no-numbers turns it off. */
-html:not(.lp-no-numbers) a.reflex-paragAnchor[name],
-html:not(.lp-no-numbers) .canlii_section_with_subsection,
-html:not(.lp-no-numbers) .canlii_subsection,
-html:not(.lp-no-numbers) .canlii_section,
-html:not(.lp-no-numbers) span.sectionLabel,
-html:not(.lp-no-numbers) .SectionNumber,
-html:not(.lp-no-numbers) span.lawlabel,
-html:not(.lp-no-numbers) span[id^="PARA_"],
-html:not(.lp-no-numbers) .lp-num {
+   elements keep the page's type, marked only by a faint red hairline under the label, brackets included (a quiet link), from
+   the first paint. On hover, a soft red wash that reaches past the number by padding a negative
+   margin cancels (so no text moves), over a judgment's "[5]" brackets too. Nothing is added to the
+   page; underlines and a hover wash are the cheapest things to draw. html.lp-no-numbers turns it off. */
+html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name],
+html:not(.lp-no-numbers):not(#lp-none) .canlii_section_with_subsection,
+html:not(.lp-no-numbers):not(#lp-none) .canlii_subsection,
+html:not(.lp-no-numbers):not(#lp-none) .canlii_section,
+html:not(.lp-no-numbers):not(#lp-none) span.sectionLabel,
+html:not(.lp-no-numbers):not(#lp-none) .SectionNumber,
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel,
+html:not(.lp-no-numbers):not(#lp-none) span[id^="PARA_"],
+html:not(.lp-no-numbers):not(#lp-none) .lp-num {
   padding: 1px 2px !important;
   margin: -1px -2px !important;
   border-radius: 4px !important;
-  background: rgb(17 24 39 / 9%) !important;
   color: inherit !important;
   text-decoration: none !important;
+  background: linear-gradient(rgb(213 43 30 / 40%), rgb(213 43 30 / 40%)) left 2px bottom 0 / calc(100% - 4px) 1px no-repeat !important;
   cursor: pointer !important;
+  transition: background-color 120ms, color 120ms !important;
 }
 
-html:not(.lp-no-numbers) a.reflex-paragAnchor[name] {
+html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name] {
   padding: 1px 0.42em !important;
   margin: -1px -0.42em !important;
+  background-position: left 0.08em bottom 0 !important;
+  background-size: calc(100% - 0.16em) 1px !important;
 }
 
 /* A label inside a label (federal "(1)" in its lawlabel) is one tag, not two tints. */
-html:not(.lp-no-numbers) span.lawlabel .canlii_section_with_subsection,
-html:not(.lp-no-numbers) span.lawlabel .canlii_subsection,
-html:not(.lp-no-numbers) span.lawlabel .canlii_section {
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel .canlii_section_with_subsection,
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel .canlii_subsection,
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel .canlii_section {
   padding: 0 !important;
   margin: 0 !important;
   background: none !important;
+  text-decoration: none !important;
 }
 
-html:not(.lp-no-numbers) a.reflex-paragAnchor[name]:hover,
-html:not(.lp-no-numbers) .canlii_section_with_subsection:hover,
-html:not(.lp-no-numbers) .canlii_subsection:hover,
-html:not(.lp-no-numbers) .canlii_section:hover,
-html:not(.lp-no-numbers) span.sectionLabel:hover,
-html:not(.lp-no-numbers) .SectionNumber:hover,
-html:not(.lp-no-numbers) span.lawlabel:hover,
-html:not(.lp-no-numbers) span[id^="PARA_"]:hover,
-html:not(.lp-no-numbers) .lp-num:hover {
-  background: rgb(213 43 30 / 13%) !important;
+html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name]:hover,
+html:not(.lp-no-numbers):not(#lp-none) .canlii_section_with_subsection:hover,
+html:not(.lp-no-numbers):not(#lp-none) .canlii_subsection:hover,
+html:not(.lp-no-numbers):not(#lp-none) .canlii_section:hover,
+html:not(.lp-no-numbers):not(#lp-none) span.sectionLabel:hover,
+html:not(.lp-no-numbers):not(#lp-none) .SectionNumber:hover,
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel:hover,
+html:not(.lp-no-numbers):not(#lp-none) span[id^="PARA_"]:hover,
+html:not(.lp-no-numbers):not(#lp-none) .lp-num:hover {
+  background: rgb(213 43 30 / 9%) !important;
   color: #b72016 !important;
+}
+
+/* A judgment's brackets are the page's text, outside the anchor: the "5" keeps their colour, so
+   "[5]" changes as one under its wash. */
+html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name]:hover {
+  color: inherit !important;
 }
 
 /* While a selection is copied, its numbers are the page's plain text (no tag look in the paste). */
@@ -244,6 +243,7 @@ html .lp-copying .lp-num {
   margin: 0 !important;
   background: none !important;
   color: inherit !important;
+  text-decoration: none !important;
 }
 
 /* The one tooltip the controls share, in Pinpointer's fixed layer. */

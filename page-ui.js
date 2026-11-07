@@ -154,7 +154,7 @@
     }
     const shown = node.lpTools?.dataset.noteupCountDisplay || String(count);
     button.dataset.count = shown;
-    const label = `Cited by ${shown} (CanLII, in a new tab)`;
+    const label = `${shown} citing ${shown === '1' ? 'document' : 'documents'} (CanLII, in a new tab)`;
     button.dataset.tip = label;
     button.setAttribute('aria-label', label);
   }
@@ -219,9 +219,12 @@
       if (!unit.element?.isConnected || seen.has(unit.element)) continue; // two units on one element: the first keeps it
       seen.add(unit.element);
       let tools = cited ? canliiTools(unit.element) : null;
-      if (cited && !tools && unit.kind !== 'paragraph') {
+      if (cited && unit.kind !== 'paragraph') {
+        // A statute's count is the section's (CanLII repeats it in each subsection's wrapper): once
+        // per section, on its first unit.
         const section = String(unit.locator).split('(')[0];
-        if (!sectionsUsed.has(section)) { sectionsUsed.add(section); tools = bySection.get(section) || null; }
+        if (sectionsUsed.has(section)) tools = null;
+        else { sectionsUsed.add(section); tools ||= bySection.get(section) || null; }
       }
       const label = stated?.get(unit.locator) || null;
       const record = { ...unit, tools, label, cited: citedCount(tools), numbered: numbersOn() && Boolean(label || numberIn(unit.element)) };
@@ -307,7 +310,16 @@
     };
     // Controls stay in the margin, never over the text: a margin needs room for one button's width, and a page whose
     // text leaves no such room on either side shows none (the hotkeys still copy).
-    const MARGIN = provider === 'canlii' ? 16 : 12;
+    // CanLII draws its citation-weight bars just right of the text: the margin starts clear of them
+    // (a few on the page are read; they all stand at the same place).
+    let MARGIN = 12;
+    if (provider === 'canlii') {
+      const bars = document.querySelectorAll('.viibes-marker');
+      for (let k = 0; k < Math.min(bars.length, 12); k += 1) {
+        const bar = bars[k].getBoundingClientRect();
+        if (bar.width) MARGIN = Math.max(MARGIN, Math.round(bar.right - origin.left - colRight) + 10);
+      }
+    }
     let column, side = 'right';
     if (tools.length) column = median(tools.map((tool) => tool.center)) - SIZE / 2;
     // CanLII draws its citation-weight bar just right of the text: the controls keep clear of it.
