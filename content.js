@@ -1373,8 +1373,14 @@
     /** A CanLII statute's provision numbers that CanLII writes as plain text ("(2)", "(a)"): for a
      *  block's first text node, the length of the number it starts with (after `lead` spaces), or null. */
     statuteNumberIn: (block, text) => {
-      // The cheap test first: most blocks start with no number at all.
-      const match = PROVISION_MARKER.exec(text.data);
+      // The cheap test first: most blocks start with no number at all. A number set in an element of
+      // its own (BC's <span class="holder">(b)</span>) has the space after it outside its text.
+      let probe = text.data;
+      if (!/[\s ]$/.test(probe)) {
+        const full = block.textContent, at = full.indexOf(probe);
+        if (at >= 0) probe += full.charAt(at + probe.length);
+      }
+      const match = PROVISION_MARKER.exec(probe);
       if (!match || !canliiStatutePage() || isHeading(block, true) || !provisionStart(block).marker) return null;
       const lead = /^[\s ]*/.exec(text.data)[0].length;
       return { lead, length: match[1].length };
