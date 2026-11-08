@@ -629,7 +629,7 @@
     const items = [...$('menu').querySelectorAll('button:not(:disabled)')], index = items.indexOf(document.activeElement);
     items[(index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length]?.focus();
   });
-  addEventListener('pointerdown', (event) => { if (!$('menu').hidden && !$('menu').contains(event.target) && !event.target.closest('[data-menu]')) closeMenu(); }, true);
+  addEventListener('pointerdown', (event) => { if (!$('menu').hidden && !$('menu').contains(event.target) && !event.target.closest?.('[data-menu]')) closeMenu(); }, true);
 
   // Tree events.
 
@@ -967,17 +967,22 @@
   // lost; other input waits for the data.
   let earlyClick = null;
   const addressOf = (element) => {
-    const control = element.closest('button, a, select, input');
+    const control = element.closest?.('button, a, select, input');
     if (!control) return null;
     const row = control.closest('#tree [data-at]');
-    const which = ['data-select', 'data-toggle', 'data-menu', 'data-project', 'id'].find((name) => control.hasAttribute(name));
-    const self = which ? `${control.tagName.toLowerCase()}[${which}="${CSS.escape(control.getAttribute(which))}"]` : `${control.tagName.toLowerCase()}.${CSS.escape(control.classList[0] || '')}`;
+    const which = ['data-select', 'data-toggle', 'data-menu', 'data-add-sub', 'data-project', 'id'].find((name) => control.hasAttribute(name));
+    // A control with nothing to find it by again is not replayed.
+    if (!which && !control.classList.length) return null;
+    const self = which ? `${control.tagName.toLowerCase()}[${which}="${CSS.escape(control.getAttribute(which))}"]` : `${control.tagName.toLowerCase()}.${CSS.escape(control.classList[0])}`;
     return row ? `#tree [data-at="${row.dataset.at}"] ${self}` : (control.id ? `#${CSS.escape(control.id)}` : self);
   };
   function replayEarlyClick() {
     const address = earlyClick;
     earlyClick = null;
-    if (address) requestAnimationFrame(() => document.querySelector(`[data-panel="marker"] ${address}`)?.click());
+    if (!address) return;
+    requestAnimationFrame(() => {
+      try { document.querySelector(`[data-panel="marker"] ${address}`)?.click(); } catch (_) { /* the control is gone */ }
+    });
   }
   for (const type of ['click', 'auxclick', 'pointerdown', 'keydown', 'change', 'input', 'dragstart', 'submit']) {
     document.querySelector('[data-panel="marker"]').addEventListener(type, (event) => {
