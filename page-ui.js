@@ -605,7 +605,8 @@
     if (!number || !getSelection().isCollapsed) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    run(page.model(false).then(async (model) => {
+    // On CanLII the number says what it is: copied at once, without the page's model.
+    const slow = () => page.model(false).then(async (model) => {
       fullModel = model;
       // The unit the number states first; where that unit holds no text of its own (a statute's s 45
       // and s 45(1) anchors sit at one spot), the unit the number sits in, which copies as s 45(1).
@@ -614,7 +615,10 @@
       for (const [i, node] of candidates.entries()) {
         try { return await page.copyUnit(model, node, 'pinpoint'); } catch (error) { if (i === candidates.length - 1) throw error; }
       }
-    }), null);
+    });
+    let quick = null;
+    try { quick = page.quickNumberCopy?.(number) || null; } catch (_) { quick = null; }
+    run(quick ? quick.catch(slow) : slow(), null);
   }, true);
 
   // Where a number links: its unit's pinpoint target from the page's model; on CanLII, before the

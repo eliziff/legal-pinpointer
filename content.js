@@ -623,7 +623,26 @@
   // of its own, and Word pastes that as a paragraph of its own (a line break after every paste).
   // The engine host's copy event first, which no page script can reach (Lexis and Westlaw intercept
   // copy events on their pages); then a copy event here; the async clipboard only as a last resort.
+  // Writes through a copy event, at once; true when the browser took it (needs a click or key press).
+  function clipboardWriteNow(payload) {
+    let copied = false;
+    const onCopy = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.clipboardData.setData('text/plain', payload.plain);
+      event.clipboardData.setData('text/html', payload.html);
+      copied = true;
+    };
+    document.addEventListener('copy', onCopy, { once: true, capture: true });
+    globalThis.LegalPinpointerWritingClipboard = true;
+    let executed = false;
+    try { executed = document.execCommand('copy'); }
+    finally { document.removeEventListener('copy', onCopy, true); globalThis.LegalPinpointerWritingClipboard = false; }
+    return executed && copied;
+  }
+
   async function clipboardWrite(payload) {
+    if (navigator.userActivation?.isActive && clipboardWriteNow(payload)) return;
     const hosted = await chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_CLIPBOARD', plain: payload.plain, html: payload.html })
       .catch(() => null);
     if (hosted && hosted.ok) return;
@@ -978,59 +997,180 @@
     return copyRange(model, range, mode, node);
   }
 
-  // A CanLII statute's provisions, read straight from the selected markup (a few milliseconds, no
-  // model): each provision's number and depth are in the page itself. Federal Acts nest provisions in
-  // lists (ul.ProvisionList); Alberta's are flat paragraphs whose class names the level. A subsection
-  // stands at its section's level; each paragraph, subparagraph and clause one level further in. Text
-  // with no number of its own (CanLII's Continued paragraphs, Alberta's closing words) stands at its
-  // provision's text.
-  const CANLII_PROVISION = /^(Continued)?(Section|Subsection|Paragraph|Subparagraph|Clause|Subclause|Subsubclause|Definition)$/;
-  const FLAT_LEVEL = { Section: 0, Subsection: 0, Definition: 0, Clause: 1, Subclause: 2, Subsubclause: 3, Paragraph: 3, Subparagraph: 4 };
-  const SECTION_NUMBER = 'span.sectionLabel, .SectionNumber, .canlii_section, .canlii_section_with_subsection';
-  const PROVISION_MARKER = /^[\s ]*(\d+(?:\.\d+)*[A-Z]?(?:[\s ]*\([0-9A-Za-z.]+\))*|(?:\([0-9A-Za-z.]+\))+)/;
+  // A CanLII statute's provisions, read from the selected text alone, for Ctrl+C and the quote hotkey
+  // alike: a few milliseconds, no model, no layout. CanLII serves each jurisdiction's own markup
+  // (federal lists, Alberta's and Ontario's classed paragraphs, BC's, Nova Scotia's unclassed ones),
+  // but Canadian drafting numbers every level the same way, and the numbering says the depth: a
+  // section ("21", "3(1)") and its subsections ("(2)") stand at one level; then lowercase letters
+  // ("(a)"), lowercase roman numerals ("(i)"), capitals ("(A)") and capital roman numerals ("(I)"),
+  // each one level further in. Text with no number of its own leads into the provisions after it
+  // (a definition before its "(a)") or, starting in lowercase, closes the provision it follows
+  // ("whichever is the later"); either way it stands at its provision's text. Headings, marginal
+  // notes and Alberta's citation lines are left out.
+  const PROVISION_MARKER = /^[\s ]*(\d+(?:\.\d+)*[A-Z]?\.?(?:[\s ]*\([0-9A-Za-z.]+\))*|\([0-9A-Za-z.]+\)(?:\([0-9A-Za-z.]+\))*|\d+°|[a-z]\))(?=[\s ])/;
+  const DOCUMENT_ROOT = '#originalDocument, #docCont, #documentContent';
+  const TEXT_BLOCK = 'p, li, dd, dt, td, th, h1, h2, h3, h4, h5, h6, blockquote, div';
+  const HEADING_CLASS = /(note|heading|title|^citation|^historical|^partnum|^part$|^division$|^chapter|^schedule|^copyright)/i;
+  const STATUTE_CHROME = '.viibes-marker-toolbox, .viibes-marker, [data-lp-ui], #legal-pinpointer-status, script, style';
+  const ROMAN = /^(?=[ivxlc]+$)c{0,3}(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})$/;
+
+  // Whether the page's sections carry CanLII's labels (read once: they never change).
+  let sectionLabels = null;
+  const sectionLabelled = () => (sectionLabels ??= Boolean(document.querySelector('[section]')));
 
   function canliiStatutePage() {
     return /(^|\.)canlii\.org$/.test(location.hostname) && /\/laws\//.test(location.pathname);
   }
 
-  function provisionKind(block) {
-    for (const name of block.classList) {
-      const match = CANLII_PROVISION.exec(name);
-      if (match) return { name: match[2], continued: Boolean(match[1]) };
+  // The blocks the selection's text sits in, in order (walked from the selection's start, never the
+  // whole page); null past the limit.
+  function selectedBlocks(range, limit) {
+    const container = range.commonAncestorContainer;
+    const root = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    if (!root) return [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    if (range.startContainer.nodeType === Node.TEXT_NODE) {
+      node = range.startContainer;
+      walker.currentNode = node;
+    } else {
+      walker.currentNode = range.startContainer.childNodes[range.startOffset] || range.startContainer;
+      node = walker.currentNode.nodeType === Node.TEXT_NODE ? walker.currentNode : walker.nextNode();
+    }
+    const blocks = [], seen = new Set(), documentRoot = document.querySelector(DOCUMENT_ROOT);
+    for (; node; node = walker.nextNode()) {
+      if (range.comparePoint(node, 0) > 0) break;
+      if (!node.data.trim() || !range.intersectsNode(node)) continue;
+      const parent = node.parentElement;
+      if (!parent || parent.closest(STATUTE_CHROME)) continue;
+      // Text the page does not draw (CanLII's hidden definition terms) is not copied.
+      if (!parent.getClientRects().length) continue;
+      const block = parent.closest(TEXT_BLOCK);
+      if (!block || seen.has(block) || (documentRoot && !documentRoot.contains(block))) continue;
+      seen.add(block);
+      blocks.push(block);
+      if (blocks.length > limit) return null;
+    }
+    return blocks;
+  }
+
+  function isHeading(block, numbered) {
+    if (/^H[1-6]$/.test(block.tagName)) return true;
+    // A defined term listed on its own before the definition that repeats it.
+    if (block.tagName === 'DT' && block.nextElementSibling?.textContent.trim().startsWith(block.textContent.trim())) return true;
+    const classed = (element) => element && Array.from(element.classList).some((name) => HEADING_CLASS.test(name.replace(/-e$/, '')));
+    if (classed(block) || (!numbered && classed(block.parentElement))) return true;
+    if (numbered) return false;
+    // A run of bold text alone on its line (Nova Scotia's and BC's headings).
+    const text = block.textContent.replace(/[\s ]+/g, '');
+    const bold = Array.from(block.querySelectorAll('b, strong'), (b) => b.textContent).join('').replace(/[\s ]+/g, '');
+    return Boolean(text) && bold === text;
+  }
+
+  function provisionStart(block) {
+    const text = block.textContent;
+    let match = PROVISION_MARKER.exec(text);
+    // Without CanLII's labels, a bare number is a section only when ordinary text follows it (old
+    // scanned Acts print page numbers before "CHAPTER" or "Cap.").
+    if (match && /^\d+[A-Z]?$/.test(match[1]) && !sectionLabelled()
+      && (Number.parseInt(match[1], 10) > 999 || !/^[A-Z][a-z]/.test(text.slice(match[0].length).trimStart()) || /^(Cap|Chap|Sec)/.test(text.slice(match[0].length).trimStart()))) match = null;
+    if (!match) return { marker: '', prefix: /^[\s ]*/.exec(text)[0].length };
+    return {
+      marker: match[1].replace(/[\s ]+/g, ' ').trim(),
+      prefix: match[0].length + /^[\s ]*/.exec(text.slice(match[0].length))[0].length
+    };
+  }
+
+  // A marker's level in the drafting hierarchy. "previous" is the lowercase or capital letter
+  // marker just before it, which tells a letter "(i)" (after "(h)") from a roman numeral.
+  function markerRank(marker, block, previous) {
+    if (/°$/.test(marker)) return 1;
+    if (/^[a-z]\)$/.test(marker)) return 2;
+    const last = /\(([0-9A-Za-z.]+)\)$/.exec(marker);
+    if (!last || /^\d/.test(marker)) {
+      // "21", "3(1)", Ontario's "58." with its subsection: the section's level. A bare "1." in a page
+      // whose sections carry CanLII's labels is a numbered paragraph inside a subsection.
+      if (/^\d+(?:\.\d+)*\.$/.test(marker) && !block.querySelector('[section]') && sectionLabelled()) return 1;
+      return 0;
+    }
+    const token = last[1];
+    if (/^\d/.test(token)) return 0;
+    const follows = (letter) => previous && previous.length === 1 && letter.length === 1 && letter.charCodeAt(0) === previous.charCodeAt(0) + 1;
+    if (/^[a-z]+$/.test(token)) return ROMAN.test(token) && !follows(token) ? 2 : 1;
+    if (/^[A-Z]+$/.test(token)) return ROMAN.test(token.toLowerCase()) && !follows(token) ? 4 : 3;
+    return 1;
+  }
+  const letterOf = (marker) => (/\(([a-zA-Z]+)\)$/.exec(marker) || [])[1] || '';
+
+  // The numbered block before this one in the page (for the letter just before a selection's first "(i)").
+  function previousProvision(block, steps = 40) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (element) => (element.matches(TEXT_BLOCK) && !element.closest(STATUTE_CHROME) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP)
+    });
+    walker.currentNode = block;
+    for (let previous = walker.previousNode(), count = 0; previous && count < steps; previous = walker.previousNode(), count += 1) {
+      if (previous.contains(block)) continue;
+      const start = provisionStart(previous);
+      if (start.marker && !isHeading(previous, true)) return { block: previous, start };
     }
     return null;
   }
 
-  // A provision's pinpoint ("45(1)(a)"): its own number and those of the provisions it sits in, up
-  // to the one that states its section (CanLII's section and subsection attributes).
-  function parentProvision(block, listed) {
-    if (listed) {
-      const holder = block.closest('ul.ProvisionList')?.parentElement?.closest('li');
-      if (!holder) return null;
-      return [...holder.querySelectorAll(':scope > p, :scope > div > p')].find((p) => provisionKind(p) && !provisionKind(p).continued) || null;
+  // The page's own anchor for a provision: its section and subsection labels, an anchor in or just
+  // before it, or its id.
+  function provisionAnchor(block) {
+    const label = block.querySelector('[section]');
+    if (label) {
+      const section = label.getAttribute('section'), subsection = label.getAttribute('subsection');
+      const name = `sec${section}${subsection && subsection !== 'null' ? `subsec${subsection}` : ''}`;
+      if (document.getElementsByName(name).length) return name;
     }
-    const level = FLAT_LEVEL[provisionKind(block)?.name] ?? 0;
-    for (let p = block.previousElementSibling; p; p = p.previousElementSibling) {
-      const kind = p.tagName === 'P' && provisionKind(p);
-      if (kind && !kind.continued && (FLAT_LEVEL[kind.name] ?? 0) < level) return p;
-      if (p.querySelector?.('[section]') && level > 0 && kind && !kind.continued) return p;
+    const inside = block.querySelector('a[name]')?.getAttribute('name');
+    if (inside) return inside;
+    for (let previous = block.previousElementSibling, hops = 0; previous && hops < 3; previous = previous.previousElementSibling, hops += 1) {
+      if (previous.matches('a[name]')) return previous.getAttribute('name');
+      if (previous.textContent.trim() && !isHeading(previous, false)) break;
     }
-    return null;
+    return block.id || '';
   }
 
-  function provisionLocator(block, listed) {
-    const parts = [];
-    for (let current = block, guard = 0; current && guard < 8; current = parentProvision(current, listed), guard += 1) {
-      const label = current.querySelector('[section]');
-      if (label) {
-        const section = label.getAttribute('section'), subsection = label.getAttribute('subsection');
-        return `${section}${subsection && subsection !== 'null' ? `(${subsection})` : ''}${parts.reverse().join('')}`;
-      }
-      const match = PROVISION_MARKER.exec(current.textContent);
-      if (!match) break;
-      const marker = match[1].replace(/[\s\u00a0]+/g, '');
-      if (/^\d/.test(marker)) return `${marker}${parts.reverse().join('')}`;
-      parts.push(marker);
+  // A provision's pinpoint ("21(1)(a)"): its own number after those of the provisions it sits in,
+  // read back up the page to the one that states its section.
+  function provisionLocator(block, start) {
+    // Inside a definition ("indictment" (a)): the defined term after the section.
+    const term = block.closest('dd')?.querySelector('dfn')?.textContent.trim();
+    const located = provisionChain(block, start);
+    if (!term || !/^\d/.test(located)) return located;
+    const at = located.search(/\([a-zA-Z]/);
+    return at > 0 ? `${located.slice(0, at)} “${term}” ${located.slice(at)}` : located;
+  }
+
+  function provisionChain(block, start) {
+    const stated = (element) => {
+      const label = element.querySelector?.('[section]');
+      if (!label) return '';
+      const subsection = label.getAttribute('subsection');
+      return `${label.getAttribute('section')}${subsection && subsection !== 'null' ? `(${subsection})` : ''}`;
+    };
+    let own = stated(block);
+    const sub = /^\d+(?:\.\d+)*[A-Z]?\.?\s*(\([0-9A-Za-z.]+\))/.exec(start.marker);
+    if (own && sub && !own.includes('(')) own += sub[1];
+    if (own) return own;
+    const compact = (marker) => marker.replace(/\s+/g, '').replace(/\.$/, '');
+    const parts = [compact(start.marker)];
+    let rank = markerRank(start.marker, block, letterOf(previousProvision(block, 3)?.start.marker || ''));
+    if (rank === 0 && /^\d/.test(start.marker)) return parts[0];
+    let current = block;
+    for (let steps = 0; current && steps < 60 && rank > 0; steps += 1) {
+      const found = previousProvision(current, 400);
+      if (!found) break;
+      current = found.block;
+      const before = markerRank(found.start.marker, found.block, letterOf(previousProvision(found.block, 3)?.start.marker || ''));
+      if (before >= rank) continue;
+      const section = stated(found.block);
+      if (section) return section + parts.reverse().join('');
+      parts.push(compact(found.start.marker));
+      rank = before;
     }
     return parts.reverse().join('');
   }
@@ -1038,31 +1178,14 @@
   function canliiStatuteQuote(range) {
     if (!SETTINGS.statuteCopyIndent || !canliiStatutePage() || !range || range.collapsed) return null;
     if (ownOverlay(range.startContainer) || ownOverlay(range.endContainer)) return null;
-    const container = range.commonAncestorContainer;
-    const common = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
-    if (!common) return null;
-    const own = common.closest('p');
-    const picked = (own ? [own] : [...common.querySelectorAll('p')])
-      .filter((block) => provisionKind(block) && range.intersectsNode(block));
-    // A few words from inside one provision stay plain text: the selection must take in a provision's start.
-    if (!picked.length || !picked.some((block) => range.isPointInRange(block, 0))) return null;
-    if (picked.length > 2000) return null; // a whole Act (Ctrl+A): the browser's own copy, at once
-    const listed = picked.some((block) => block.closest('ul.ProvisionList'));
-    const here = `${location.origin}${location.pathname}`;
+    // A whole Act (Ctrl+A) is left to the browser's own copy, at once.
+    const blocks = selectedBlocks(range, 2000);
+    if (!blocks || !blocks.length) return null;
     const pieces = [];
-    for (const [index, block] of picked.entries()) {
-      const kind = provisionKind(block);
-      let depth = FLAT_LEVEL[kind.name] ?? 0;
-      if (listed) {
-        depth = -1;
-        for (let list = block.closest('ul.ProvisionList'); list; list = list.parentElement?.closest('ul.ProvisionList')) depth += 1;
-        depth = Math.max(0, depth);
-      }
-      const text = block.textContent;
-      const match = kind.continued ? null : PROVISION_MARKER.exec(text);
-      const numbered = Boolean(match && (!/^\d/.test(match[1]) || block.querySelector(SECTION_NUMBER)));
-      const marker = numbered ? match[1].replace(/[\s ]+/g, ' ').trim() : '';
-      const prefix = numbered ? match[0].length + /^[\s ]*/.exec(text.slice(match[0].length))[0].length : 0;
+    let letter = '';
+    for (const block of blocks) {
+      const start = provisionStart(block);
+      if (isHeading(block, Boolean(start.marker))) continue;
       // This block's selected part, and how far into the block the selection starts.
       const part = document.createRange();
       part.selectNodeContents(block);
@@ -1076,39 +1199,98 @@
       }
       if (range.compareBoundaryPoints(Range.END_TO_END, part) < 0) part.setEnd(range.endContainer, range.endOffset);
       const fragment = part.cloneContents();
-      stripLeadingCharacters(fragment, Math.max(0, prefix - offset));
+      for (const chrome of fragment.querySelectorAll(STATUTE_CHROME)) chrome.remove();
+      for (const inner of fragment.querySelectorAll(TEXT_BLOCK)) if (inner.textContent.trim()) inner.remove();
+      stripLeadingCharacters(fragment, Math.max(0, start.prefix - offset));
       const content = renderSelectionFragment(fragment);
-      const body = { plain: content.plain.replace(/^[\s ]+/, ''), html: content.html.replace(/<(strong|b|em|i|u|sup|sub)>(?:\s|&nbsp;)*<\/\1>/g, '').replace(/^(?:\s|&nbsp;|&#160;| )+/, '') };
-      // A section whose number only heads its first subsection holds no text of its own.
-      if (!body.plain && (!marker || index + 1 < picked.length)) continue;
-      let markerHtml = core.escapeHtml(marker);
-      if (marker) {
-        const label = block.querySelector('[section]');
-        const section = label?.getAttribute('section'), subsection = label?.getAttribute('subsection');
-        const name = section ? `sec${section}${subsection && subsection !== 'null' ? `subsec${subsection}` : ''}` : '';
-        const anchor = name && document.getElementsByName(name).length ? name : block.id;
-        if (anchor) markerHtml = anchorHtml(marker, `${here}#${encodeURIComponent(anchor)}`);
+      const body = {
+        plain: content.plain.replace(/^[\s ]+/, ''),
+        html: content.html.replace(/<(strong|b|em|i|u|sup|sub|span)>(?:\s|&nbsp;)*<\/\1>/g, '').replace(/^(?:\s|&nbsp;|&#160;| )+/, '')
+      };
+      let rank = null;
+      if (start.marker) {
+        if (!pieces.some((piece) => piece.start.marker)) letter = letterOf(previousProvision(block, 3)?.start.marker || '');
+        rank = markerRank(start.marker, block, letter);
+        letter = letterOf(start.marker) || letter;
       }
-      pieces.push({ marker, markerHtml, depth, leading: offset > prefix, body, block });
+      pieces.push({ block, start, offset, body, rank, leading: Boolean(start.marker) && offset > start.prefix });
     }
-    if (!pieces.length) return null;
-    const numberedDepths = pieces.filter((piece) => piece.marker).map((piece) => piece.depth);
-    const base = Math.min(...(numberedDepths.length ? numberedDepths : pieces.map((piece) => piece.depth)));
-    for (const piece of pieces) piece.depth = Math.max(0, piece.depth - base);
-    // One column for the whole quote, wide enough for its widest number, as quoteMarkup draws it.
+    // Words from inside one provision stay the browser's own copy: the selection must take in a number.
+    if (!pieces.some((piece) => piece.start.marker && (piece.offset === 0 || piece.offset < piece.start.prefix))) return null;
+    // A section whose number only heads its first subsection holds no text of its own.
+    const kept = pieces.filter((piece, index) => piece.body.plain || (piece.start.marker && index === pieces.length - 1));
+    if (!kept.length) return null;
+
+    // Unnumbered text: a lead-in stands at the text of the level above the provisions after it, a
+    // closing (lowercase) at the text of the level above the provisions before it.
+    kept.forEach((piece, index) => {
+      if (piece.rank != null) return;
+      const before = kept.slice(0, index).reverse().find((other) => other.rank != null);
+      const after = kept.slice(index + 1).find((other) => other.rank != null);
+      const closing = /^[a-z]/.test(piece.body.plain);
+      const near = closing ? (before || after) : (after || before);
+      piece.textRank = Math.max(0, (near ? near.rank : 1) - 1);
+    });
+    const ranks = kept.map((piece) => (piece.rank != null ? piece.rank : piece.textRank));
+    const base = Math.min(...ranks);
+
+    const here = `${location.origin}${location.pathname}`;
     const width = (label) => Array.from(label).reduce((sum, ch) => sum + (/\s/.test(ch) ? 0.28 : /[().,]/.test(ch) ? 0.33 : 0.56), 0);
-    const column = Math.min(5, Math.max(2.5, Math.ceil((Math.max(0, ...pieces.map((piece) => width(piece.marker))) + 0.9) * 4) / 4));
+    const column = Math.min(5, Math.max(2.5, Math.ceil((Math.max(0, ...kept.map((piece) => width(piece.start.marker))) + 0.9) * 4) / 4));
     const lead = (piece) => (piece.leading ? '… ' : '');
+    const html = [], plain = [];
+    for (const piece of kept) {
+      if (piece.rank == null) {
+        const depth = piece.textRank - base;
+        plain.push(`${'\t'.repeat(depth + 1)}${piece.body.plain}`);
+        html.push(`<p style="margin:0 0 0 ${(depth + 1) * column}em">${piece.body.html}</p>`);
+        continue;
+      }
+      const depth = piece.rank - base;
+      const anchor = provisionAnchor(piece.block);
+      const markerHtml = anchor ? anchorHtml(piece.start.marker, `${here}#${encodeURIComponent(anchor)}`) : core.escapeHtml(piece.start.marker);
+      plain.push(`${'\t'.repeat(depth)}${piece.start.marker}\t${lead(piece)}${piece.body.plain}`);
+      html.push(`<p style="margin:0 0 0 ${(depth + 1) * column}em;text-indent:-${column}em">${markerHtml}<span style="mso-tab-count:1">\t</span>${lead(piece)}${piece.body.html}</p>`);
+    }
+    const numbered = kept.filter((piece) => piece.rank != null);
+    const firstPiece = numbered[0], lastPiece = numbered[numbered.length - 1];
     return {
-      first: provisionLocator(pieces.find((piece) => piece.marker)?.block || pieces[0].block, listed),
-      last: provisionLocator([...pieces].reverse().find((piece) => piece.marker)?.block || pieces[pieces.length - 1].block, listed),
-      plain: pieces.map((piece) => (piece.marker
-        ? `${'\t'.repeat(piece.depth)}${piece.marker}\t${lead(piece)}${piece.body.plain}`
-        : `${'\t'.repeat(piece.depth + 1)}${piece.body.plain}`)).join('\n'),
-      html: pieces.map((piece) => (piece.marker
-        ? `<p style="margin:0 0 0 ${(piece.depth + 1) * column}em;text-indent:-${column}em">${piece.markerHtml}<span style="mso-tab-count:1">\t</span>${lead(piece)}${piece.body.html}</p>`
-        : `<p style="margin:0 0 0 ${(piece.depth + 1) * column}em">${piece.body.html}</p>`)).join('')
+      first: firstPiece ? provisionLocator(firstPiece.block, firstPiece.start) : '',
+      last: lastPiece && lastPiece !== firstPiece ? provisionLocator(lastPiece.block, lastPiece.start) : '',
+      plain: plain.join('\n'),
+      html: html.join('')
     };
+  }
+
+  // A click on a CanLII number, copied at once from the page itself (no model): a judgment's
+  // "[5]" as its paragraph, a statute's number as its provision. Null where the page cannot say.
+  function quickNumberCopy(number) {
+    if (!/(^|\.)canlii\.org$/.test(location.hostname)) return null;
+    const here = `${location.origin}${location.pathname}`;
+    let kind, locator, anchor;
+    const paragraph = number.matches('a.reflex-paragAnchor[name]') ? /^par(\d+)$/.exec(number.getAttribute('name')) : null;
+    if (paragraph) {
+      kind = 'paragraph'; locator = paragraph[1]; anchor = number.getAttribute('name');
+    } else if (canliiStatutePage()) {
+      const block = number.closest(TEXT_BLOCK);
+      const start = block && provisionStart(block);
+      if (!start?.marker) return null;
+      kind = 'section'; locator = provisionLocator(block, start); anchor = provisionAnchor(block);
+    } else return null;
+    if (!locator) return null;
+    const url = anchor ? `${here}#${encodeURIComponent(anchor)}` : here;
+    const prefix = SETTINGS.pinpointStyle === 'bare' ? '' : kind === 'paragraph' ? 'at para ' : 's ';
+    const payload = { plain: `${prefix}${locator}`, html: `${core.escapeHtml(prefix)}${anchorHtml(locator, url)}` };
+    if (clipboardWriteNow(payload)) {
+      rememberedFragment = null;
+      showToast(`Copied pinpoint: ${payload.plain}`, false);
+      return Promise.resolve({ ok: true, plain: payload.plain });
+    }
+    return clipboardWrite(payload).then(() => {
+      rememberedFragment = null;
+      showToast(`Copied pinpoint: ${payload.plain}`, false);
+      return { ok: true, plain: payload.plain };
+    });
   }
 
   /** A reader's own copy (Ctrl+C) of statute text, as the quote copy writes it: each provision it
@@ -1146,6 +1328,8 @@
     statuteCopy,
     /** A CanLII statute's indented copy, read from the page alone (no model needed), or null. */
     quickStatuteCopy: (range) => canliiStatuteQuote(range),
+    /** A click on a CanLII number, copied from the page itself: a promise, or null where the page cannot say. */
+    quickNumberCopy: (number) => quickNumberCopy(number),
     /** Writes plain and HTML text to the clipboard (outside a copy event). */
     writeClipboard: (payload) => clipboardWrite(payload),
     /** Runs a change the caller undoes at once (a copy's number links): the page's model is not
