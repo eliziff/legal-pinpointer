@@ -292,6 +292,50 @@ html:not(.lp-no-numbers):not(#lp-none) span.lp-br:has(+ .lp-num-fade) {
   transition: background-color 250ms ease-out, color 250ms ease-out !important;
 }
 
+/* Copied: a ring pulses out from the number and a small "Copied" label pops up above it (lp-num-done,
+   page-ui.js, about a second). Both are drawn outside the text: position: relative moves nothing. */
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-done {
+  position: relative !important;
+  animation: lp-num-ring 520ms ease-out !important;
+}
+
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-done::after {
+  content: "Copied" !important;
+  position: absolute !important;
+  left: -4px !important;
+  bottom: calc(100% + 7px) !important;
+  z-index: 5 !important;
+  padding: 3px 8px !important;
+  border-radius: 6px !important;
+  background: #111827 !important;
+  color: #ffffff !important;
+  font: 600 11.5px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif !important;
+  letter-spacing: normal !important;
+  text-indent: 0 !important;
+  white-space: nowrap !important;
+  pointer-events: none !important;
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 35%) !important;
+  transform-origin: left bottom !important;
+  animation: lp-num-label 1000ms cubic-bezier(.2, .9, .3, 1.2) forwards !important;
+}
+
+@keyframes lp-num-ring {
+  0% { box-shadow: 0 0 0 0 rgb(213 43 30 / 55%); }
+  100% { box-shadow: 0 0 0 11px rgb(213 43 30 / 0%); }
+}
+
+@keyframes lp-num-label {
+  0% { opacity: 0; transform: translateY(5px) scale(.85); }
+  14% { opacity: 1; transform: none; }
+  75% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-4px) scale(.98); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.lp-no-numbers):not(#lp-none) .lp-num-done,
+  html:not(.lp-no-numbers):not(#lp-none) .lp-num-done::after { animation-duration: 1ms !important; }
+}
+
 /* While a selection is copied, its numbers are the page's plain text (no tag look in the paste). */
 html:not(#lp-none) .lp-copying a.reflex-paragAnchor[name],
 html:not(#lp-none) .lp-copying .canlii_section_with_subsection,

@@ -729,15 +729,21 @@
 
   // The copied number flashes solid red (content.css), then fades back: the label as a whole, not a
   // part inside it.
-  let flashed = null, flashTimer = 0, fadeTimer = 0;
+  let flashed = null, flashTimer = 0, fadeTimer = 0, doneTimer = 0;
   function flashNumber(number) {
     let target = number;
     for (let outer = target.parentElement?.closest(NUMBER); outer; outer = outer.parentElement?.closest(NUMBER)) target = outer;
     clearTimeout(flashTimer);
     clearTimeout(fadeTimer);
-    flashed?.classList.remove('lp-num-copied', 'lp-num-fade');
+    clearTimeout(doneTimer);
+    const again = flashed === target && target.classList.contains('lp-num-done');
+    flashed?.classList.remove('lp-num-copied', 'lp-num-fade', 'lp-num-done');
     flashed = target;
     target.classList.add('lp-num-copied');
+    // A second click of the same number plays the ring and label again (from the next frame, so the
+    // animation restarts without forcing the page's layout).
+    const done = () => { target.classList.add('lp-num-done'); doneTimer = setTimeout(() => target.classList.remove('lp-num-done'), 1000); };
+    if (again) requestAnimationFrame(done); else done();
     flashTimer = setTimeout(() => {
       target.classList.add('lp-num-fade');
       target.classList.remove('lp-num-copied');
