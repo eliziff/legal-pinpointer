@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Legal Pinpointer popup (example)</title>
+  <link rel="stylesheet" href="assets/marker.css">
+  <link rel="stylesheet" href="assets/ui.css">
+</head>
+<!-- One width for every tab; only the middle scrolls, its scrollbar space always reserved. -->
+<body data-tab="marker" class="m-0 flex max-h-[600px] w-[376px] flex-col overflow-hidden">
+  <header class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-line bg-surface px-3">
+    <div class="flex min-w-0 items-center gap-2">
+      <span class="grid size-6 shrink-0 place-items-center rounded-md bg-brand text-white" aria-hidden="true"><svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4v16"/><path d="M17 4v16"/><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/></svg></span>
+      <span class="truncate text-[13px] font-semibold tracking-tight">Legal Pinpointer</span>
+    </div>
+    <nav class="tabs seg" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" data-tab="marker" aria-selected="true">Marker</button>
+      <button type="button" role="tab" data-tab="copy" aria-selected="false">Copy</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+  </header>
+
+  <main class="min-h-0 flex-1 overflow-y-auto px-3 py-3 [scrollbar-gutter:stable]">
+    <section class="panel" data-panel="marker" role="tabpanel">
+      <div class="project flex items-center gap-1">
+        <select id="project" class="field min-w-0 flex-1 font-medium" aria-label="Project"><option>Smith appeal: Charter issues</option></select>
+        <button type="button" class="btn btn-ghost btn-icon" data-project="add" title="New project" aria-label="New project"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+        <button type="button" class="btn btn-ghost btn-icon" data-project="rename" title="Rename project" aria-label="Rename project"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.4 3.6a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button type="button" class="btn btn-ghost btn-icon" data-project="delete" title="Delete project" aria-label="Delete project"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+        <button type="button" class="btn btn-ghost btn-icon aria-expanded:bg-active aria-expanded:text-ink" id="marker-settings-toggle" title="Case Marker settings" aria-label="Case Marker settings" aria-expanded="false" aria-controls="marker-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg></button>
+      </div>
+      <form id="name-form" class="mt-2 flex gap-1.5" hidden>
+        <input id="name-input" class="field min-w-0 flex-1" maxlength="80" autocomplete="off" spellcheck="false">
+        <button type="submit" class="btn btn-primary">Save</button><button type="button" id="name-cancel" class="btn btn-ghost">Cancel</button>
+      </form>
+      <div id="marker-settings" class="card mt-2" hidden>
+        <label class="setting"><span><b>Circles on pages</b><small>On CanLII search results and titles, and the Westlaw, Lexis and court titles</small></span><input type="checkbox" class="switch" data-setting="caseMarker" checked></label>
+        <label class="setting"><span><b>Several folders per document</b><small>Off: a document sits in one folder per project</small></span><input type="checkbox" class="switch" data-setting="markerMultipleFolders"></label>
+        <label class="setting-field"><span>Hover + C files into</span><select class="field h-7 w-44 text-xs" data-slot="canliiHotkeySlot1"></select></label>
+        <label class="setting-field"><span>Hover + V files into</span><select class="field h-7 w-44 text-xs" data-slot="canliiHotkeySlot2"></select></label>
+        <div class="setting-field"><span>Data</span><span class="flex gap-1"><button type="button" class="btn btn-outline btn-sm" id="export">Export</button><button type="button" class="btn btn-outline btn-sm" id="import">Import</button></span></div>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+      <div class="mt-3.5 mb-1 flex items-center gap-1.5">
+        <h2 class="eyebrow m-0 flex-1">Folders</h2>
+        <select id="viewer-sort" class="field h-7 px-1.5 text-xs" aria-label="Sort documents">
+          <option value="saved">Saved order</option><option value="alpha">A–Z</option><option value="newest">Newest</option>
+        </select>
+        <button type="button" class="btn btn-ghost btn-icon" id="copy-links" data-menu aria-haspopup="menu" title="Copy the links in all documents" aria-label="Copy links"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+      </div>
+      <div id="tree" class="relative min-w-0" role="tree" aria-label="Folders" style="height:336px"><div role="treeitem" class="tvrow" data-at="0" style="top:0px;padding-inline-start:0px"><button type="button" class="trow troot" aria-pressed="true"><span class="tspace"></span><span class="tname">All documents</span><span class="tcount">7</span><span class="tactions"></span></button></div><div role="treeitem" class="tvrow" data-at="1" style="top:28px;padding-inline-start:0px"><div class="trow" data-folder="x"><button type="button" class="tchev open"><span class="ico i-chevron ticon"></span></button><label class="tglyph"><span class="ico i-folder ticon" style="color:#e0533d"></span></label><button type="button" class="tname">Section 8 search</button><span class="tcount">4</span><span class="tactions"><button type="button" class="tplus"><span class="ico i-plus ticon"></span></button><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="2" style="top:56px;padding-inline-start:16px"><div class="trow" data-folder="x"><button type="button" class="tchev open"><span class="ico i-chevron ticon"></span></button><label class="tglyph"><span class="ico i-folder ticon" style="color:#3b7ddd"></span></label><button type="button" class="tname">Reasonable expectation of privacy</button><span class="tcount">2</span><span class="tactions"><button type="button" class="tplus"><span class="ico i-plus ticon"></span></button><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="3" style="top:84px;padding-inline-start:32px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-gavel ticon"></span></span><a class="tname" href="#">R v Alpha, 2031 SCC 4</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="4" style="top:112px;padding-inline-start:32px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-gavel ticon"></span></span><a class="tname" href="#">R v Beta, 2029 ONCA 118</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="5" style="top:140px;padding-inline-start:16px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-gavel ticon"></span></span><a class="tname" href="#">R v Gamma, 2030 BCCA 77</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="6" style="top:168px;padding-inline-start:16px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-gavel ticon"></span></span><a class="tname" href="#">R v Delta, 2028 ABCA 210</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="7" style="top:196px;padding-inline-start:0px"><div class="trow" data-folder="x"><button type="button" class="tchev open"><span class="ico i-chevron ticon"></span></button><label class="tglyph"><span class="ico i-folder ticon" style="color:#2f9e6e"></span></label><button type="button" class="tname">Section 24(2) remedy</button><span class="tcount">2</span><span class="tactions"><button type="button" class="tplus"><span class="ico i-plus ticon"></span></button><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="8" style="top:224px;padding-inline-start:16px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-gavel ticon"></span></span><a class="tname" href="#">R v Epsilon, 2031 SCC 9</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="9" style="top:252px;padding-inline-start:16px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-scroll ticon"></span></span><a class="tname" href="#">Canadian Charter of Rights and Freedoms</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="10" style="top:280px;padding-inline-start:0px"><div class="trow" data-folder="x"><span class="tspace"></span><label class="tglyph"><span class="ico i-folder ticon" style="color:#e3a21a"></span></label><button type="button" class="tname">Sentencing</button><span class="tcount"></span><span class="tactions"><button type="button" class="tplus"><span class="ico i-plus ticon"></span></button><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div><div role="treeitem" class="tvrow" data-at="11" style="top:308px;padding-inline-start:0px"><div class="trow"><span class="tspace"></span><span class="tglyph"><span class="ico i-gavel ticon"></span></span><a class="tname" href="#">R v Zeta, 2027 SKCA 31</a><span class="tactions"><button type="button" class="tmore"><span class="ico i-more ticon"></span></button></span></div></div></div>
+      <p id="tree-empty" class="tempty" hidden style="display:none">No folders yet. Add one, then click a circle on CanLII to file a case.</p>
+      <!-- A top-level folder's name is typed where the button is: one 28px slot either way, so nothing moves. -->
+      <div class="mt-1.5 flex h-7 items-center">
+        <button type="button" class="btn btn-outline btn-sm" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
+        <input id="add-folder-input" class="field h-7 min-w-0 flex-1 text-xs" data-add maxlength="80" placeholder="New folder name" aria-label="New folder name" autocomplete="off" spellcheck="false" hidden>
+        <button type="button" class="btn btn-ghost btn-sm ms-auto text-muted" id="open-trash" title="Deleted folders and removed documents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>Trash</span><span id="trash-count" class="tabular-nums"> 2</span></button>
+      </div>
+      <dialog id="confirm" class="dialog" aria-labelledby="confirm-title">
+        <form method="dialog">
+          <div class="dialog-body">
+            <h2 class="dialog-title" id="confirm-title"></h2>
+            <p class="dialog-text" id="confirm-text"></p>
+            <label class="dialog-check" id="confirm-check-row" hidden><input type="checkbox" id="confirm-check"><span id="confirm-check-label"></span></label>
+          </div>
+          <div class="dialog-actions"><button type="submit" value="cancel" class="btn btn-outline btn-sm">Cancel</button><button type="submit" value="ok" class="btn btn-danger btn-sm" id="confirm-ok"></button></div>
+        </form>
+      </dialog>
+      <dialog id="trash" class="dialog" aria-labelledby="trash-title">
+        <div class="dialog-body pb-2"><h2 class="dialog-title" id="trash-title">Trash</h2><p class="dialog-text">Restored folders and projects come back with their documents filed in them.</p></div>
+        <ul class="trash-list" id="trash-list"></ul>
+        <div class="dialog-actions"><button type="button" class="btn btn-ghost btn-sm me-auto text-brand-text" id="empty-trash">Empty trash</button><button type="button" class="btn btn-outline btn-sm" id="close-trash">Close</button></div>
+      </dialog>
+      <div id="menu" class="menu" role="menu" hidden></div>
+    </section>
+
+    <section class="panel" data-panel="copy" role="tabpanel" hidden>
+      <div class="card px-3 py-2.5" id="doc">
+        <p class="m-0 text-xs text-muted" id="doc-kind">CanLII · case</p>
+        <p class="m-0 mt-0.5 font-semibold [overflow-wrap:anywhere] empty:hidden" id="doc-cite">R v Alpha, 2031 SCC 4</p>
+      </div>
+      <div class="grid mt-2 grid-cols-2 gap-1.5">
+        <button type="button" class="btn btn-primary h-10 justify-between" data-copy="pinpoint"><span>Pinpoint</span><kbd class="kbd">Ctrl X</kbd></button>
+        <button type="button" class="btn btn-primary h-10 justify-between" data-copy="quote"><span>Quote</span><kbd class="kbd">Ctrl ⇧ X</kbd></button>
+        <button type="button" class="btn btn-outline h-10 justify-between" data-copy="citation"><span>Citation</span><kbd class="kbd">Alt X</kbd></button>
+        <button type="button" class="btn btn-outline h-10 justify-between enabled:text-brand-text" id="open-canlii" disabled><span>Open in CanLII</span><kbd class="kbd">Alt C</kbd></button>
+      </div>
+      <div class="seg mt-2 flex w-full" role="radiogroup" aria-label="Pinpoint format">
+        <label><input type="radio" name="pinpointStyle" value="full" checked><span>at paras 12–14</span></label>
+        <label><input type="radio" name="pinpointStyle" value="bare"><span>12–14</span></label>
+      </div>
+      <h2 class="eyebrow">Search &amp; links</h2>
+      <div class="list card">
+        <button type="button" class="list-row" data-launch="LEGAL_PINPOINTER_OPEN_FIND"><span>Tab Search — this window</span><kbd class="kbd">Ctrl ⇧ S</kbd></button>
+        <button type="button" class="list-row" data-launch="LEGAL_PINPOINTER_OPEN_CANLII_SEARCH"><span>CanLII text search</span><kbd class="kbd">Ctrl ⇧ E</kbd></button>
+        <button type="button" class="list-row" data-launch="LEGAL_PINPOINTER_PDF_LINK"><span>Link to copied text (PDFs)</span><kbd class="kbd">Ctrl ⇧ F</kbd></button>
+      </div>
+      <p class="m-0 mt-2 text-xs text-amber-700 dark:text-amber-300" id="shortcut-hint" hidden></p>
+    </section>
+
+    <section class="panel" data-panel="settings" role="tabpanel" hidden>
+      <h2 class="eyebrow">Copying</h2>
+      <div class="card">
+        <label class="setting"><span><b>Keyboard shortcuts</b><small>Ctrl+X, Ctrl+Shift+X, Alt+X and Alt+C on legal pages</small></span><input type="checkbox" class="switch" data-setting="copyShortcuts" checked></label>
+        <label class="setting"><span><b>Link the whole pinpoint</b><small>For text-fragment sources, link “at para” too</small></span><input type="checkbox" class="switch" data-setting="linkFullTextFragmentPinpoint"></label>
+        <label class="setting"><span><b>Indented statute copies</b><small>Copied provisions (Ctrl+C and the quote copy) paste into Word as indented paragraphs, wrapped lines kept at the indent; off, as inline text</small></span><input type="checkbox" class="switch" data-setting="statuteCopyIndent" checked></label>
+        <label class="setting-field"><span>Secondary sources cite</span><select class="field h-7 text-xs" data-setting-select="secondaryTitleDepth">
+          <option value="last">The last subdivision</option><option value="intermediate">First and last</option><option value="full">The full path</option>
+        </select></label>
+        <label class="setting"><span><b>Link passages without structure</b><small>Text-fragment links on pages with no paragraphs or provisions</small></span><input type="checkbox" class="switch" data-setting="buildTextFragmentWithoutStructure"></label>
+      </div>
+      <h2 class="eyebrow">On the page</h2>
+      <div class="card">
+        <label class="setting"><span><b>Copy from paragraph numbers</b><small>Click a paragraph or section number to copy its pinpoint (like Ctrl+X); text you copy keeps its numbers linked</small></span><input type="checkbox" class="switch" data-setting="unitCopyButtons" checked></label>
+        <label class="setting-field"><span>Copy controls</span><select class="field h-7 text-xs" data-setting-select="unitCopyStyle">
+          <option value="numbers">The numbers themselves</option><option value="buttons">Buttons in the margin</option>
+        </select></label>
+        <label class="setting"><span><b>Cited by beside the paragraph</b><small>On CanLII, a cited paragraph’s Cited by opens in a new tab from the margin, in place of CanLII’s paragraph tools button</small></span><input type="checkbox" class="switch" data-setting="canliiCitedBy" checked></label>
+        <label class="setting"><span><b>Name in CanLII’s header</b><small>The full style of cause stays visible as you scroll, with a copy-link button, and titles the tab</small></span><input type="checkbox" class="switch" data-setting="canliiHeader" checked></label>
+        <label class="setting"><span><b>Citation bar on Westlaw, Lexis &amp; court sites</b><small>A bar frozen at the top with the citation, Copy link and the CanLII button</small></span><input type="checkbox" class="switch" data-setting="providerHeader" checked></label>
+        <label class="setting"><span><b>Clean titles on Westlaw &amp; Lexis</b><small>A roomy, selectable title block with a copy-link button</small></span><input type="checkbox" class="switch" data-setting="cleanTitles" checked></label>
+        <label class="setting"><span><b>CanLII button on Westlaw &amp; Lexis</b><small>Lit when a CanLII version is found</small></span><input type="checkbox" class="switch" data-setting="canliiButton" checked></label>
+        <label class="setting"><span><b>Hide selection menus</b><small>Westlaw, Lexis and Practical Law’s highlight/annotate pop-ups</small></span><input type="checkbox" class="switch" data-setting="suppressSelectionMenus" checked></label>
+      </div>
+      <h2 class="eyebrow">Advanced</h2>
+      <div class="card">
+        <label class="setting"><span><b>Alberta first among same-named Acts</b><small>In CanLII's name suggestions, when several provinces' Acts share one exact title, Alberta's is listed first</small></span><input type="checkbox" class="switch" data-setting="canliiAlbertaFirst"></label>
+      </div>
+      <h2 class="eyebrow">Tab Search</h2>
+      <div class="card">
+        <label class="setting"><span><b>Wake sleeping tabs</b><small>When the panel opens, reload sleeping tabs it has never read so they can be searched</small></span><input type="checkbox" class="switch" data-setting="sonarWakeTabs" checked></label>
+      </div>
+      <h2 class="eyebrow">PDF links</h2>
+      <div class="card">
+        <label class="setting"><span><b>Link to copied text</b><small>Ctrl+Shift+F and the right-click menu</small></span><input type="checkbox" class="switch" data-setting="pdfFragments" checked></label>
+        <label class="setting-field"><span>Copy as</span><select class="field h-7 text-xs" data-setting-select="pdfLinkFormat">
+          <option value="url">The link</option><option value="text">The text, linked</option><option value="tag">The text + [Link]</option>
+        </select></label>
+      </div>
+      <p class="m-0 mt-3 text-xs text-muted">Case Marker settings are in the Marker tab.</p>
+      <button type="button" class="btn-link mt-2" id="shortcuts">Change keyboard shortcuts…</button>
+    </section>
+  </main>
+
+  <footer class="shrink-0 border-t border-line bg-surface px-3"><p id="status" class="m-0 h-7 truncate text-xs leading-7 text-muted [&.error]:text-brand-text" role="status" aria-live="polite"></p></footer>
+<script>
+const tab = new URLSearchParams(location.search).get('tab') || 'marker';
+document.body.dataset.tab = tab;
+for (const b of document.querySelectorAll('.tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === tab);
+for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab;
+document.querySelector('.tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) location.search = '?tab=' + b.dataset.tab; });
+</script>
+</body>
+</html>
