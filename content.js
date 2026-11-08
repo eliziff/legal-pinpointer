@@ -1018,12 +1018,12 @@
   let sectionLabels = null;
   const sectionLabelled = () => (sectionLabels ??= Boolean(document.querySelector('[section]')));
 
-  // A statute quote's paragraph as Word lays out a block quotation: the whole quote set in half an
-  // inch from both margins, each level a column further in, a number hanging in its column with a tab
-  // stop at its text (points, Word's own unit; a column is measured in ems of 12pt).
+  // A statute quote's paragraph in Word's standard hanging indent: each level half an inch further
+  // in (Left), the number hanging half an inch (Hanging) with a tab stop at the text, so wrapped
+  // lines stay under the text. The column argument is unused: every level steps the standard 0.5".
   function quoteIndent(columns, column, hanging) {
-    const left = 36 + columns * column * 12, hang = column * 12;
-    return `margin:0 36pt 0 ${left}pt${hanging ? `;text-indent:-${hang}pt;tab-stops:${left}pt` : ''}`;
+    const left = columns * 36;
+    return `margin:0 0 0 ${left}pt${hanging ? `;text-indent:-36pt;tab-stops:${left}pt` : ''}`;
   }
 
   function canliiStatutePage() {
