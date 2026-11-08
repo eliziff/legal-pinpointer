@@ -1293,6 +1293,8 @@
     const here = `${location.origin}${location.pathname}`;
     let kind, locator, anchor;
     const paragraph = number.matches('a.reflex-paragAnchor[name]') ? /^par(\d+)$/.exec(number.getAttribute('name')) : null;
+    // An anchor on a numbered heading or list item is not a paragraph number: the model says where it is.
+    if (paragraph && providers.canliiAnchorsNumberDocument && !providers.canliiAnchorsNumberDocument(document)) return null;
     if (paragraph) {
       kind = 'paragraph'; locator = paragraph[1]; anchor = number.getAttribute('name');
     } else if (canliiStatutePage()) {

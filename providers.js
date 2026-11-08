@@ -858,12 +858,38 @@ ${base.headerText || ''}`), read(own)]);
     }).filter((node) => node.startPoint && node.element);
   }
 
+  // CanLII marks paragraph numbers with anchors (par1, par2...), but in older decisions it also
+  // anchors numbered headings, the items of an order or of a quoted test, and footnotes ("(1)
+  // enrichment;", "1. To keep the dog in an enclosure"): a handful, partway through the reasons.
+  // They number the decision only when there are ten or more, when they are printed as CanLII
+  // prints paragraph numbers ("[1]"), or when they take in a good share of its paragraphs;
+  // otherwise the decision is read as though CanLII had numbered nothing.
+  const anchorVerdicts = new WeakMap();
+  function canliiAnchorsNumberDocument(document) {
+    if (anchorVerdicts.has(document)) return anchorVerdicts.get(document);
+    const anchors = Array.from(document.querySelectorAll('a.reflex-paragAnchor[name], a[name^="par"]'))
+      .filter((anchor) => /^par(?:ag)?\d+$/i.test(anchor.getAttribute('name')));
+    let verdict = anchors.length >= 10;
+    if (!verdict && anchors.length) {
+      const text = (node) => (node ? node.textContent : '');
+      verdict = anchors.some((anchor) => /\[\s*$/.test(text(anchor.previousSibling)) && /^\s*\]/.test(text(anchor.nextSibling)));
+      if (!verdict) {
+        const root = document.querySelector('#originalDocument, #docCont, #documentContent') || document.body;
+        const paragraphs = Array.from(root.querySelectorAll('p')).filter((p) => p.textContent.trim().length > 60).length;
+        verdict = anchors.length >= 0.3 * paragraphs;
+      }
+    }
+    anchorVerdicts.set(document, verdict);
+    return verdict;
+  }
+
   function engineStructure(base, plane, engine) {
     const offsetAt = engineOffsets(plane.text, engine);
     if (!offsetAt) return { kind: '', nodes: [], source: 'none' };
     const pages = pageNodes(engine, plane, offsetAt);
     if (pages.length) return { kind: 'page', nodes: pages, source: 'legal-structure' };
-    if (base.documentType !== 'legislation' && base.nativeNodes.length) {
+    const nativeNumbers = base.provider !== 'canlii' || canliiAnchorsNumberDocument(plane.root.ownerDocument);
+    if (base.documentType !== 'legislation' && base.nativeNodes.length && nativeNumbers) {
       return { kind: base.nativeNodes[0].kind, nodes: uniqueNodes(base.nativeNodes), source: 'provider-native' };
     }
 
@@ -873,12 +899,19 @@ ${base.headerText || ''}`), read(own)]);
       .filter((node) => node.kind === engineKind)
       .map((node) => engineNode(node, engineKind, plane, offsetAt, structureKind, base.provider))
       .filter(Boolean);
-    const merged = base.documentType === 'legislation'
+    // A decision's numbering numbers the decision: a few numbered headings, questions or list items
+    // in long unnumbered reasons are not its paragraphs, read by the engine or seen in the text.
+    let paragraphs = null;
+    const numbersDecision = (count) => count >= 20
+      || count >= 0.3 * (paragraphs ??= Array.from(plane.root.querySelectorAll('p')).filter((p) => p.textContent.trim().length > 60).length);
+    let merged = base.documentType === 'legislation'
       ? mergeProvisionNodes(nodes, base.nativeNodes)
       : uniqueNodes(nodes);
+    if (base.documentType === 'case' && merged.length && !numbersDecision(merged.length)) return { kind: 'paragraph', nodes: [], source: 'none' };
     if (!merged.length && base.documentType === 'case') {
       const visible = visibleMarkerNodes(plane);
-      if (visible.length) return { kind: 'paragraph', nodes: visible, source: 'visible-marker' };
+      if (visible.length && numbersDecision(visible.length)) return { kind: 'paragraph', nodes: visible, source: 'visible-marker' };
+      return { kind: 'paragraph', nodes: [], source: 'none' };
     }
     return {
       kind: merged.length ? (merged[0].kind || structureKind) : structureKind,
@@ -955,6 +988,7 @@ ${base.headerText || ''}`), read(own)]);
     adapterFor,
     pickCaseTarget,
     engineInput,
+    canliiAnchorsNumberDocument,
     engineStructure,
     inspect,
     inspectBase,
