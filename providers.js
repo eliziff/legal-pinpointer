@@ -633,7 +633,11 @@ ${base.headerText || ''}`), read(own)]);
   async function requestCaseUrl(base, language) {
     const { keys, cases, ownKeys } = await caseAliasEvidence(base);
     if (!keys.length) return { canliiUrl: '', siteUrl: '' };
-    const canliiUrl = await pickCaseTarget(base, cases, language);
+    // The document's own citations first: a header can also cite the decisions below or about it
+    // (R v Morgentaler's lists the Court of Appeal's), whose CanLII pages would make two answers.
+    const own = cases.filter((citation) => ownKeys.includes(citation.key));
+    const canliiUrl = (own.length && own.length < cases.length ? await pickCaseTarget(base, own, language) : '')
+      || await pickCaseTarget(base, cases, language);
     if (canliiUrl) return { canliiUrl, siteUrl: '' };
     const sites = ownKeys.length ? await requestCourtSites(ownKeys) : {};
     const found = new Set(ownKeys.map((key) => sites[key]).filter(Boolean));

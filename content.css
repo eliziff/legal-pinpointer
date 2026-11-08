@@ -235,6 +235,12 @@ html:not(.lp-no-numbers):not(#lp-none) span.lp-br:not(.lp-copying *) {
   font-weight: 600 !important;
 }
 
+/* A CanLII statute number that was plain text (page-ui.js wraps it once the page is read, possibly
+   after it was painted): red, but in the page's own weight, so no line rewraps. */
+html:not(.lp-no-numbers):not(#lp-none) .lp-num.lp-num-text:not(.lp-copying *) {
+  font-weight: inherit !important;
+}
+
 /* A label inside a label (federal "(1)" in its lawlabel) is one tag, not two tints. */
 html:not(.lp-no-numbers):not(#lp-none) span.lawlabel .canlii_section_with_subsection,
 html:not(.lp-no-numbers):not(#lp-none) span.lawlabel .canlii_subsection,
@@ -256,6 +262,34 @@ html:not(.lp-no-numbers):not(#lp-none) span[id^="PARA_"]:hover,
 html:not(.lp-no-numbers):not(#lp-none) .lp-num:hover {
   background: rgb(213 43 30 / 10%) !important;
   color: #b72016 !important;
+}
+
+/* A click: while pressed the wash darkens at once; once copied the number flashes solid red with
+   white digits (lp-num-copied, page-ui.js) and fades back (lp-num-fade). Colours only: nothing moves. */
+html:not(.lp-no-numbers):not(#lp-none) :is(a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, span[id^="PARA_"], .lp-num):active {
+  background: rgb(213 43 30 / 22%) !important;
+  transition: none !important;
+}
+
+html:not(.lp-no-numbers):not(#lp-none) :is(a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, span[id^="PARA_"], .lp-num).lp-num-copied {
+  background: #b72016 !important;
+  color: #ffffff !important;
+  transition: none !important;
+}
+
+/* The digits inside a label, and a judgment's "[ ]" around its number, turn white with it. */
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-copied :is(.canlii_section_with_subsection, .canlii_subsection, .canlii_section),
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-copied + span.lp-br,
+html:not(.lp-no-numbers):not(#lp-none) span.lp-br:has(+ .lp-num-copied) {
+  color: #ffffff !important;
+  transition: none !important;
+}
+
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-fade,
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-fade :is(.canlii_section_with_subsection, .canlii_subsection, .canlii_section),
+html:not(.lp-no-numbers):not(#lp-none) .lp-num-fade + span.lp-br,
+html:not(.lp-no-numbers):not(#lp-none) span.lp-br:has(+ .lp-num-fade) {
+  transition: background-color 250ms ease-out, color 250ms ease-out !important;
 }
 
 /* While a selection is copied, its numbers are the page's plain text (no tag look in the paste). */
@@ -343,6 +377,22 @@ html:not(.lp-no-canlii-name) #canlii-header #canlii-breadcrumbs > span:last-of-t
     order: 99 !important;
     flex: 1 0 100% !important;
   }
+}
+
+/* Case Marker's small circle for this document, before its name in CanLII's header. Shorter than the
+   name's line, so it adds no height; not drawn while it holds no circle. */
+.lp-crumb-marker {
+  all: initial !important;
+  display: inline-flex !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 17px !important;
+}
+
+.lp-crumb-marker:empty {
+  display: none !important;
 }
 
 .lp-crumb-copy,
@@ -546,6 +596,7 @@ html:not(.lp-raw-titles) #crsw_legalMemoIcon {
 
 @media print {
   .lp-crumb-copy,
+  .lp-crumb-marker,
   .lp-tools,
   .lp-units { display: none !important; }
 }

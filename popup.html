@@ -37,8 +37,8 @@
       <div id="marker-settings" class="card mt-2" hidden>
         <label class="setting"><span><b>Circles on pages</b><small>On CanLII search results and titles, and the Westlaw, Lexis and court titles</small></span><input type="checkbox" class="switch" data-setting="caseMarker"></label>
         <label class="setting"><span><b>Several folders per document</b><small>Off: a document sits in one folder per project</small></span><input type="checkbox" class="switch" data-setting="markerMultipleFolders"></label>
-        <label class="setting-field"><span>Hover + C files into</span><select class="field h-7 max-w-44 text-xs" data-slot="canliiHotkeySlot1"></select></label>
-        <label class="setting-field"><span>Hover + V files into</span><select class="field h-7 max-w-44 text-xs" data-slot="canliiHotkeySlot2"></select></label>
+        <label class="setting-field"><span>Hover + C files into</span><select class="field h-7 w-44 text-xs" data-slot="canliiHotkeySlot1"></select></label>
+        <label class="setting-field"><span>Hover + V files into</span><select class="field h-7 w-44 text-xs" data-slot="canliiHotkeySlot2"></select></label>
         <div class="setting-field"><span>Data</span><span class="flex gap-1"><button type="button" class="btn btn-outline btn-sm" id="export">Export</button><button type="button" class="btn btn-outline btn-sm" id="import">Import</button></span></div>
         <input type="file" id="import-file" accept="application/json,.json" hidden>
       </div>
@@ -51,7 +51,11 @@
       </div>
       <div id="tree" class="relative min-w-0" role="tree" aria-label="Folders"></div>
       <p id="tree-empty" class="tempty" hidden>No folders yet. Add one, then click a circle on CanLII to file a case.</p>
-      <button type="button" class="btn btn-outline btn-sm mt-1.5" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
+      <!-- A top-level folder's name is typed where the button is: one 28px slot either way, so nothing moves. -->
+      <div class="mt-1.5 flex h-7 items-center">
+        <button type="button" class="btn btn-outline btn-sm" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
+        <input id="add-folder-input" class="field h-7 min-w-0 flex-1 text-xs" data-add maxlength="80" placeholder="New folder name" aria-label="New folder name" autocomplete="off" spellcheck="false" hidden>
+      </div>
       <div id="menu" class="menu" role="menu" hidden></div>
     </section>
 

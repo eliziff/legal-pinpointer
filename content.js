@@ -40,10 +40,12 @@
   };
   // providers.js reads the secondary-source title setting from here.
   globalThis.LegalPinpointerSettings = SETTINGS;
-  const settingsReady = new Promise((resolve) => chrome.storage.local.get(SETTINGS, (stored) => {
-    Object.assign(SETTINGS, stored);
-    resolve(SETTINGS);
-  }));
+  // early.js has normally read them already (one read for every script on the page).
+  const settingsReady = (globalThis.LegalPinpointerEarlySettings || new Promise((resolve) => chrome.storage.local.get(SETTINGS, resolve)))
+    .then((stored) => {
+      for (const key of Object.keys(SETTINGS)) if (key in stored) SETTINGS[key] = stored[key];
+      return SETTINGS;
+    });
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
     for (const key of Object.keys(SETTINGS)) if (changes[key]) SETTINGS[key] = changes[key].newValue ?? SETTINGS[key];
@@ -1164,7 +1166,8 @@
     const sub = /^\d+(?:\.\d+)*[A-Z]?\.?\s*(\([0-9A-Za-z.]+\))/.exec(start.marker);
     if (own && sub && !own.includes('(')) own += sub[1];
     if (own) return own;
-    const compact = (marker) => marker.replace(/\s+/g, '').replace(/\.$/, '');
+    // "58. (1)" is s 58(1): no space, and no full stop after a section number.
+    const compact = (marker) => marker.replace(/\s+/g, '').replace(/\.(?=\(|$)/g, '');
     const parts = [compact(start.marker)];
     let rank = markerRank(start.marker, block, letterOf(previousProvision(block, 3)?.start.marker || ''));
     if (rank === 0 && /^\d/.test(start.marker)) return parts[0];
@@ -1180,7 +1183,19 @@
       parts.push(compact(found.start.marker));
       rank = before;
     }
-    return parts.reverse().join('');
+    const chain = parts.reverse().join('');
+    if (/^\d/.test(chain)) return chain;
+    // A subsection ("(2)", or the "(3)" a paragraph's chain stopped at) stands at its section's level,
+    // so the walk above ends on it: its section is the nearest number before it that states one.
+    for (let steps = 0; current && steps < 200; steps += 1) {
+      const found = previousProvision(current, 400);
+      if (!found) break;
+      current = found.block;
+      // (Not Quebec's "1°", a paragraph.)
+      const section = (stated(found.block) || compact(found.start.marker)).match(/^\d+(?:\.\d+)*[A-Z]?(?=\(|$)/);
+      if (section) return section[0] + chain;
+    }
+    return chain;
   }
 
   function canliiStatuteQuote(range) {
@@ -1284,6 +1299,20 @@
       const start = block && provisionStart(block);
       if (!start?.marker) return null;
       kind = 'section'; locator = provisionLocator(block, start); anchor = provisionAnchor(block);
+      // No anchor of its own (a paragraph inside a subsection): the nearest one of the provisions it
+      // sits in, up to its section's.
+      const rankOf = (found) => markerRank(found.start.marker, found.block, letterOf(previousProvision(found.block, 3)?.start.marker || ''));
+      let rank = anchor ? 0 : rankOf({ block, start });
+      for (let current = block, steps = 0; !anchor && current && steps < 120; steps += 1) {
+        const found = previousProvision(current, 400);
+        if (!found) break;
+        current = found.block;
+        const section = /^\d/.test(found.start.marker), level = rankOf(found);
+        if (!section && level >= rank) continue; // a sibling or something inside one
+        rank = level;
+        anchor = provisionAnchor(found.block);
+        if (section) break;
+      }
     } else return null;
     if (!locator) return null;
     const url = anchor ? `${here}#${encodeURIComponent(anchor)}` : here;
@@ -1338,6 +1367,15 @@
     quickStatuteCopy: (range) => canliiStatuteQuote(range),
     /** A click on a CanLII number, copied from the page itself: a promise, or null where the page cannot say. */
     quickNumberCopy: (number) => quickNumberCopy(number),
+    /** A CanLII statute's provision numbers that CanLII writes as plain text ("(2)", "(a)"): for a
+     *  block's first text node, the length of the number it starts with (after `lead` spaces), or null. */
+    statuteNumberIn: (block, text) => {
+      // The cheap test first: most blocks start with no number at all.
+      const match = PROVISION_MARKER.exec(text.data);
+      if (!match || !canliiStatutePage() || isHeading(block, true) || !provisionStart(block).marker) return null;
+      const lead = /^[\s ]*/.exec(text.data)[0].length;
+      return { lead, length: match[1].length };
+    },
     /** Writes plain and HTML text to the clipboard (outside a copy event). */
     writeClipboard: (payload) => clipboardWrite(payload),
     /** Runs a change the caller undoes at once (a copy's number links): the page's model is not

@@ -19,9 +19,11 @@
       : /^\/Document\//.test(pathname);
   if (top && documentPage) chrome.runtime.sendMessage({ type: 'LEGAL_PINPOINTER_WARM' }).catch(() => {});
 
-  // The page UI's settings, read now so they are in hand by the time page-ui.js runs (at
-  // document_end, when a storage read would wait behind the page's own start-up scripts).
-  const PAGE_SETTINGS = { canliiAlbertaFirst: false, unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
+  // The page UI's and the copy's settings (page-ui.js, content.js), read now in one read so they are
+  // in hand by the time those scripts run (at document_end, when a storage read would wait behind
+  // the page's own start-up scripts).
+  const PAGE_SETTINGS = { canliiAlbertaFirst: false, unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true,
+    pinpointStyle: 'full', linkFullTextFragmentPinpoint: false, buildTextFragmentWithoutStructure: false, copyShortcuts: true, statuteCopyIndent: true, secondaryTitleDepth: 'last' };
   globalThis.LegalPinpointerEarlySettings = new Promise((resolve) => chrome.storage.local.get(PAGE_SETTINGS, (stored) => {
     if (top && !/canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-raw-titles', stored.cleanTitles === false);
     if (top && /canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-no-canlii-name', stored.canliiHeader === false);

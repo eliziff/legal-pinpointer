@@ -173,7 +173,14 @@
   .tvrow { @apply absolute inset-x-0 h-7; contain: layout style; }
   .tadd { @apply flex h-7 items-center px-2; }
   .tcount { @apply shrink-0 text-[11px] text-faint tabular-nums; }
-  .tactions { @apply flex w-7 shrink-0 items-center justify-end opacity-0; }
+  .tactions { @apply relative flex w-7 shrink-0 items-center justify-end opacity-0; }
+  /* A folder's "+" (a folder inside it): over its count while the row is hovered, so a folder's
+     name keeps its full width; the name's end fades under it. */
+  .tplus { @apply absolute end-full top-0 grid size-7 place-items-center rounded-md border-0 bg-transparent p-0 text-muted hover:bg-active hover:text-ink; }
+  .tplus .ticon { @apply size-4; }
+  .trow[data-folder]:is(:hover, :focus-within) .tcount { @apply opacity-0; }
+  .trow[data-folder]:is(:hover, :focus-within) .tname { mask-image: linear-gradient(to left, transparent 24px, #000 36px); }
+  .i-plus { --i: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'><path d='M5 12h14'/><path d='M12 5v14'/></svg>"); }
   .trow:hover .tactions, .trow:focus-within .tactions { @apply opacity-100; }
   @media (hover: none) { .tactions { @apply opacity-100; } }
   .tmore { @apply grid size-7 place-items-center rounded-md border-0 bg-transparent p-0 text-muted hover:bg-active hover:text-ink aria-expanded:bg-active aria-expanded:text-ink; }
@@ -245,6 +252,6 @@ body:not([data-route="canlii"]) #canlii-fields { display: none; }
   .lpm-picker .lpm-chip { background: var(--hover); }
   .lpm-picker .lpm-chip:hover, .lpm-picker .lpm-chip[aria-pressed="true"] { background: var(--active); color: var(--ink); }
   .lpm-picker .lpm-chip[aria-pressed="true"] { border-color: var(--ink); }
-  .lpm-picker :is(.lpm-note, .lpm-badge-text, .lpm-badge-color) { background: var(--app); border-color: var(--line-strong); }
+  .lpm-picker .lpm-note { background: var(--app); border-color: var(--line-strong); }
   .lpm-circle.lpm-empty { box-shadow: inset 0 0 0 2px var(--line-strong); }
 }

@@ -24,7 +24,6 @@
   const settings = { unitCopyButtons: true, unitCopyStyle: 'numbers', canliiCitedBy: true, canliiHeader: true, providerHeader: true, cleanTitles: true, canliiButton: true, caseMarker: true };
   const idle = (callback, timeout) => (window.requestIdleCallback
     ? requestIdleCallback(callback, { timeout }) : setTimeout(callback, 50));
-
   // CanLII's maple leaf (from its own wordmark) and, for a decision found only on its court's
   // Lexum/Decisia site, a courthouse: inlined, so nothing is fetched or exposed to the page.
   const CANLII_LOGO = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="2640.1 4.7 685.6 685.6"><g transform="matrix(1.33,0,0,-1.33,-51.85,911.22)"><g><g><g transform="translate(1366.69,215.90)"></g><g transform="translate(1822.88,431.36)"></g><g transform="translate(908.24,339.35)"></g><g transform="translate(1697.10,238.79)"></g><g transform="translate(504.64,273.00)"></g><g transform="translate(237.02,626.65)"></g><g transform="translate(506.37,271.47)"></g><g transform="translate(1974.78,669.64)"></g><g transform="translate(500.98,275.13)"></g><g transform="translate(502.71,273.59)"></g><g transform="translate(2488.91,367.05)"><path d="m 0,0 49.26,65.91 -79.71,2.34 0.29,52.55 -83.35,-34.54 71.16,113.27 -61.84,10.96 -9.15,102.98 -83.89,-74.10 -49.20,43.22 -20.25,-145.77 -40.78,99.91 -39.88,-41.18 -54.08,49.81 -7.68,-88.29 -55.23,-4.56 91.47,-139.03 5.77,-9.82 -31.36,-46.42 110.42,-20.47 -57.34,-109.91 62.40,-27.90 41.29,120.43 99.02,-63.83 -1.18,67.44 172.52,37.22 z" style="fill:#bb2119;fill-rule:nonzero"></path></g><g transform="translate(2489.93,368.69)"><path d="m 0,0 48.95,66.14 -79.72,1.96 0.04,52.55 -83.18,-34.93 70.62,113.61 -61.89,10.66 -9.64,102.94 -83.54,-74.49 -49.40,42.99 -19.57,-145.87 -41.25,99.72 -39.68,-41.37 -54.32,49.55 -7.27,-88.32 -55.21,-4.82 92.12,-138.60 5.82,-9.79 -31.14,-46.56 110.51,-19.95 -56.82,-110.18 62.53,-27.60 40.72,120.63 99.32,-63.36 -1.50,67.43 172.34,38.03 z" style="fill:#bb2119;fill-rule:nonzero"></path></g><g transform="translate(2195.26,379.91)"></g><g transform="translate(2363.50,463.28)"></g></g></g></g></svg>`;
@@ -212,6 +211,7 @@
     if (!settings.unitCopyButtons) return;
     wrapWestlawNumbers();
     wrapCanliiBrackets();
+    wrapCanliiStatuteNumbers();
     let found;
     try { found = providers.quickUnits(document, location); } catch (_) { return; }
     const units = [], seen = new Set(), cited = citedBy(), stated = provider === 'canlii' ? numberedLocators() : null;
@@ -475,7 +475,7 @@
   // Westlaw alone writes a number as plain text at the start of its paragraph: that number is put in
   // a span of its own (span.lp-num) just before its paragraph's controls are placed.
   const NUMBER = provider === 'canlii'
-    ? 'a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel'
+    ? 'a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, .lp-num'
     : provider === 'lexis' ? '[id^="PARA_"]' : '.lp-num';
   const numbersOn = () => settings.unitCopyButtons && settings.unitCopyStyle !== 'buttons';
   const LABELS = '.canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel';
@@ -533,6 +533,112 @@
       span.appendChild(number);
     }
   }
+
+  // A CanLII statute's provision numbers that CanLII writes as plain text (a BC, Alberta or Ontario
+  // Act's "(2)", "(a)", "(i)", most sections of some Acts): each put in a span.lp-num of its own, so
+  // every number on the page is red and copies on a click, as CanLII's labelled ones do. Which
+  // numbers count is content.js's statute copy's own reading. Text and layout are unchanged (the
+  // span only colours the number; its weight stays the page's, as it may come after the first
+  // paint, so no line rewraps). A whole Act is never read (the Criminal Code has 40,000 blocks):
+  // only the blocks from a screen above the window to two below it, found from the page's own hit
+  // test at the window, not a search, with the rest of the page UI and then in the frame of a
+  // scroll, before it paints, as the margin controls are. A text that does not start with a digit
+  // or "(" is passed over on its first character.
+  // Not table cells: a schedule's or an amendment table's numbers are references, not provisions.
+  const TEXT_BLOCKS = 'p, li, dd, dt, div';
+  const STATUTE_ROOT = '#originalDocument, #docCont, #documentContent';
+  const readBlocks = new WeakSet();
+  const statuteNumbers = () => provider === 'canlii' && numbersOn() && /\/laws\//.test(location.pathname) && Boolean(page.statuteNumberIn);
+  function startsNumber(data) {
+    for (let i = 0; i < data.length; i += 1) {
+      const code = data.charCodeAt(i);
+      if (code <= 32 || code === 160) continue;
+      return code === 40 || (code >= 48 && code <= 57);
+    }
+    return false;
+  }
+  /** A block's first text with words in it: a few steps down its first children, no walker. */
+  function firstText(block) {
+    const after = (node) => {
+      for (let at = node; at && at !== block; at = at.parentNode) if (at.nextSibling) return at.nextSibling;
+      return null;
+    };
+    for (let node = block.firstChild; node;) {
+      if (node.nodeType === 3 && node.data.trim()) return node;
+      node = node.nodeType === 1 && node.firstChild ? node.firstChild : after(node);
+    }
+    return null;
+  }
+  const BLOCK_FILTER = { acceptNode: (element) => (element.matches(TEXT_BLOCKS) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) };
+  /** The blocks from a screen above the window to two below it, in page order. */
+  function blocksNearView(root) {
+    const box = root.getBoundingClientRect();
+    if (box.bottom < -innerHeight || box.top > 2 * innerHeight) return [];
+    const x = Math.round(Math.min(innerWidth - 2, Math.max(1, box.left + Math.min(160, box.width / 4))));
+    // The text at a point of the window (a hit on a page-tall container would start the walk at its top).
+    let hit = null;
+    for (const fraction of [0.05, 0.3, 0.55, 0.8, 0.98]) {
+      const at = document.caretRangeFromPoint?.(x, innerHeight * fraction)?.startContainer;
+      const element = at?.nodeType === 3 ? at.parentElement : at;
+      if (element && root.contains(element) && element !== root && element.getBoundingClientRect().height < innerHeight) { hit = element; break; }
+    }
+    if (!hit) return [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, BLOCK_FILTER), before = [], after = [];
+    // Blocks around the hit: a container of it (taller than the window) is passed over, not stopped at.
+    walker.currentNode = hit;
+    for (let block = walker.previousNode(), steps = 0; block && steps < 3000; block = walker.previousNode(), steps += 1) {
+      if (block.contains(hit)) continue;
+      if (block.getBoundingClientRect().bottom < -innerHeight) break;
+      before.push(block);
+    }
+    walker.currentNode = hit;
+    const own = hit.closest(TEXT_BLOCKS);
+    for (let block = walker.nextNode(), steps = 0; block && steps < 3000; block = walker.nextNode(), steps += 1) {
+      const rect = block.getBoundingClientRect();
+      if (rect.top > 2 * innerHeight) break;
+      if (rect.bottom >= -innerHeight) after.push(block);
+    }
+    return [...before.reverse(), ...(own && root.contains(own) ? [own] : []), ...after];
+  }
+  let wrappedAt = null, wrapFrame = 0;
+  function wrapCanliiStatuteNumbers() {
+    if (!statuteNumbers()) return;
+    const root = document.querySelector(STATUTE_ROOT);
+    if (!root) return;
+    wrappedAt = scrollY;
+    // Read before anything is wrapped: a wrap splits the text it is in.
+    const wraps = [];
+    for (const block of blocksNearView(root)) {
+      if (readBlocks.has(block)) continue;
+      const text = firstText(block);
+      if (!text || !startsNumber(text.data)) continue;
+      // The block's own first words (an inner block reads its own), not already a number.
+      const parent = text.parentElement;
+      if (parent.closest(TEXT_BLOCKS) !== block || parent.closest(`${NUMBER}, [data-lp-ui], .lp-br, table`)) continue;
+      readBlocks.add(block);
+      const found = page.statuteNumberIn(block, text);
+      if (found) wraps.push([text, found]);
+    }
+    for (const [text, found] of wraps) {
+      const number = found.lead ? text.splitText(found.lead) : text;
+      if (number.length > found.length) number.splitText(found.length);
+      const span = document.createElement('span');
+      span.className = 'lp-num lp-num-text';
+      number.replaceWith(span);
+      span.appendChild(number);
+    }
+  }
+  // Half a screen of scrolling (or a jump to a provision) reads the blocks newly near the window.
+  const wrapSoon = () => {
+    if (!wrapFrame && wrappedAt !== null && statuteNumbers()) {
+      wrapFrame = requestAnimationFrame(() => {
+        wrapFrame = 0;
+        if (Math.abs(scrollY - wrappedAt) > innerHeight / 2) wrapCanliiStatuteNumbers();
+      });
+    }
+  };
+  addEventListener('scroll', wrapSoon, { passive: true });
+  addEventListener('resize', () => { wrappedAt = Infinity; wrapSoon(); }, { passive: true });
 
   /** The locator a number's own markup states (CanLII statutes), or ''. */
   function statedLocator(number) {
@@ -618,8 +724,26 @@
     });
     let quick = null;
     try { quick = page.quickNumberCopy?.(number) || null; } catch (_) { quick = null; }
-    run(quick ? quick.catch(slow) : slow(), null);
+    run((quick ? quick.catch(slow) : slow()).then(() => flashNumber(number)), null);
   }, true);
+
+  // The copied number flashes solid red (content.css), then fades back: the label as a whole, not a
+  // part inside it.
+  let flashed = null, flashTimer = 0, fadeTimer = 0;
+  function flashNumber(number) {
+    let target = number;
+    for (let outer = target.parentElement?.closest(NUMBER); outer; outer = outer.parentElement?.closest(NUMBER)) target = outer;
+    clearTimeout(flashTimer);
+    clearTimeout(fadeTimer);
+    flashed?.classList.remove('lp-num-copied', 'lp-num-fade');
+    flashed = target;
+    target.classList.add('lp-num-copied');
+    flashTimer = setTimeout(() => {
+      target.classList.add('lp-num-fade');
+      target.classList.remove('lp-num-copied');
+      fadeTimer = setTimeout(() => { target.classList.remove('lp-num-fade'); if (flashed === target) flashed = null; }, 300);
+    }, 140);
+  }
 
   // Where a number links: its unit's pinpoint target from the page's model; on CanLII, before the
   // model is built, the document's own anchor.
@@ -792,7 +916,13 @@
     const text = title.textContent.replace(/\s+/g, ' ').trim();
     if (!text) return;
     if (!crumb || crumb.name !== name) {
-      crumb = { name, original: name.textContent, button: null };
+      crumb = { name, original: name.textContent, button: null, marker: null };
+      // Case Marker's circle for this document, small, before the name (hidden while empty).
+      const marker = document.createElement('span');
+      marker.className = 'lp-crumb-marker';
+      marker.setAttribute('data-lp-ui', '');
+      name.before(marker);
+      crumb.marker = marker;
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'lp-crumb-copy';
@@ -805,6 +935,8 @@
     }
     if (name.textContent !== text) name.textContent = text;
     name.title = text;
+    const caseMarker = globalThis.LegalPinpointerCaseMarker;
+    if (caseMarker && settings.caseMarker) caseMarker.banner(crumb.marker); else crumb.marker.replaceChildren();
     // The tab, too, is titled with the full style of cause or statute name.
     crumb.tabTitle ??= document.title;
     if (document.title !== text) document.title = text;
@@ -826,6 +958,7 @@
   function unmountCrumb() {
     if (!crumb) return;
     crumb.button.remove();
+    crumb.marker.remove();
     crumb.name.textContent = crumb.original;
     crumb.name.removeAttribute('title');
     headerObserver?.disconnect();
@@ -1001,7 +1134,8 @@
     a.live:hover { border-color: #f3b4ae; box-shadow: 0 1px 4px rgb(213 43 30 / 18%); }
     a.dead { opacity: .42; filter: grayscale(1); cursor: default; }
     a.pending { opacity: .25; filter: grayscale(1); cursor: default; }
-    a[hidden] { display: none; }
+    a[hidden], .marker[hidden] { display: none; }
+    .marker { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 26px; }
     button { all: unset; display: inline-flex; flex: none; align-items: center; gap: 6px; box-sizing: border-box; height: 28px; padding: 0 8px;
       border-radius: 6px; color: #374151; font: 500 12px/1 inherit; font-family: inherit; cursor: pointer; transition: background-color 80ms, color 80ms; }
     button:hover { background: #fff1f0; color: #b72016; }
@@ -1028,12 +1162,23 @@
     element.className = 'bar';
     element.setAttribute('role', 'toolbar');
     element.setAttribute('aria-label', 'Citation');
-    element.innerHTML = '<a class="pending" data-lp-action="canlii" aria-label="CanLII" title="Looking for a CanLII version"></a><span class="cite"></span>'
+    // Case Marker's circle is the host's own child (Case Marker's styles and clicks reach it there),
+    // shown in the bar's slot; the slot shows only while it holds one.
+    element.innerHTML = '<a class="pending" data-lp-action="canlii" aria-label="CanLII" title="Looking for a CanLII version"></a>'
+      + '<span class="marker" hidden><slot></slot></span><span class="cite"></span>'
       + `<button type="button" data-lp-action="citation" aria-label="Copy the linked citation" title="Copy the linked citation (Alt+X)">${LINK_ICON}<span></span></button>`;
     shadow.appendChild(element);
     document.documentElement.appendChild(host);
-    bar = { host, element, canlii: element.firstChild, cite: element.children[1] };
+    const marker = element.querySelector('.marker'), slot = marker.firstChild;
+    slot.addEventListener('slotchange', () => { marker.hidden = !slot.assignedElements().length; });
+    bar = { host, element, canlii: element.firstChild, cite: element.querySelector('.cite') };
     return bar;
+  }
+
+  /** The bar's small Case Marker circle, for the page's document (Case Marker places it). */
+  function barMarker() {
+    const caseMarker = globalThis.LegalPinpointerCaseMarker;
+    if (caseMarker && settings.caseMarker) caseMarker.banner(bar.host); else bar.host.replaceChildren();
   }
 
   // Along the top of the box the title scrolls in (an app's document pane), else of the window below
@@ -1079,6 +1224,7 @@
     bar.canlii.removeAttribute('data-tip');
     bar.canlii.title = bar.canlii.classList.contains('live') ? (current.canliiUrl ? 'Open on CanLII' : 'Open on the court’s site') : 'No CanLII version found';
     bar.canlii.hidden = !settings.canliiButton;
+    barMarker();
     barVisibility();
   }
 
@@ -1135,7 +1281,7 @@
       if (!settings.canliiButton) unmountFloating();
       if (!settings.providerHeader) unmountBar();
       // The bar is there at once with the title; the citation replaces it when the model is in.
-      else if (tools && !bar) { mountBar(); bar.cite.textContent = titleText(); bar.canlii.hidden = !settings.canliiButton; barVisibility(); }
+      else if (tools && !bar) { mountBar(); bar.cite.textContent = titleText(); bar.canlii.hidden = !settings.canliiButton; barMarker(); barVisibility(); }
       if (tools || settings.canliiButton) {
         try {
           const current = metadata && page.current(metadata) ? metadata : (metadata = await page.model(true));
@@ -1168,8 +1314,10 @@
   });
   // Settings early.js read at document_start are normally in hand already, so the page UI applies
   // at once; otherwise as soon as they arrive.
+  // (early.js reads the copy's settings too: only the page UI's own are taken.)
+  const take = (stored) => { for (const key of Object.keys(settings)) if (key in stored) settings[key] = stored[key]; };
   const early = globalThis.LegalPinpointerEarlySettingsValue;
-  if (early) { Object.assign(settings, early); apply(); }
+  if (early) { take(early); apply(); }
   else (globalThis.LegalPinpointerEarlySettings || new Promise((resolve) => chrome.storage.local.get(settings, resolve)))
-    .then((stored) => { Object.assign(settings, stored); apply(); });
+    .then((stored) => { take(stored); apply(); });
 })();

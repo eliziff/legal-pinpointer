@@ -12,7 +12,6 @@
 (function startMarkerCore() {
   if (globalThis.LegalPinpointerMarkerCore) return;
   const RING = ['', '62%', '52%'];
-  const BADGE_MAX = 19;
   const escapeHtml = (value) => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   // lucide icons, as Beaver draws them.
   const PATHS = {
@@ -32,12 +31,25 @@
   // ---------------------------------------------------------------------------
   // Model: a project's folders nest without limit; a document is filed under any number of them.
 
-  /** One project's folders grouped under their parent, each level in its saved order. */
+  // One collator for every name comparison (String#localeCompare costs a locale lookup per call),
+  // made on first use: making one loads the locale's collation data, about 10 ms.
+  let collator = null;
+  const compareNames = (a, b) => (collator ||= new Intl.Collator()).compare(a, b);
+  const bySavedOrder = (a, b) => (a[1].order || 0) - (b[1].order || 0) || compareNames(String(a[1].name), String(b[1].name));
+
+  /** One project's folders grouped under their parent, each level in its saved order. Each level is
+   *  sorted on its own, so names are compared only between siblings. */
   function folderChildren(folders, project) {
     const map = new Map();
-    Object.entries(folders).filter(([, folder]) => folder.projectId === project)
-      .sort((a, b) => (a[1].order || 0) - (b[1].order || 0) || String(a[1].name).localeCompare(String(b[1].name)))
-      .forEach((entry) => { const parent = entry[1].parentId || null; if (!map.has(parent)) map.set(parent, []); map.get(parent).push(entry); });
+    for (const id of Object.keys(folders)) {
+      const folder = folders[id];
+      if (folder.projectId !== project) continue;
+      const parent = folder.parentId || null;
+      let level = map.get(parent);
+      if (!level) map.set(parent, level = []);
+      level.push([id, folder]);
+    }
+    for (const level of map.values()) if (level.length > 1) level.sort(bySavedOrder);
     return map;
   }
 
@@ -105,13 +117,13 @@
   }
 
   // ---------------------------------------------------------------------------
-  // The editor: "Filed under" slots, the waterfall for the active slot, the note (and Case Marker's
-  // badge). Every change saves itself; it closes on Escape, the close button or a press outside it.
+  // The editor: "Filed under" slots, the waterfall for the active slot, the note. Every change saves
+  // itself; it closes on Escape, the close button or a press outside it.
 
   // `multiple` (Settings: "Several folders per document", off by default): the "Filed under" slots.
   // Without it a document has one folder per project: choosing a folder moves it there, and the
   // slots show only for a document filed in several before the setting was turned off.
-  function openEditor({ anchor, folders, project, data, root = document.body, badge = true, multiple = false, onChange, onClose, inside = () => false }) {
+  function openEditor({ anchor, folders, project, data, root = document.body, multiple = false, onChange, onClose, inside = () => false }) {
     let slots = filings(data, folders, project), activeSlot = 0, noteTimer = 0, closed = false;
     // Where the anchor is, read before anything is inserted: the page's layout is still clean, so
     // this costs nothing even on a long judgment (after an insertion it would lay the page out).
@@ -123,19 +135,10 @@
     element.setAttribute('data-lp-ui', '');
     element.innerHTML = `<button type="button" class="lpm-x" data-close aria-label="Close">${icon('x', 'lpm-x-icon')}</button>`
       + '<div class="lpm-slots" aria-label="Filed under"></div><div class="lpm-waterfall"></div>'
-      + `<textarea class="lpm-note" rows="1" placeholder="Note" maxlength="2000" aria-label="Note">${escapeHtml(data?.note || '')}</textarea>`
-      + (badge ? `<div class="lpm-badge-row"><input class="lpm-badge-text" maxlength="${BADGE_MAX}" placeholder="Badge" aria-label="Badge" value="${escapeHtml(data?.badge?.text || '')}">`
-        + `<input class="lpm-badge-color" type="color" value="${escapeHtml(data?.badge?.color || '#5b6670')}" title="Badge colour" aria-label="Badge colour"></div>` : '');
+      + `<textarea class="lpm-note" rows="1" placeholder="Note" maxlength="2000" aria-label="Note">${escapeHtml(data?.note || '')}</textarea>`;
     root.appendChild(element);
 
-    const value = () => {
-      const result = { folderIds: slots.slice(), note: element.querySelector('.lpm-note').value.trim() };
-      if (badge) {
-        const text = element.querySelector('.lpm-badge-text').value.trim().slice(0, BADGE_MAX);
-        result.badge = text ? { text, color: element.querySelector('.lpm-badge-color').value } : null;
-      }
-      return result;
-    };
+    const value = () => ({ folderIds: slots.slice(), note: element.querySelector('.lpm-note').value.trim() });
     const emit = () => { clearTimeout(noteTimer); onChange(value()); };
     function render() {
       const several = multiple || slots.length > 1;
@@ -198,7 +201,6 @@
       if (chip) put(chip.dataset.folder || null);
     });
     element.addEventListener('input', (event) => {
-      if (event.target.matches('.lpm-badge-text, .lpm-badge-color')) return emit();
       clearTimeout(noteTimer);
       noteTimer = setTimeout(emit, 300);
     });
@@ -256,6 +258,6 @@
     return true;
   }
 
-  globalThis.LegalPinpointerMarkerCore = { escapeHtml, icon, folderIcon, folderChildren, folderPath, filings, setFilings, circle, filingNames, waterfall, openEditor, BADGE_MAX,
-    readDocuments, writeDocuments, documentChanges, splitLegacy };
+  globalThis.LegalPinpointerMarkerCore = { escapeHtml, icon, folderIcon, folderChildren, folderPath, filings, setFilings, circle, filingNames, waterfall, openEditor,
+    compareNames, documentsIn, readDocuments, writeDocuments, documentChanges, splitLegacy };
 })();

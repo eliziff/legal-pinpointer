@@ -4,7 +4,8 @@
 // Ontario Court of Appeal's and the other courts' sites): the decision's frame gets what CanLII,
 // Westlaw and Lexis pages have. Beside the title, the CanLII button (lit once the decision's CanLII
 // version is identified from the page's own metadata) and Copy link. Along the top of the frame,
-// once the title has scrolled away, a bar with the full name and citation and the same buttons.
+// once the title has scrolled away, a bar with the full name and citation, the same buttons and,
+// while Case Marker is on, a small copy of the decision's circle (marker.js places it).
 //
 // Nothing moves the page: the title's buttons are out of flow at its end, and the bar is fixed, in
 // its own shadow root, click-through outside the bar. The copy needs no engine: the name and
@@ -38,7 +39,8 @@
     a::before { content: ""; width: 16px; height: 16px; background: ${CANLII_ICON} center / contain no-repeat; }
     a.live:hover { border-color: #f3b4ae; box-shadow: 0 1px 4px rgb(213 43 30 / 18%); }
     a:not(.live) { opacity: .3; filter: grayscale(1); cursor: default; }
-    a[hidden] { display: none; }
+    a[hidden], .marker[hidden] { display: none; }
+    .marker { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 26px; }
     button { all: unset; display: inline-flex; flex: none; align-items: center; gap: 6px; box-sizing: border-box; height: 26px; padding: 0 7px;
       border-radius: 6px; color: #374151; font: 500 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; cursor: pointer; transition: background-color 80ms, color 80ms; }
     button:hover { background: #fff1f0; color: #b72016; }
@@ -91,11 +93,15 @@
     inline.shadow.innerHTML = `<span class="tools">${buttons()}</span>`;
     title.appendChild(inline.host);
     tools = inline.shadow.querySelector('.tools');
-    // Along the top of the frame.
+    // Along the top of the frame, with Case Marker's small circle for the decision: the host's own
+    // child (Case Marker's styles and clicks reach it there), shown in the bar's slot while it has one.
     const fixed = shadowHost('all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483645;');
-    fixed.shadow.innerHTML = `<div class="bar" role="toolbar" aria-label="Citation">${buttons().replace('<button', '<span class="name"></span><button')}</div>`;
+    fixed.shadow.innerHTML = `<div class="bar" role="toolbar" aria-label="Citation">${buttons().replace('<button', '<span class="marker" hidden><slot></slot></span><span class="name"></span><button')}</div>`;
     document.documentElement.appendChild(fixed.host);
     bar = fixed.shadow.querySelector('.bar');
+    const marker = bar.querySelector('.marker'), slot = marker.firstChild;
+    slot.addEventListener('slotchange', () => { marker.hidden = !slot.assignedElements().length; });
+    globalThis.LegalPinpointerCaseMarker?.banner(fixed.host);
     for (const root of [tools, bar]) root.addEventListener('click', onClick);
     observer = new IntersectionObserver(([entry]) => { titleVisible = entry.isIntersecting || !title.getClientRects().length; showBar(); });
     observer.observe(title);

@@ -14,7 +14,7 @@
 //
 // Registered only while Case Marker is on (engine-worker.js), at document_start: circles are placed
 // as the page is parsed, before its first paint, and never inserted or removed under the reader.
-// A circle's size never depends on what is filed (badges float), so stored state can arrive later.
+// A circle's size never depends on what is filed ("+N" floats), so stored state can arrive later.
 (function startCaseMarker() {
   if (globalThis.LegalPinpointerCaseMarker) return;
   const onCanlii = /(?:^|\.)canlii\.org$/.test(location.hostname);
@@ -95,7 +95,7 @@
   function prune(key) {
     const marker = state.markers[key];
     const data = marker?.byProject?.[state.project];
-    if (data && !data.folderPath?.length && !data.folderIds?.length && !data.note && !data.badge) delete marker.byProject[state.project];
+    if (data && !data.folderPath?.length && !data.folderIds?.length && !data.note) delete marker.byProject[state.project];
     if (marker && !Object.keys(marker.byProject || {}).length) delete state.markers[key];
   }
 
@@ -122,23 +122,14 @@
 
   function render(wrap) {
     const key = wrap.dataset.key;
-    const data = entry(key);
     const parts = [];
     const others = filed(key).length - 1;
     if (others > 0) {
-      // Floats like the badge, so the circle's box never changes; drawn from the attribute, so it is never copied.
+      // Floats, so the circle's box never changes; drawn from the attribute, so it is never copied.
       const more = document.createElement('span');
       more.className = 'lpm-more';
       more.dataset.more = `+${others}`;
       parts.push(more);
-    }
-    if (data?.badge?.text) {
-      const badge = document.createElement('span');
-      badge.className = 'lpm-badge';
-      badge.style.background = data.badge.color || '#5b6670';
-      // Drawn by CSS from the attribute: the title Pinpointer cites from must not contain the badge's text.
-      badge.dataset.badge = data.badge.text;
-      parts.push(badge);
     }
     parts.push(circle(key));
     wrap.replaceChildren(...parts);
@@ -201,6 +192,7 @@
       const meta = { citation: document.querySelector('meta[name="lbh-citation"]')?.content || '',
         date: document.querySelector('meta[name="lbh-decision-date"]')?.content || '' };
       attach(key, title.textContent, (wrap) => { wrap.classList.add('lpm-title'); title.prepend(wrap); }, meta);
+      setMain(key, title.textContent, meta);
     }
   }
 
@@ -220,7 +212,15 @@
       if (key === here || !/^https:\/\/(?:www\.)?canlii\.org\//.test(link.href) || !isDocument(key)) continue;
       const label = clean(link.textContent);
       if (!label) continue;
-      attach(key, label, (wrap) => { wrap.classList.add('lpm-inline'); link.before(wrap); });
+      // A listed decision (Treatment's citing decisions are laid out as search results): its circle
+      // takes the place of the result's number, as on the search page; its other links get none.
+      const result = link.closest('.searchResult');
+      const number = result?.parentElement?.querySelector(':scope > .index span[data-result-number]');
+      if (result && !link.closest('.titleContainer .name')) continue;
+      if (number) {
+        if (number.previousElementSibling?.classList.contains('lpm-wrap')) continue;
+        attach(key, label, (wrap) => { wrap.classList.add('lpm-index', 'lpm-panel'); number.before(wrap); });
+      } else attach(key, label, (wrap) => { wrap.classList.add('lpm-inline'); link.before(wrap); });
     }
   }
   function watchPanel() {
@@ -255,8 +255,9 @@
     const key = siteKey(location.href);
     if (!key) return;
     seen.add(title);
-    attach(key, title.textContent, (wrap) => { wrap.classList.add('lpm-title'); title.prepend(wrap); },
-      { url: location.href.split(/[?#]/)[0], provider: 'court' });
+    const meta = { url: location.href.split(/[?#]/)[0], provider: 'court' };
+    attach(key, title.textContent, (wrap) => { wrap.classList.add('lpm-title'); title.prepend(wrap); }, meta);
+    setMain(key, title.textContent, meta);
     // The metadata table is parsed after the title; read it once the document is complete.
     const resolve = () => {
       const text = Array.from(document.querySelectorAll('.metadata td'), (cell) => clean(cell.textContent)).filter(Boolean).join(' | ').slice(0, 4000);
@@ -277,6 +278,7 @@
           refresh(canliiKey);
         });
         if (editorKey === key) editorKey = canliiKey;
+        if (main?.key === key) main.key = canliiKey;
         for (const wrap of wraps.get(key) || []) {
           wrap.dataset.key = canliiKey;
           if (label) labels.set(canliiKey, label);
@@ -305,17 +307,40 @@
     return cite ? `cite:${cite}` : '';
   }
 
-  // A circle for a document shown on another provider, placed by the caller; replaces any earlier one.
-  function attachExternal(slot, canliiUrl, citation, label, meta, siteUrl) {
-    const key = identity(canliiUrl, citation, siteUrl);
-    const existing = slot.querySelector('.lpm-wrap');
-    if (existing && existing.dataset.key === key) return;
+  // The page's own document (the one its title is about) and the banners that show a small copy of
+  // its circle: CanLII's header, and the citation bar on Westlaw, Lexis and court sites. A banner
+  // is an element its page script hands over (banner()); the copy is one more circle for the same
+  // document, so filing from either repaints both.
+  let main = null;
+  const banners = new Set();
+  /** Puts the main document's circle in `slot` (replacing another document's), or empties it. */
+  function fill(slot, className) {
+    const existing = slot.querySelector(':scope > .lpm-wrap');
+    if (existing && main && state.enabled && existing.dataset.key === main.key) return;
     existing?.remove();
-    if (!key || !state.enabled) return;
-    attach(key, label, (wrap) => { wrap.classList.add('lpm-title'); slot.appendChild(wrap); }, meta);
+    if (!main || !state.enabled) return;
+    attach(main.key, main.label, (wrap) => { wrap.classList.add(className); slot.appendChild(wrap); }, main.meta);
+  }
+  function fillBanners() {
+    for (const slot of banners) if (slot.isConnected) fill(slot, 'lpm-banner'); else banners.delete(slot);
+  }
+  function setMain(key, label, meta) {
+    main = key && currentVersion(key) ? { key, label: clean(label), meta } : null;
+    fillBanners();
+  }
+  function banner(slot) {
+    banners.add(slot);
+    fill(slot, 'lpm-banner');
   }
 
-  globalThis.LegalPinpointerCaseMarker = { attachExternal, identity, enabled: () => state.enabled };
+  // A circle for a document shown on another provider, placed by the caller; replaces any earlier
+  // one. That document is the page's own: the banners show it too.
+  function attachExternal(slot, canliiUrl, citation, label, meta, siteUrl) {
+    setMain(identity(canliiUrl, citation, siteUrl), label, meta);
+    fill(slot, 'lpm-title');
+  }
+
+  globalThis.LegalPinpointerCaseMarker = { attachExternal, banner, identity, enabled: () => state.enabled };
 
   function removeAll() {
     panelObserver?.disconnect();
@@ -348,12 +373,11 @@
       anchor, folders: state.folders, project: state.project, data: entry(key) || {}, multiple: state.multiple,
       // A press on a circle is the circle's own: it toggles this editor or opens another.
       inside: (event) => Boolean(circleIn(event)),
-      onChange({ folderIds, note, badge }) {
+      onChange({ folderIds, note }) {
         const at = current();
         const data = entry(at, true);
         core.setFilings(data, folderIds, state.folders);
         if (note) data.note = note; else delete data.note;
-        if (badge) data.badge = badge; else delete data.badge;
         prune(at);
         save(at);
         refresh(at);

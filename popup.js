@@ -16,6 +16,11 @@
   const marker = { folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
   let markerRendered = false, nameMode = null, statusTimer = 0;
   let supported = false, canliiAvailable = false, busy = false;
+  // Until storage is read (a few ms), the popup shows the snapshot its last session left: the tab,
+  // the settings and the first screen of folders, so it opens at its final size, on the right tab.
+  // The Marker tab takes no input until its data is in; a setting changed meanwhile is kept.
+  let ready = false;
+  const changedEarly = new Set();
 
   function status(text, error = false) {
     clearTimeout(statusTimer);
@@ -30,14 +35,23 @@
   // ---------------------------------------------------------------------------
   // Tabs
 
-  function selectTab(tab) {
-    if (!['marker', 'copy', 'settings'].includes(tab)) tab = 'marker';
+  const TABS = ['marker', 'copy', 'settings'];
+  function showPanel(tab) {
     document.body.dataset.tab = tab;
     for (const button of document.querySelectorAll('.tabs [data-tab]')) button.setAttribute('aria-selected', button.dataset.tab === tab);
     for (const panel of document.querySelectorAll('[data-panel]')) panel.hidden = panel.dataset.panel !== tab;
-    if (tab === 'marker' && !markerRendered) renderMarker();
-    if (tab === 'settings') renderSlots();
-    if (settings.popupTab !== tab) { settings.popupTab = tab; chrome.storage.local.set({ popupTab: tab }); }
+  }
+  // The open tab is remembered in the popup's own snapshot, not extension storage: a storage write
+  // would reach every open CanLII, Westlaw and Lexis tab.
+  function selectTab(tab) {
+    if (!TABS.includes(tab)) tab = 'marker';
+    showPanel(tab);
+    if (tab === 'marker' && ready && !markerRendered) renderMarker();
+    if (settings.popupTab !== tab) {
+      settings.popupTab = tab;
+      if (!ready) changedEarly.add('popupTab');
+      queueSnapshot();
+    }
   }
   document.querySelector('.tabs').addEventListener('click', (event) => {
     const button = event.target.closest('[data-tab]');
@@ -115,7 +129,9 @@
     input.addEventListener('change', () => {
       if (!input.checked) return;
       settings.pinpointStyle = input.value;
+      if (!ready) changedEarly.add('pinpointStyle');
       chrome.storage.local.set({ pinpointStyle: input.value });
+      queueSnapshot();
       status(input.value === 'bare' ? 'Bare pinpoints: 12–14, 7(2)–(4)' : 'Full pinpoints: at paras 12–14, ss 7(2)–(4)');
     });
   }
@@ -152,13 +168,12 @@
 
   // Settings live in the Settings tab and, for Case Marker, in the Marker tab's own settings.
   const onSettingChange = (event) => {
-    const target = event.target;
-    if (target.dataset.setting) {
-      settings[target.dataset.setting] = target.checked;
-      chrome.storage.local.set({ [target.dataset.setting]: target.checked });
-    } else if (target.dataset.settingSelect) {
-      settings[target.dataset.settingSelect] = target.value;
-      chrome.storage.local.set({ [target.dataset.settingSelect]: target.value });
+    const target = event.target, key = target.dataset.setting || target.dataset.settingSelect;
+    if (key) {
+      settings[key] = target.dataset.setting ? target.checked : target.value;
+      if (!ready) changedEarly.add(key);
+      chrome.storage.local.set({ [key]: settings[key] });
+      queueSnapshot();
     } else if (target.dataset.slot) {
       const key = target.dataset.slot;
       marker[key === 'canliiHotkeySlot1' ? 'slot1' : 'slot2'] = target.value || null;
@@ -260,9 +275,12 @@
 
   function sortDocuments(keys) {
     const sort = $('viewer-sort').value;
-    if (sort === 'alpha') keys.sort((a, b) => documentTitle(a).localeCompare(documentTitle(b)));
-    if (sort === 'newest') keys.sort((a, b) => (marker.markers[b].year || '').localeCompare(marker.markers[a].year || ''));
-    return keys;
+    if (sort !== 'alpha' && sort !== 'newest') return keys;
+    // Each document's sort value is read once, not at every comparison.
+    const value = sort === 'alpha' ? documentTitle : (key) => marker.markers[key].year || '';
+    const sorted = keys.map((key) => [value(key), key]);
+    sorted.sort(sort === 'alpha' ? (a, b) => core.compareNames(a[0], b[0]) : (a, b) => core.compareNames(b[0], a[0]));
+    return sorted.map(([, key]) => key);
   }
   const projectDocuments = () => Object.keys(marker.markers).filter((key) => projectData(key));
   /** In a folder or anywhere below it (all documents for the root): Copy links. */
@@ -324,7 +342,7 @@
     };
     walk(null, 0);
     for (const key of index.unfiled) list.push({ kind: 'document', key, depth: 0 });
-    if (adding === null) list.push({ kind: 'add', depth: 0 });
+    // A top-level folder's name field is the New folder button's own slot (renderTree), not a row.
     return { list, index };
   }
 
@@ -356,7 +374,8 @@
       // Filled in the folder's colour; the chevron already says open or closed.
       + `<label class="tglyph" title="${name} colour">${ICON('folder', `color:${color}`)}<input type="color" value="${color}" data-color aria-label="${name} colour"></label>`
       + `${label}<span class="tcount">${row.count || ''}</span>`
-      + `<span class="tactions"><button type="button" class="tmore" data-menu aria-label="${name} options">${ICON('more')}</button></span></div></div>`;
+      + `<span class="tactions"><button type="button" class="tplus" data-add-sub aria-label="New folder in ${name}" title="New folder in ${name}">${ICON('plus')}</button>`
+      + `<button type="button" class="tmore" data-menu aria-label="${name} options">${ICON('more')}</button></span></div></div>`;
   }
 
   // The rows in the page are one contiguous block, in index order (so Tab order follows the tree).
@@ -428,6 +447,14 @@
     $('tree-empty').hidden = Boolean(index.folders.size || index.total || adding !== undefined);
     $('copy-links').title = copyTitle();
     draw(true);
+    queueSnapshot();
+    const field = $('add-folder-input'), top = adding === null;
+    $('add-folder').hidden = top;
+    if (field.hidden === top) {
+      field.hidden = !top;
+      field.value = '';
+    }
+    if (top) { if (document.activeElement !== field) field.focus(); return; }
     const editing = rows.findIndex((row) => row.kind === 'add' || (row.kind === 'folder' && row.id === renaming));
     if (editing >= 0) { reveal(editing)?.querySelector('input.tname-input')?.focus(); return; }
     if (active !== undefined) focusFolder(active);
@@ -532,12 +559,11 @@
     editor?.close();
     editor = core.openEditor({
       anchor, folders: marker.folders, project: marker.project, data: projectData(key), multiple: settings.markerMultipleFolders,
-      onChange({ folderIds, note, badge }) {
+      onChange({ folderIds, note }) {
         const data = projectData(key);
         if (!data) return;
         core.setFilings(data, folderIds, marker.folders);
         if (note) data.note = note; else delete data.note;
-        if (badge) data.badge = badge; else delete data.badge;
         saveDocuments(key);
         renderTree();
       },
@@ -625,6 +651,7 @@
     const row = button.closest('.trow'), folderId = row?.dataset.folder;
     if (button.hasAttribute('data-menu')) { if ($('menu').target?.button === button && !$('menu').hidden) closeMenu(); else openMenu(button); }
     else if (button.hasAttribute('data-toggle')) { if (!closed.delete(folderId)) closed.add(folderId); renderTree({ reindex: false }); }
+    else if (button.hasAttribute('data-add-sub')) { closed.delete(folderId); adding = folderId; renderTree(); }
     else if (button.hasAttribute('data-select')) {
       // Choosing a folder changes only which row is marked: redraw the rows in view.
       selected = button.dataset.select || null;
@@ -711,6 +738,11 @@
   });
 
   $('add-folder').addEventListener('click', () => { adding = null; renderTree(); });
+  $('add-folder-input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); commitName(event.target); }
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelName(); }
+  });
+  $('add-folder-input').addEventListener('focusout', (event) => commitName(event.target));
   $('viewer-sort').addEventListener('change', renderTree);
 
   function documentUrl(key) {
@@ -719,7 +751,7 @@
   }
 
   // Copy links (as the original Case Marker's export does): each document's name linked and, with
-  // notes, its folder, badge, note, citation and date under it. One paragraph per document, so a
+  // notes, its folder, note, citation and date under it. One paragraph per document, so a
   // paste into Word has no breaks the list does not.
   const copyTitle = () => `Copy the links in ${selected ? marker.folders[selected]?.name : 'all documents'}`;
   $('copy-links').addEventListener('click', (event) => {
@@ -731,7 +763,6 @@
     const data = projectData(key) || {}, meta = marker.markers[key]?.meta || {}, title = documentTitle(key), lines = [];
     const folders = documentFilings(key).map(pathName);
     if (folders.length) lines.push(['Folder', folders.join('; ')]);
-    if (data.badge?.text) lines.push(['Badge', data.badge.text]);
     if (data.note) lines.push(['Note', data.note]);
     if (meta.citation && !title.includes(meta.citation)) lines.push(['Citation', meta.citation]);
     if (meta.date) lines.push(['Date', meta.date]);
@@ -764,7 +795,11 @@
     } catch (error) { status('The browser denied clipboard access.', true); }
   }
 
-  function renderSlots() {
+  // The hotkey folder lists hold only their chosen folder until one is opened: a select lays out
+  // every option it holds, and a project can have hundreds of folders.
+  let slotOptions = null;
+  function allSlotOptions() {
+    if (slotOptions) return slotOptions;
     const options = ['<option value="">—</option>'], folders = tree();
     const walk = (parentId, prefix) => {
       for (const [folderId, folder] of folders.get(parentId) || []) {
@@ -773,11 +808,34 @@
       }
     };
     walk(null, '');
-    for (const select of document.querySelectorAll('[data-slot]')) {
-      select.innerHTML = options.join('');
-      select.value = (select.dataset.slot === 'canliiHotkeySlot1' ? marker.slot1 : marker.slot2) || '';
-    }
+    return slotOptions = options.join('');
   }
+  function renderSlots() {
+    slotOptions = null;
+    for (const select of document.querySelectorAll('[data-slot]')) {
+      const value = (select.dataset.slot === 'canliiHotkeySlot1' ? marker.slot1 : marker.slot2) || '';
+      const name = value && marker.folders[value]?.projectId === marker.project
+        ? core.folderPath(marker.folders, value).map((at) => marker.folders[at].name).join(' › ') : '';
+      select.innerHTML = `<option value="">—</option>${name ? `<option value="${escapeHtml(value)}">${escapeHtml(name)}</option>` : ''}`;
+      select.value = name ? value : '';
+      delete select.dataset.full;
+    }
+    if (!$('marker-settings').hidden) fillSlotsSoon();
+  }
+  function fillSlot(select) {
+    if (!select || select.dataset.full) return;
+    const value = select.value;
+    select.innerHTML = allSlotOptions();
+    select.value = value;
+    select.dataset.full = 'true';
+  }
+  // Filled while the panel is open and nothing else is happening (the list's text and width do not
+  // change), or at once should a list be opened first.
+  let slotHandle = 0;
+  function fillSlotsSoon() {
+    if (!slotHandle) slotHandle = requestIdleCallback(() => { slotHandle = 0; for (const select of document.querySelectorAll('[data-slot]')) fillSlot(select); });
+  }
+  for (const type of ['pointerdown', 'focusin', 'keydown']) $('marker-settings').addEventListener(type, (event) => fillSlot(event.target.closest?.('[data-slot]')), true);
 
   function askName(mode, initial = '') {
     nameMode = mode;
@@ -863,9 +921,97 @@
 
   // ---------------------------------------------------------------------------
 
-  // A stored single-object canliiMarkers (before documents had their own keys) is split first.
-  Promise.all([chrome.storage.local.get({ ...SETTINGS, ...MARKER }), core.splitLegacy().catch(() => false).then(() => core.readDocuments())]).then(([stored, documents]) => {
-    for (const key of Object.keys(SETTINGS)) settings[key] = stored[key];
+  // The snapshot (localStorage, this popup's own and synchronous): the tab, the settings and the
+  // Marker tab's first screen as a new session draws it (all folders open, none selected, saved
+  // order). Written when the browser is idle after a change; read before the first paint.
+  const SNAPSHOT = 'lpPopupSnapshot', SNAPSHOT_VERSION = 1, SNAPSHOT_ROWS = Math.ceil(600 / ROW) + 1;
+  let snapshotHandle = 0;
+  function snapshotTree() {
+    if (!markerRendered || $('viewer-sort').value !== 'saved') return undefined;
+    const kept = { selected, renaming, adding, closed: [...closed] };
+    selected = renaming = null;
+    adding = undefined;
+    closed.clear();
+    try {
+      const { list, index } = flatten(false);
+      return { html: list.slice(0, SNAPSHOT_ROWS).map(rowHtml).join(''), height: list.length * ROW,
+        empty: !(index.folders.size || index.total), projects: $('project').innerHTML, title: copyTitle() };
+    } finally {
+      ({ selected, renaming, adding } = kept);
+      for (const folderId of kept.closed) closed.add(folderId);
+    }
+  }
+  function writeSnapshot() {
+    snapshotHandle = 0;
+    try {
+      const tree = snapshotTree();
+      localStorage.setItem(SNAPSHOT, JSON.stringify({ v: SNAPSHOT_VERSION, settings, tree: tree === undefined ? readSnapshot()?.tree : tree }));
+    } catch (_) { /* storage unavailable: the popup just paints without a snapshot */ }
+  }
+  function queueSnapshot() {
+    if (ready && !snapshotHandle) snapshotHandle = requestIdleCallback(writeSnapshot, { timeout: 300 });
+  }
+  // The popup can close at any moment: a pending snapshot is written as it goes.
+  const flushSnapshot = () => { if (snapshotHandle) { cancelIdleCallback(snapshotHandle); writeSnapshot(); } };
+  addEventListener('pagehide', flushSnapshot);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSnapshot(); });
+  function readSnapshot() {
+    try {
+      const value = JSON.parse(localStorage.getItem(SNAPSHOT));
+      return value?.v === SNAPSHOT_VERSION && value.settings ? value : null;
+    } catch (_) { return null; }
+  }
+
+  // Until the Marker tab's data is in (a few ms after it shows), its rows are the snapshot's: a click
+  // on one is held and made again on the same control once the real rows are drawn, so no click is
+  // lost; other input waits for the data.
+  let earlyClick = null;
+  const addressOf = (element) => {
+    const control = element.closest('button, a, select, input');
+    if (!control) return null;
+    const row = control.closest('#tree [data-at]');
+    const which = ['data-select', 'data-toggle', 'data-menu', 'data-project', 'id'].find((name) => control.hasAttribute(name));
+    const self = which ? `${control.tagName.toLowerCase()}[${which}="${CSS.escape(control.getAttribute(which))}"]` : `${control.tagName.toLowerCase()}.${CSS.escape(control.classList[0] || '')}`;
+    return row ? `#tree [data-at="${row.dataset.at}"] ${self}` : (control.id ? `#${CSS.escape(control.id)}` : self);
+  };
+  function replayEarlyClick() {
+    const address = earlyClick;
+    earlyClick = null;
+    if (address) requestAnimationFrame(() => document.querySelector(`[data-panel="marker"] ${address}`)?.click());
+  }
+  for (const type of ['click', 'auxclick', 'pointerdown', 'keydown', 'change', 'input', 'dragstart', 'submit']) {
+    document.querySelector('[data-panel="marker"]').addEventListener(type, (event) => {
+      if (ready) return;
+      if (type === 'click' && event.button === 0) earlyClick = addressOf(event.target);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  }
+
+  const snapshot = readSnapshot();
+  if (snapshot) {
+    for (const key of Object.keys(SETTINGS)) if (key in snapshot.settings) settings[key] = snapshot.settings[key];
+    renderSettings();
+    const tab = TABS.includes(settings.popupTab) ? settings.popupTab : 'marker';
+    showPanel(tab);
+    if (tab === 'marker' && snapshot.tree) {
+      $('project').innerHTML = snapshot.tree.projects;
+      $('tree').style.height = `${snapshot.tree.height}px`;
+      $('tree').innerHTML = snapshot.tree.html;
+      $('tree-empty').hidden = !snapshot.tree.empty;
+      $('copy-links').title = snapshot.tree.title;
+    }
+  }
+
+  // One read: extension storage holds only the settings and Case Marker's folders, projects and
+  // documents (should it ever hold more, read its keys first). A stored single-object canliiMarkers,
+  // from before documents had their own keys, is split first.
+  chrome.storage.local.get(null).then(async (all) => {
+    const stored = { ...SETTINGS, ...MARKER, ...all };
+    let documents = core.documentsIn(all);
+    if (all.canliiMarkers) documents = await core.splitLegacy().catch(() => false).then(() => core.readDocuments());
+    // The open tab comes from the snapshot; extension storage keeps it only from before there was one.
+    for (const key of Object.keys(SETTINGS)) if (!changedEarly.has(key) && !(snapshot && key === 'popupTab')) settings[key] = stored[key];
     marker.folders = stored.canliiFolders || {};
     marker.markers = documents;
     marker.projects = stored.canliiProjects || {};
@@ -873,8 +1019,12 @@
     marker.slot1 = stored.canliiHotkeySlot1;
     marker.slot2 = stored.canliiHotkeySlot2;
     ensureProject();
+    ready = true;
     renderSettings();
+    renderSlots();
     selectTab(settings.popupTab);
+    queueSnapshot();
+    replayEarlyClick();
   });
   setBusy(false);
   inspect();
