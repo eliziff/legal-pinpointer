@@ -607,7 +607,8 @@
     const { folderId, key, button } = $('menu').target, action = item.dataset.action;
     if ((action === 'delete' || action === 'remove') && !item.dataset.armed) {
       item.dataset.armed = 'true';
-      item.textContent = action === 'delete' ? 'Delete with its subfolders?' : 'Remove from this project?';
+      item.textContent = action === 'remove' ? 'Remove from this project?'
+        : tree().has(folderId) ? 'Delete with its subfolders?' : 'Delete this folder?';
       return;
     }
     closeMenu();
