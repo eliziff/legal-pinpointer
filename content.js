@@ -600,10 +600,10 @@
       const column = Math.min(5, Math.max(2.5, Math.ceil((Math.max(...pieces.map((piece) => width(piece.marker))) + 0.9) * 4) / 4));
       return {
         plain: pieces.map((piece) => `${'\t'.repeat(piece.depth)}${piece.marker}\t${piece.lead.trimStart()}${piece.bodyPlain.trimStart()}`).join('\n'),
-        html: pieces.map((piece) => {
-          const text = `${piece.lead.trimStart()}${piece.leading && piece.bodyHtml ? ' ' : ''}${piece.bodyHtml.trimStart()}`;
-          return `<p style="${quoteIndent(piece.depth + 1, column, true)}">${piece.markerHtml}<span style="mso-tab-count:1">\t</span>${text}</p>`;
-        }).join('')
+        html: pieces.reduce((word, piece) => {
+          word.add(piece.depth + 1, piece.marker, piece.markerHtml, `${piece.lead.trimStart()}${piece.leading && piece.bodyHtml ? ' ' : ''}${piece.bodyHtml.trimStart()}`);
+          return word;
+        }, wordQuote()).html()
       };
     }
     // Setting off (statuteCopyIndent), and every other kind of document: the inline form, which adds
@@ -1018,12 +1018,23 @@
   let sectionLabels = null;
   const sectionLabelled = () => (sectionLabels ??= Boolean(document.querySelector('[section]')));
 
-  // A statute quote's paragraph in Word's standard hanging indent: each level half an inch further
-  // in (Left), the number hanging half an inch (Hanging) with a tab stop at the text, so wrapped
-  // lines stay under the text. The column argument is unused: every level steps the standard 0.5".
-  function quoteIndent(columns, column, hanging) {
-    const left = columns * 36;
-    return `margin:0 0 0 ${left}pt${hanging ? `;text-indent:-36pt;tab-stops:${left}pt` : ''}`;
+  // A statute quote as Word's own list paragraphs. Word's default paste from other programs (Merge
+  // Formatting) drops a paragraph's indents but keeps list formatting, so each provision is a
+  // one-item Word list labelled with its own number ("334", "(a)"): a standard hanging indent, each
+  // level 0.5" further in, the number hanging 0.5" with a tab to the text, under every paste option.
+  // Unnumbered text (a lead-in, closing words) gets an empty label and sits at its level's text.
+  // Other programs read the fallback number and the plain indents instead.
+  function wordQuote() {
+    const lists = [], paragraphs = [];
+    const label = (marker) => marker.replace(/["\\%()[\]{}]/g, '\\$&');
+    return {
+      add(columns, marker, markerHtml, bodyHtml) {
+        const id = lists.length + 1, level = Math.min(9, Math.max(1, columns)), left = columns * 36;
+        lists.push(`@list l${id}{mso-list-id:${90000 + id};}\n@list l${id}:level${level}{mso-level-number-format:none;mso-level-text:"${label(marker)}";mso-level-tab-stop:${left}pt;mso-level-number-position:left;margin-left:${left}pt;text-indent:-36pt;}`);
+        paragraphs.push(`<p class=MsoListParagraph style="margin:0 0 0 ${left}pt;text-indent:-36pt;tab-stops:${left}pt;mso-list:l${id} level${level} lfo${id}"><![if !supportLists]><span style="mso-list:Ignore">${markerHtml}<span style="mso-tab-count:1">\t</span></span><![endif]>${bodyHtml}</p>`);
+      },
+      html: () => `<style>${lists.join('\n')}</style>${paragraphs.join('')}`
+    };
   }
 
   function canliiStatutePage() {
@@ -1246,19 +1257,19 @@
     const width = (label) => Array.from(label).reduce((sum, ch) => sum + (/\s/.test(ch) ? 0.28 : /[().,]/.test(ch) ? 0.33 : 0.56), 0);
     const column = Math.min(5, Math.max(2.5, Math.ceil((Math.max(0, ...kept.map((piece) => width(piece.start.marker))) + 0.9) * 4) / 4));
     const lead = (piece) => (piece.leading ? '… ' : '');
-    const html = [], plain = [];
+    const word = wordQuote(), plain = [];
     for (const piece of kept) {
       if (piece.rank == null) {
         const depth = piece.textRank - base;
         plain.push(`${'\t'.repeat(depth + 1)}${piece.body.plain}`);
-        html.push(`<p style="${quoteIndent(depth + 1, column, false)}">${piece.body.html}</p>`);
+        word.add(depth + 1, '', '', piece.body.html);
         continue;
       }
       const depth = piece.rank - base;
       const anchor = provisionAnchor(piece.block);
       const markerHtml = anchor ? anchorHtml(piece.start.marker, `${here}#${encodeURIComponent(anchor)}`) : core.escapeHtml(piece.start.marker);
       plain.push(`${'\t'.repeat(depth)}${piece.start.marker}\t${lead(piece)}${piece.body.plain}`);
-      html.push(`<p style="${quoteIndent(depth + 1, column, true)}">${markerHtml}<span style="mso-tab-count:1">\t</span>${lead(piece)}${piece.body.html}</p>`);
+      word.add(depth + 1, piece.start.marker, markerHtml, `${lead(piece)}${piece.body.html}`);
     }
     const numbered = kept.filter((piece) => piece.rank != null);
     const firstPiece = numbered[0], lastPiece = numbered[numbered.length - 1];
@@ -1266,7 +1277,7 @@
       first: firstPiece ? provisionLocator(firstPiece.block, firstPiece.start) : '',
       last: lastPiece && lastPiece !== firstPiece ? provisionLocator(lastPiece.block, lastPiece.start) : '',
       plain: plain.join('\n'),
-      html: html.join('')
+      html: word.html()
     };
   }
 
