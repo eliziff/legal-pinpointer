@@ -69,7 +69,7 @@
   }
   page.onInvalidate?.(() => { warmed = false; fullModel = null; });
   document.addEventListener('pointerover', (event) => {
-    if (!warmed && (event.target.closest?.('[data-lp-ui]') || (numbersOn() && event.target.closest?.(NUMBER)))) warm();
+    if (!warmed && (event.target.closest?.('[data-lp-ui]') || (numbersOn() && numberFrom(event.target)))) warm();
   }, { capture: true, passive: true });
   document.addEventListener('keydown', (event) => {
     if (!warmed && (event.key === 'Control' || event.key === 'Alt' || event.key === 'Meta')) warm();
@@ -211,6 +211,7 @@
     view.syncFrame = 0;
     if (!settings.unitCopyButtons) return;
     wrapWestlawNumbers();
+    wrapCanliiBrackets();
     let found;
     try { found = providers.quickUnits(document, location); } catch (_) { return; }
     const units = [], seen = new Set(), cited = citedBy(), stated = provider === 'canlii' ? numberedLocators() : null;
@@ -480,6 +481,41 @@
   const LABELS = '.canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel';
   const SECTION_LABEL = '.canlii_section, span.sectionLabel, .SectionNumber';
 
+  // A judgment's "[5]": CanLII writes the brackets as plain text around the paragraph anchor, so each
+  // is put in a span of its own (span.lp-br, styled with the number in content.css). Text and layout
+  // are unchanged; runs once as the script starts, then for anchors added later.
+  const bracketed = new WeakSet();
+  function wrapCanliiBrackets() {
+    if (provider !== 'canlii') return;
+    const wrap = (text, at) => {
+      const piece = at ? text.splitText(at) : text;
+      if (!at && piece.length > 1) piece.splitText(1);
+      const span = document.createElement('span');
+      span.className = 'lp-br';
+      piece.replaceWith(span);
+      span.appendChild(piece);
+    };
+    for (const anchor of document.getElementsByClassName('reflex-paragAnchor')) {
+      if (bracketed.has(anchor)) continue;
+      bracketed.add(anchor);
+      const before = anchor.previousSibling, after = anchor.nextSibling;
+      if (before?.nodeType !== 3 || !before.data.endsWith('[') || after?.nodeType !== 3 || !after.data.startsWith(']')) continue;
+      wrap(before, before.length - 1);
+      wrap(after, 0);
+    }
+  }
+  wrapCanliiBrackets();
+
+  /** The number an event's target is, or whose bracket it is. */
+  function numberFrom(target) {
+    const number = target?.closest?.(NUMBER);
+    if (number) return number;
+    const bracket = target?.closest?.('.lp-br');
+    if (!bracket) return null;
+    const sibling = bracket.previousElementSibling?.matches(NUMBER) ? bracket.previousElementSibling : bracket.nextElementSibling;
+    return sibling?.matches(NUMBER) ? sibling : null;
+  }
+
   function wrapWestlawNumbers() {
     if (provider !== 'westlaw' || !numbersOn()) return;
     for (const text of document.querySelectorAll('.crsw_labeledParagraph .co_paragraphText:not([data-lp-num])')) {
@@ -532,7 +568,7 @@
   const cleanHere = () => `${location.origin}${location.pathname}`;
 
   function numberAt(event) {
-    return numbersOn() ? event.target.closest?.(NUMBER) || null : null;
+    return numbersOn() ? numberFrom(event.target) : null;
   }
 
   /** The unit a number stands for: the locator its markup states (a statute's "45 (1)" is s 45(1),
@@ -596,19 +632,37 @@
   }
 
   const LINKABLE = NUMBER;
+  let copies = 0;
   document.addEventListener('copy', (event) => {
     if (globalThis.LegalPinpointerWritingClipboard) return;
     const selection = getSelection();
     if (selection.isCollapsed || !selection.rangeCount) return;
     const range = selection.getRangeAt(0);
     // Statute text: its provisions as indented paragraphs, as the quote copy writes them (content.js).
-    const statute = fullModel && page.current(fullModel) ? page.statuteCopy?.(fullModel, range) : null;
+    const copyId = ++copies;
+    const ready = fullModel && page.current(fullModel);
+    const statute = ready ? page.statuteCopy?.(fullModel, range) : null;
     if (statute) {
       event.preventDefault();
       event.stopImmediatePropagation();
       event.clipboardData.setData('text/plain', statute.plain);
       event.clipboardData.setData('text/html', statute.html);
       return;
+    }
+    // A copy made before the page's model is built (a quick select and Ctrl+C on a long statute):
+    // the browser's own copy goes in now, and once the model is in, a statute's indented copy
+    // replaces it, unless something else was copied meanwhile.
+    if (!ready && page.settings?.statuteCopyIndent !== false && page.statuteCopy && page.writeClipboard) {
+      const saved = range.cloneRange(), started = Date.now();
+      warm();
+      const finish = (model) => {
+        fullModel = model;
+        if (copyId !== copies || Date.now() - started > 8000) return;
+        const late = page.statuteCopy(model, saved);
+        if (late) return page.writeClipboard(late);
+      };
+      // This copy's own number links change the page for a moment; a build they overlap is retried.
+      page.model(false).then(finish, () => page.model(false).then(finish)).catch(() => {});
     }
     if (!numbersOn() || !LINKABLE) return;
     const common = range.commonAncestorContainer;
@@ -653,7 +707,7 @@
     if (tip) tip.hidden = true;
   }
   document.addEventListener('pointerover', (event) => {
-    const number = numbersOn() ? event.target.closest?.(NUMBER) : null;
+    const number = numbersOn() ? numberFrom(event.target) : null;
     const button = number || event.target;
     const text = number ? 'Copy the pinpoint' : button.dataset?.tip;
     if (!number && (!button.parentElement?.classList?.contains('lp-unit') || !text)) return hideTip();
@@ -690,7 +744,7 @@
       if (view.syncTimer || !settings.unitCopyButtons) return;
       for (const record of records) {
         for (const node of record.addedNodes) {
-          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui') || node.classList.contains('lp-num') || !(node.matches(ANCHORS) || node.querySelector(ANCHORS))) continue;
+          if (node.nodeType !== 1 || node.hasAttribute('data-lp-ui') || node.classList.contains('lp-num') || node.classList.contains('lp-br') || !(node.matches(ANCHORS) || node.querySelector(ANCHORS))) continue;
           view.syncTimer = setTimeout(() => { view.syncTimer = 0; queueSync(); }, view.units.length ? 250 : 0);
           return;
         }

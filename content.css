@@ -170,10 +170,9 @@ html:not(.lp-no-cited-by) .viibes-marker-toolbox {
 }
 
 /* Paragraph and provision numbers as the copy control (page-ui.js): the providers' own number
-   elements keep the page's type, marked only by a faint red hairline under the label, brackets included (a quiet link), from
-   the first paint. On hover, a soft red wash that reaches past the number by padding a negative
-   margin cancels (so no text moves), over a judgment's "[5]" brackets too. Nothing is added to the
-   page; underlines and a hover wash are the cheapest things to draw. html.lp-no-numbers turns it off. */
+   elements keep the page's type, set in Pinpointer red from the first paint. On hover, a soft red
+   wash that reaches past the number by padding a negative margin cancels (so no text moves), over a
+   judgment's "[5]" brackets too. html.lp-no-numbers turns it off. */
 html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name],
 html:not(.lp-no-numbers):not(#lp-none) .canlii_section_with_subsection,
 html:not(.lp-no-numbers):not(#lp-none) .canlii_subsection,
@@ -186,9 +185,9 @@ html:not(.lp-no-numbers):not(#lp-none) .lp-num {
   padding: 1px 2px !important;
   margin: -1px -2px !important;
   border-radius: 4px !important;
-  color: inherit !important;
+  color: #b72016 !important;
   text-decoration: none !important;
-  background: linear-gradient(rgb(213 43 30 / 40%), rgb(213 43 30 / 40%)) left 2px bottom 0 / calc(100% - 4px) 1px no-repeat !important;
+  background: none !important;
   cursor: pointer !important;
   transition: background-color 120ms, color 120ms !important;
 }
@@ -196,8 +195,26 @@ html:not(.lp-no-numbers):not(#lp-none) .lp-num {
 html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name] {
   padding: 1px 0.42em !important;
   margin: -1px -0.42em !important;
-  background-position: left 0.08em bottom 0 !important;
-  background-size: calc(100% - 0.16em) 1px !important;
+}
+
+/* A judgment's brackets (span.lp-br, page-ui.js) take the number's colour, so "[5]" reads as one. */
+html:not(.lp-no-numbers):not(#lp-none) span.lp-br {
+  color: #b72016 !important;
+  cursor: pointer !important;
+}
+
+/* The numbers' weight, left out of a copy (the paste keeps the page's own weights). */
+html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name]:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) .canlii_section_with_subsection:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) .canlii_subsection:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) .canlii_section:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) span.sectionLabel:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) .SectionNumber:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) span[id^="PARA_"]:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) .lp-num:not(.lp-copying *),
+html:not(.lp-no-numbers):not(#lp-none) span.lp-br:not(.lp-copying *) {
+  font-weight: 600 !important;
 }
 
 /* A label inside a label (federal "(1)" in its lawlabel) is one tag, not two tints. */
@@ -219,26 +236,21 @@ html:not(.lp-no-numbers):not(#lp-none) .SectionNumber:hover,
 html:not(.lp-no-numbers):not(#lp-none) span.lawlabel:hover,
 html:not(.lp-no-numbers):not(#lp-none) span[id^="PARA_"]:hover,
 html:not(.lp-no-numbers):not(#lp-none) .lp-num:hover {
-  background: rgb(213 43 30 / 9%) !important;
+  background: rgb(213 43 30 / 10%) !important;
   color: #b72016 !important;
 }
 
-/* A judgment's brackets are the page's text, outside the anchor: the "5" keeps their colour, so
-   "[5]" changes as one under its wash. */
-html:not(.lp-no-numbers):not(#lp-none) a.reflex-paragAnchor[name]:hover {
-  color: inherit !important;
-}
-
 /* While a selection is copied, its numbers are the page's plain text (no tag look in the paste). */
-html .lp-copying a.reflex-paragAnchor[name],
-html .lp-copying .canlii_section_with_subsection,
-html .lp-copying .canlii_subsection,
-html .lp-copying .canlii_section,
-html .lp-copying span.sectionLabel,
-html .lp-copying .SectionNumber,
-html .lp-copying span.lawlabel,
-html .lp-copying span[id^="PARA_"],
-html .lp-copying .lp-num {
+html:not(#lp-none) .lp-copying a.reflex-paragAnchor[name],
+html:not(#lp-none) .lp-copying .canlii_section_with_subsection,
+html:not(#lp-none) .lp-copying .canlii_subsection,
+html:not(#lp-none) .lp-copying .canlii_section,
+html:not(#lp-none) .lp-copying span.sectionLabel,
+html:not(#lp-none) .lp-copying .SectionNumber,
+html:not(#lp-none) .lp-copying span.lawlabel,
+html:not(#lp-none) .lp-copying span[id^="PARA_"],
+html:not(#lp-none) .lp-copying .lp-num,
+html:not(#lp-none) .lp-copying span.lp-br {
   padding: 0 !important;
   margin: 0 !important;
   background: none !important;

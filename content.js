@@ -1000,6 +1000,8 @@
     /** Where a pinpoint to this node links (its CanLII paragraph or provision where there is one). */
     linkFor: (model, node) => targetForNode(model, { kind: 'node' }, node),
     statuteCopy,
+    /** Writes plain and HTML text to the clipboard (outside a copy event). */
+    writeClipboard: (payload) => clipboardWrite(payload),
     onInvalidate: (listener) => invalidationListeners.add(listener),
     copyUnit,
     copyControl,
