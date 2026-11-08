@@ -602,7 +602,7 @@
         plain: pieces.map((piece) => `${'\t'.repeat(piece.depth)}${piece.marker}\t${piece.lead.trimStart()}${piece.bodyPlain.trimStart()}`).join('\n'),
         html: pieces.map((piece) => {
           const text = `${piece.lead.trimStart()}${piece.leading && piece.bodyHtml ? ' ' : ''}${piece.bodyHtml.trimStart()}`;
-          return `<p style="margin:0 0 0 ${(piece.depth + 1) * column}em;text-indent:-${column}em">${piece.markerHtml}<span style="mso-tab-count:1">\t</span>${text}</p>`;
+          return `<p style="${quoteIndent(piece.depth + 1, column, true)}">${piece.markerHtml}<span style="mso-tab-count:1">\t</span>${text}</p>`;
         }).join('')
       };
     }
@@ -1018,6 +1018,14 @@
   let sectionLabels = null;
   const sectionLabelled = () => (sectionLabels ??= Boolean(document.querySelector('[section]')));
 
+  // A statute quote's paragraph as Word lays out a block quotation: the whole quote set in half an
+  // inch from both margins, each level a column further in, a number hanging in its column with a tab
+  // stop at its text (points, Word's own unit; a column is measured in ems of 12pt).
+  function quoteIndent(columns, column, hanging) {
+    const left = 36 + columns * column * 12, hang = column * 12;
+    return `margin:0 36pt 0 ${left}pt${hanging ? `;text-indent:-${hang}pt;tab-stops:${left}pt` : ''}`;
+  }
+
   function canliiStatutePage() {
     return /(^|\.)canlii\.org$/.test(location.hostname) && /\/laws\//.test(location.pathname);
   }
@@ -1243,14 +1251,14 @@
       if (piece.rank == null) {
         const depth = piece.textRank - base;
         plain.push(`${'\t'.repeat(depth + 1)}${piece.body.plain}`);
-        html.push(`<p style="margin:0 0 0 ${(depth + 1) * column}em">${piece.body.html}</p>`);
+        html.push(`<p style="${quoteIndent(depth + 1, column, false)}">${piece.body.html}</p>`);
         continue;
       }
       const depth = piece.rank - base;
       const anchor = provisionAnchor(piece.block);
       const markerHtml = anchor ? anchorHtml(piece.start.marker, `${here}#${encodeURIComponent(anchor)}`) : core.escapeHtml(piece.start.marker);
       plain.push(`${'\t'.repeat(depth)}${piece.start.marker}\t${lead(piece)}${piece.body.plain}`);
-      html.push(`<p style="margin:0 0 0 ${(depth + 1) * column}em;text-indent:-${column}em">${markerHtml}<span style="mso-tab-count:1">\t</span>${lead(piece)}${piece.body.html}</p>`);
+      html.push(`<p style="${quoteIndent(depth + 1, column, true)}">${markerHtml}<span style="mso-tab-count:1">\t</span>${lead(piece)}${piece.body.html}</p>`);
     }
     const numbered = kept.filter((piece) => piece.rank != null);
     const firstPiece = numbered[0], lastPiece = numbered[numbered.length - 1];
