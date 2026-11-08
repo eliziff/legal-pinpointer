@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legal Pinpointer</title>
+<meta name="description" content="A browser extension for Canadian legal research: pinpoint citations in one keystroke, CanLII from Westlaw and Lexis, statutes that paste into Word properly, and more.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf8f5; --surface: #ffffff; --ink: #1c1917; --soft: #44403c; --muted: #78716c; --line: #e7e2dc;
+    --red: #b72016; --red-soft: #fdeceb; --wash: rgb(213 43 30 / 10%); --code: #f4f1ec;
+    --shadow: 0 1px 2px rgb(0 0 0 / 5%), 0 12px 32px -18px rgb(0 0 0 / 22%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161412; --surface: #1f1c19; --ink: #f5f2ee; --soft: #d6d0c9; --muted: #a39b93; --line: #34302b;
+      --red: #ff7a6b; --red-soft: #3a2220; --wash: rgb(255 122 107 / 14%); --code: #2a2622; --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 12px 32px -18px rgb(0 0 0 / 60%); }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 Inter, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--red); text-underline-offset: 3px; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+  h1, h2, h3 { font-family: Fraunces, Georgia, serif; font-weight: 650; letter-spacing: -0.01em; line-height: 1.15; margin: 0; }
+  h2 { font-size: clamp(26px, 4vw, 34px); }
+  h3 { font-size: 20px; font-weight: 500; }
+  p { margin: 0 0 12px; }
+  kbd { font: 600 12.5px/1 Inter, system-ui, sans-serif; padding: 3px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--surface); color: var(--ink); white-space: nowrap; }
+  code { font: 13.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--code); padding: 1px 6px; border-radius: 5px; }
+
+  /* Hero */
+  header.hero { padding: 72px 0 56px; border-bottom: 1px solid var(--line); background:
+      radial-gradient(900px 380px at 85% -10%, var(--red-soft), transparent 60%), var(--bg); }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; color: var(--soft); font-size: 15px; }
+  .brand i { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: #d52b1e; color: #fff; font-style: normal; font-family: Fraunces, serif; font-size: 18px; }
+  .hero h1 { font-size: clamp(38px, 7vw, 64px); margin: 22px 0 16px; max-width: 14ch; }
+  .hero h1 em { font-style: normal; color: var(--red); }
+  .lede { font-size: 19px; color: var(--soft); max-width: 60ch; }
+  .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; align-items: center; }
+  .button { display: inline-flex; align-items: center; gap: 10px; padding: 13px 22px; border-radius: 10px; font-weight: 600; text-decoration: none; }
+  .button.primary { background: #d52b1e; color: #fff; box-shadow: 0 8px 20px -10px rgb(213 43 30 / 70%); }
+  .button.primary:hover { background: #b72016; }
+  .button.ghost { color: var(--ink); border: 1px solid var(--line); background: var(--surface); }
+  .fine { font-size: 13.5px; color: var(--muted); }
+
+  /* Demo strip: what a pinpoint copy produces */
+  .demo { margin-top: 40px; display: grid; grid-template-columns: 1fr auto 1fr; gap: 18px; align-items: center; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; }
+  .demo .card { font-size: 15px; }
+  .label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .num { color: var(--red); font-weight: 600; border-radius: 4px; padding: 1px 3px; margin: -1px -3px; background: var(--wash); }
+  .arrow { font-size: 26px; color: var(--muted); }
+  .paste a { color: #1d4ed8; }
+  @media (prefers-color-scheme: dark) { .paste a { color: #93b4ff; } }
+
+  /* Sections */
+  section { padding: 64px 0; border-bottom: 1px solid var(--line); }
+  .kicker { color: var(--red); font-weight: 600; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 10px; }
+  .intro { color: var(--soft); max-width: 66ch; margin: 14px 0 30px; }
+  .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .feature h3 { margin-bottom: 8px; }
+  .feature p { color: var(--soft); font-size: 15px; }
+  .tip { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--code); font-size: 14px; color: var(--soft); }
+  .tip b { color: var(--ink); }
+  .how { margin-top: 12px; font-size: 13.5px; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 10px; }
+  .how b { color: var(--soft); font-weight: 600; }
+
+  /* Steps */
+  ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; display: grid; gap: 14px; }
+  ol.steps li { counter-increment: s; display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start; }
+  ol.steps li::before { content: counter(s); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--red-soft); color: var(--red); font-weight: 700; font-family: Fraunces, serif; }
+
+  /* Shortcut table */
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td { padding: 11px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  td:first-child { white-space: nowrap; width: 1%; padding-right: 20px; }
+  tr:first-child td { border-top: 0; }
+
+  .two { display: grid; gap: 28px; grid-template-columns: 1fr 1fr; align-items: start; }
+  .marker-demo { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .circle { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .ring { width: 62%; height: 62%; border-radius: 50%; box-shadow: 0 0 0 2px rgb(255 255 255 / 85%); }
+  .empty { box-shadow: inset 0 0 0 2px #c3cbd3; }
+  footer { padding: 40px 0 60px; color: var(--muted); font-size: 14px; }
+  @media (max-width: 760px) {
+    .demo { grid-template-columns: 1fr; } .arrow { transform: rotate(90deg); justify-self: center; }
+    .two { grid-template-columns: 1fr; }
+    td:first-child { white-space: normal; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="brand"><i>¶</i> Legal Pinpointer</span>
+    <h1>Pinpoint citations in <em>one keystroke.</em></h1>
+    <p class="lede">A browser extension for Canadian legal research. It copies properly formatted, linked citations and pinpoints from CanLII, Westlaw and Lexis, finds the CanLII version of what you're reading, pastes statutes into Word with their structure intact, and keeps track of the cases you're collecting.</p>
+    <div class="actions">
+      <a class="button primary" href="https://github.com/eliziff/legal-pinpointer/releases/latest/download/legal-pinpointer.zip">↓ Download for Chrome or Edge</a>
+      <a class="button ghost" href="#install">How to install</a>
+    </div>
+    <p class="fine" style="margin-top:12px">Free · Works in Chrome and Microsoft Edge · Nothing you read or copy leaves your computer</p>
+
+    <div class="demo" aria-label="Example of a pinpoint copy">
+      <div class="card">
+        <div class="label">On the page, you click</div>
+        <span class="num">[47]</span>&nbsp; In my view, the trial judge erred in failing to consider whether…
+      </div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="card paste">
+        <div class="label">You paste into Word</div>
+        <i><a href="#">R v Example</a></i>, 2023 SCC 12 at para <a href="#">47</a>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="install">
+  <div class="wrap two">
+    <div>
+      <div class="kicker">Getting started</div>
+      <h2>Install in two minutes</h2>
+      <p class="intro">Legal Pinpointer isn't in the Chrome Web Store, so it's installed by hand. You only do this once; updating is the same steps with the new download.</p>
+    </div>
+    <ol class="steps">
+      <li><div><b>Download</b> <a href="https://github.com/eliziff/legal-pinpointer/releases/latest/download/legal-pinpointer.zip">legal-pinpointer.zip</a> and <b>extract it</b> (right-click › Extract All) to a folder you'll keep, such as <code>Documents\Legal Pinpointer</code>. Don't delete this folder afterwards: the browser runs the extension from it.</div></li>
+      <li><div>In the address bar, go to <code>chrome://extensions</code> (Edge: <code>edge://extensions</code>).</div></li>
+      <li><div>Turn on <b>Developer mode</b> (a switch at the top right in Chrome, on the left in Edge).</div></li>
+      <li><div>Click <b>Load unpacked</b> and choose the folder you extracted (the one containing <code>manifest.json</code>).</div></li>
+      <li><div>Click the puzzle-piece icon in the toolbar and <b>pin</b> Legal Pinpointer, so its menu is one click away.</div></li>
+    </ol>
+  </div>
+  <div class="wrap">
+    <p class="tip" style="margin-top:26px"><b>To update later:</b> download the new zip, extract it over the same folder (replacing the files), then press the circular <b>Reload</b> arrow on Legal Pinpointer's card in <code>chrome://extensions</code>. Your folders, settings and saved cases are kept.</p>
+  </div>
+</section>
+
+<section id="copying">
+  <div class="wrap">
+    <div class="kicker">The core</div>
+    <h2>Copying citations and pinpoints</h2>
+    <p class="intro">Everything here works on CanLII, Westlaw and Lexis decisions and legislation. Copies go into Word (or Outlook, Google Docs…) as a proper citation: the case name in italics, linked to the document, and the pinpoint linked to the exact paragraph or section.</p>
+
+    <div class="grid">
+      <div class="card feature">
+        <h3>Click the number</h3>
+        <p>Paragraph and section numbers are shown in red. <b>Click one</b> and its pinpoint is copied: <code>at para 47</code>, <code>s 7(2)(b)</code>. The number flashes to confirm.</p>
+        <div class="tip"><b>Not obvious:</b> this copies just the pinpoint. Use it right after a citation you've already written, or after copying the citation itself (below).</div>
+      </div>
+      <div class="card feature">
+        <h3>The keyboard, for anything</h3>
+        <p>Point at a paragraph (or select a passage) and press:</p>
+        <p><kbd>Ctrl X</kbd> pinpoint &nbsp;·&nbsp; <kbd>Ctrl ⇧ X</kbd> quote with its pinpoint &nbsp;·&nbsp; <kbd>Alt X</kbd> the citation.</p>
+        <div class="tip"><b>Not obvious:</b> with text selected, the pinpoint covers the selection, so selecting from para 12 into para 14 copies <code>at paras 12–14</code>. You don't need to click anything first: just point.</div>
+      </div>
+      <div class="card feature">
+        <h3>Statutes that paste properly</h3>
+        <p>Copy any part of a statute on CanLII (ordinary <kbd>Ctrl C</kbd> works) and it pastes into Word indented like a statute: section, then (a), (i), (A), each a level further in, with wrapped lines lined up.</p>
+        <div class="tip"><b>Not obvious:</b> definitions keep their term (<code>s 2 “indictment” (a)</code>), and headings and marginal notes are left out. Turn it off in Settings › <i>Indented statute copies</i> if you want plain text.</div>
+      </div>
+      <div class="card feature">
+        <h3>Your copies keep their links</h3>
+        <p>Even an ordinary <kbd>Ctrl C</kbd> of a passage keeps its paragraph or section numbers linked to the source, so a block quote in your memo still points back to the exact paragraph.</p>
+        <div class="how"><b>How it works:</b> just before the browser copies, the numbers in your selection are briefly turned into links, then put back.</div>
+      </div>
+      <div class="card feature">
+        <h3>Short or full pinpoints</h3>
+        <p>The popup's Copy tab switches between <code>at paras 12–14</code> and bare <code>12–14</code>, for when your sentence already says “paragraph”.</p>
+      </div>
+      <div class="card feature">
+        <h3>Decisions without paragraph numbers</h3>
+        <p>Older Supreme Court decisions on CanLII are pinpointed to the <b>report page</b> (<code>at 534</code>), read from the page breaks CanLII prints. A decision with neither paragraph numbers nor pages copies its citation without a pinpoint rather than a wrong one.</p>
+        <div class="how"><b>How it works:</b> a built-in citation engine reads the document's structure (paragraphs, sections, report pages) and checks it's plausible: a few numbered headings in an unnumbered judgment aren't taken for paragraphs.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="canlii">
+  <div class="wrap">
+    <div class="kicker">Across sources</div>
+    <h2>Westlaw, Lexis and CanLII, connected</h2>
+    <p class="intro">Reading on Westlaw or Lexis but want to cite or share the free CanLII version? It's found for you.</p>
+    <div class="grid">
+      <div class="card feature">
+        <h3>The CanLII button</h3>
+        <p>On a Westlaw or Lexis case or statute, a small CanLII leaf appears beside the title. <b>Lit</b> means a CanLII version was found; click it (or press <kbd>Alt C</kbd>) to open it. A courthouse icon instead means the decision is only on its court's own website, which it opens.</p>
+        <div class="how"><b>How it works:</b> it reads every parallel citation in the document's header (S.C.R., D.L.R., C.C.C., Quicklaw numbers…) and matches them against a table of about 145,000 citation aliases. Your search never leaves your computer.</div>
+      </div>
+      <div class="card feature">
+        <h3>A citation bar that follows you</h3>
+        <p>Scroll down a Westlaw, Lexis or court-website judgment and a slim bar appears at the top with the full citation, <b>Copy link</b> and the CanLII button, so you never scroll back up to find them.</p>
+      </div>
+      <div class="card feature">
+        <h3>The full name on CanLII</h3>
+        <p>CanLII's sticky header shows the document's full style of cause (not a truncated crumb), with a copy-link button, and names the browser tab after it, so a dozen open cases are easy to tell apart.</p>
+      </div>
+      <div class="card feature">
+        <h3>Quieter Westlaw and Lexis</h3>
+        <p>Their pop-up highlight/annotate menus no longer jump up every time you select text, and titles become plain selectable text instead of a link that reloads the page.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="marker">
+  <div class="wrap two">
+    <div>
+      <div class="kicker">Case Marker</div>
+      <h2>Keep track of what you've read</h2>
+      <p class="intro">A coloured circle sits beside every case: on CanLII search results, in a document's title, in the header as you scroll, and on Westlaw, Lexis and court sites. Click it to file the case into a folder for the matter you're working on.</p>
+      <div class="marker-demo">
+        <span class="circle empty" title="Not filed"></span><span class="fine">not yet filed</span>
+        <span class="circle" style="background:#e0533d"></span><span class="fine">filed in “Charter”</span>
+        <span class="circle" style="background:#3b7ddd"><span class="ring" style="background:#2f9e6e"></span></span><span class="fine">in a subfolder (rings show the path)</span>
+      </div>
+    </div>
+    <div class="card feature">
+      <h3>Things worth knowing</h3>
+      <p><b>The same case everywhere.</b> A case filed on Westlaw shows as filed on CanLII and on Lexis too: it's tracked by its identity, not the website.</p>
+      <p><b>File without clicking.</b> Hover over any circle and press <kbd>C</kbd> or <kbd>V</kbd> to file it straight into your two favourite folders (chosen in the Marker tab's settings), or <kbd>N</kbd> to clear it. Fast when triaging search results.</p>
+      <p><b>Projects.</b> Keep a separate set of folders per file or matter, and switch between them at the top of the Marker tab.</p>
+      <p><b>Copy your research.</b> The copy button in the Marker tab copies every case in a folder as linked names, optionally with your notes, ready for a memo or email.</p>
+      <p><b>Nothing is lost.</b> Deleted folders, projects and cases go to the Trash and come back with everything filed in them.</p>
+    </div>
+  </div>
+</section>
+
+<section id="search">
+  <div class="wrap">
+    <div class="kicker">Finding things</div>
+    <h2>Search and links</h2>
+    <div class="grid" style="margin-top:26px">
+      <div class="card feature">
+        <h3>Tab Search <kbd>Ctrl ⇧ S</kbd></h3>
+        <p>Searches the text of every tab you have open, in a side panel, and jumps you to each hit. Useful when you have twenty judgments open and remember a phrase but not which one.</p>
+        <div class="tip"><b>Not obvious:</b> it can search just this tab, this tab group, or the whole window. Tabs the browser has put to sleep are woken to be read (Settings › <i>Wake sleeping tabs</i>).</div>
+      </div>
+      <div class="card feature">
+        <h3>CanLII text search <kbd>Ctrl ⇧ E</kbd></h3>
+        <p>Jumps straight to CanLII's document-text search from any page, including a new tab.</p>
+      </div>
+      <div class="card feature">
+        <h3>Link to a passage in a PDF <kbd>Ctrl ⇧ F</kbd></h3>
+        <p>Copy a passage from a PDF (or any page), press the shortcut, and you get a link that opens the document scrolled to and highlighting that exact text.</p>
+        <div class="tip"><b>Not obvious:</b> it works from what you <i>copied</i>, so copy first. Also on the right-click menu. Settings choose whether you get the bare link or the text, linked.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="reference">
+  <div class="wrap two">
+    <div>
+      <div class="kicker">Reference</div>
+      <h2>Every shortcut</h2>
+      <p class="intro">The <kbd>Ctrl</kbd>/<kbd>Alt</kbd> + <kbd>X</kbd> keys work on CanLII, Westlaw and Lexis documents. If a shortcut is taken by another extension, the popup tells you; change it at <code>chrome://extensions/shortcuts</code>.</p>
+      <p class="intro">Every feature can be switched off in the popup's <b>Settings</b> tab, including the red numbers, the citation bar and the circles.</p>
+    </div>
+    <div class="card">
+      <table>
+        <tr><td><kbd>Click</kbd> a red number</td><td>Copy that paragraph's or provision's pinpoint</td></tr>
+        <tr><td><kbd>Ctrl X</kbd></td><td>Pinpoint of the paragraph you're pointing at, or your selection</td></tr>
+        <tr><td><kbd>Ctrl ⇧ X</kbd></td><td>The quote, with its pinpoint</td></tr>
+        <tr><td><kbd>Alt X</kbd></td><td>The citation, linked</td></tr>
+        <tr><td><kbd>Alt C</kbd></td><td>Open the CanLII version</td></tr>
+        <tr><td><kbd>Ctrl ⇧ S</kbd></td><td>Tab Search</td></tr>
+        <tr><td><kbd>Ctrl ⇧ E</kbd></td><td>CanLII text search</td></tr>
+        <tr><td><kbd>Ctrl ⇧ F</kbd></td><td>Link to the text you copied</td></tr>
+        <tr><td>Hover + <kbd>C</kbd> / <kbd>V</kbd> / <kbd>N</kbd></td><td>File a case in your first / second folder, or clear it</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="privacy" style="border-bottom:0">
+  <div class="wrap">
+    <div class="kicker">Under the hood</div>
+    <h2>Private by design</h2>
+    <p class="intro">Everything runs inside your browser. The citation engine, the table of 145,000 citation aliases and the list of every CanLII statute ship with the extension, so finding a CanLII version or formatting a citation never sends what you're reading anywhere. Your folders and settings are stored only in your browser profile; use <b>Export</b> in the Marker tab's settings to back them up or move them to another computer.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">Legal Pinpointer · made by a practitioner, for everyday research and writing · <a href="https://github.com/eliziff/legal-pinpointer/releases">all releases</a></div>
+</footer>
+</body>
+</html>
