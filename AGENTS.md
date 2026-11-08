@@ -18,5 +18,6 @@
 ## Local test inputs
 
 - `LOCAL-RESOURCES.md` (gitignored, at the checkout root, when present) says where the
-  local test inputs are and how to run the page checks. Read it before page-UI work;
-  never commit it or name its contents in the repo.
+  local test inputs are (including the one store of every cached CanLII page) and how to
+  run the page checks. Read it before page-UI work or anything that needs cached pages, and
+  add new cached pages where it says; never commit it or name its contents in the repo.
