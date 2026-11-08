@@ -467,7 +467,8 @@
       ? escapeRegex(`(${parsed.suffixes[parsed.suffixes.length - 1]})`)
       : value;
     const provisionValue = local === value ? value : `(?:${value}|${local})`;
-    if (kind === 'page') return new RegExp(`^\\s*\\[page\\s+${value}\\]\\s*`, 'i');
+    // "[page 31]", or CanLII's centred "page 31" on a line of its own.
+    if (kind === 'page') return new RegExp(`^\\s*(?:\\[page\\s+${value}\\]|page\\s+${value}(?=[ \\t]*\\n))\\s*`, 'i');
     if (kind === 'section' || kind === 'silcrow') return new RegExp(`^\\s*(?:(?:s(?:ection)?|§)\\.?\\s*)?${provisionValue}[.:]?\\s+`, 'i');
     if (kind === 'rule') return new RegExp(`^\\s*(?:r(?:ule)?\\.?\\s*)?${provisionValue}[.:]?\\s+`, 'i');
     if (kind === 'article') return new RegExp(`^\\s*(?:art(?:icle)?\\.?\\s*)?${provisionValue}[.:]?\\s+`, 'i');

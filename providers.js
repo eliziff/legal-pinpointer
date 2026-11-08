@@ -734,17 +734,25 @@ ${base.headerText || ''}`), read(own)]);
     }));
   }
 
+  // A report's page break: "[page 31]", or a line of its own reading "page 31" (CanLII's older
+  // Supreme Court decisions centre it: <center><i><b>page 31</b></i></center>). A bare "page 31"
+  // inside a sentence is never one.
+  const pageMarker = (locator) => `(?:\\[page[ \\t]+${locator}\\]|(?:^|(?<=\\n))[ \\t]*page[ \\t]+${locator}(?=[ \\t]*(?:\\r?\\n|$)))`;
   function exactPageMarkerBefore(text, contentStart, locator) {
     const from = Math.max(0, contentStart - 100);
     const prefix = text.slice(from, contentStart);
-    const match = prefix.match(new RegExp(`\\[page[ \\t]+${locator}\\][ \\t\\r\\n]*$`, 'i'));
+    const match = prefix.match(new RegExp(`${pageMarker(locator)}[ \\t\\r\\n]*$`, 'i'));
     if (!match) return null;
-    return { start: from + match.index, end: contentStart, text: `[page ${locator}]` };
+    const start = from + match.index;
+    // The window can open mid-line: a bare marker must start a line of the whole text.
+    if (match[0][0] !== '[' && start > 0 && text[start - 1] !== '\n') return null;
+    return { start, end: contentStart, text: `[page ${locator}]` };
   }
 
   function exactPageMarkerAt(text, start, locator) {
+    if (start > 0 && text[start - 1] !== '\n' && text[start] !== '[') return null;
     const match = text.slice(start, start + 100)
-      .match(new RegExp(`^\\[page[ \\t]+${locator}\\][ \\t\\r\\n]*`, 'i'));
+      .match(new RegExp(`^${pageMarker(locator)}[ \\t\\r\\n]*`, 'i'));
     return match ? { start, end: start + match[0].length, text: `[page ${locator}]` } : null;
   }
 
@@ -773,8 +781,7 @@ ${base.headerText || ''}`), read(own)]);
     if (nodes.length) {
       const last = nodes[nodes.length - 1];
       const expected = String(Number(last.locator) + 1);
-      const match = plane.text.slice(last.endOffset, last.endOffset + 100)
-        .match(new RegExp(`^\\[page[ \\t]+${expected}\\]`, 'i'));
+      const match = exactPageMarkerAt(plane.text, last.endOffset, expected);
       if (match) {
         const start = last.endOffset;
         const startPoint = fragments.boundaryPoint(plane, start);
