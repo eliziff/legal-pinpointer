@@ -55,7 +55,23 @@
       <div class="mt-1.5 flex h-7 items-center">
         <button type="button" class="btn btn-outline btn-sm" id="add-folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>New folder</button>
         <input id="add-folder-input" class="field h-7 min-w-0 flex-1 text-xs" data-add maxlength="80" placeholder="New folder name" aria-label="New folder name" autocomplete="off" spellcheck="false" hidden>
+        <button type="button" class="btn btn-ghost btn-sm ms-auto text-muted" id="open-trash" title="Deleted folders and removed documents" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span>Trash</span><span id="trash-count" class="tabular-nums"></span></button>
       </div>
+      <dialog id="confirm" class="dialog" aria-labelledby="confirm-title">
+        <form method="dialog">
+          <div class="dialog-body">
+            <h2 class="dialog-title" id="confirm-title"></h2>
+            <p class="dialog-text" id="confirm-text"></p>
+            <label class="dialog-check" id="confirm-check-row" hidden><input type="checkbox" id="confirm-check"><span id="confirm-check-label"></span></label>
+          </div>
+          <div class="dialog-actions"><button type="submit" value="cancel" class="btn btn-outline btn-sm">Cancel</button><button type="submit" value="ok" class="btn btn-danger btn-sm" id="confirm-ok"></button></div>
+        </form>
+      </dialog>
+      <dialog id="trash" class="dialog" aria-labelledby="trash-title">
+        <div class="dialog-body pb-2"><h2 class="dialog-title" id="trash-title">Trash</h2><p class="dialog-text">Restored folders and projects come back with their documents filed in them.</p></div>
+        <ul class="trash-list" id="trash-list"></ul>
+        <div class="dialog-actions"><button type="button" class="btn btn-ghost btn-sm me-auto text-brand-text" id="empty-trash">Empty trash</button><button type="button" class="btn btn-outline btn-sm" id="close-trash">Close</button></div>
+      </dialog>
       <div id="menu" class="menu" role="menu" hidden></div>
     </section>
 

@@ -9,11 +9,11 @@
     unitCopyButtons: true, unitCopyStyle: 'numbers', statuteCopyIndent: true, canliiAlbertaFirst: false, secondaryTitleDepth: 'last', canliiCitedBy: true, canliiHeader: true, cleanTitles: true, canliiButton: true, suppressSelectionMenus: true,
     sonarWakeTabs: true, providerHeader: true, caseMarker: true, markerMultipleFolders: false, pdfFragments: true, pdfLinkFormat: 'url', popupTab: 'marker'
   };
-  const MARKER = { canliiFolders: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null };
+  const MARKER = { canliiFolders: {}, canliiProjects: {}, canliiCurrentProject: null, canliiHotkeySlot1: null, canliiHotkeySlot2: null, canliiTrash: [] };
   // Folders take the next unused colour of this palette instead of all starting the same.
   const PALETTE = ['#3b7ddd', '#e0533d', '#2f9e6e', '#e3a21a', '#8b5cf6', '#db4f9a', '#1aa3a3', '#ef7d22', '#5f6f86', '#7cb32a'];
   const settings = { ...SETTINGS };
-  const marker = { folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null };
+  const marker = { folders: {}, markers: {}, projects: {}, project: 'default', slot1: null, slot2: null, trash: [] };
   let markerRendered = false, nameMode = null, statusTimer = 0;
   let supported = false, canliiAvailable = false, busy = false;
   // Until storage is read (a few ms), the popup shows the snapshot its last session left: the tab,
@@ -527,9 +527,21 @@
     renderTree();
   }
 
-  function deleteFolder(folderId) {
-    const gone = new Set([folderId, ...projectFolders().filter((other) => inside(other, folderId))]);
-    // Documents are not rewritten: a filing whose folder is gone is never read (core.filings).
+  // A deleted folder goes to the Trash, with its subfolders unless they are kept (they then move up a
+  // level). Documents are not rewritten: a filing whose folder is gone is never read (core.filings),
+  // so a folder restored from the Trash has its documents back as they were.
+  function deleteFolder(folderId, withSubfolders = true) {
+    const folder = marker.folders[folderId];
+    if (!folder) return;
+    const below = projectFolders().filter((other) => other !== folderId && inside(other, folderId));
+    const gone = new Set([folderId, ...(withSubfolders ? below : [])]);
+    if (!withSubfolders) {
+      // Its own subfolders take its place among its siblings, in their order.
+      const parentId = folder.parentId || null, start = (tree().get(parentId) || []).length;
+      (tree().get(folderId) || []).forEach(([childId], index) => { marker.folders[childId].parentId = parentId; marker.folders[childId].order = start + index; });
+    }
+    trashItem({ kind: 'folder', name: folder.name, project: marker.project,
+      folders: Object.fromEntries([...gone].map((goneId) => [goneId, marker.folders[goneId]])) });
     for (const goneId of gone) delete marker.folders[goneId];
     if (gone.has(selected)) selected = null;
     if (gone.has(marker.slot1)) marker.slot1 = null;
@@ -538,6 +550,133 @@
     renderTree();
     renderSlots();
   }
+
+  // A real confirmation, not an inline one: the folder's name, what goes with it, and (for a folder
+  // with subfolders) whether they go too.
+  function confirmDialog({ title, text, check = null, ok }) {
+    const dialog = $('confirm');
+    $('confirm-title').textContent = title;
+    $('confirm-text').textContent = text;
+    $('confirm-check-row').hidden = !check;
+    if (check) { $('confirm-check-label').textContent = check.label; $('confirm-check').checked = check.checked; }
+    $('confirm-ok').textContent = ok;
+    dialog.returnValue = '';
+    dialog.showModal();
+    $('confirm-ok').focus();
+    return new Promise((resolve) => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok' ? { checked: $('confirm-check').checked } : null), { once: true }));
+  }
+  async function confirmDeleteFolder(folderId) {
+    const folder = marker.folders[folderId];
+    if (!folder) return;
+    const subfolders = projectFolders().filter((other) => other !== folderId && inside(other, folderId)).length;
+    const answer = await confirmDialog({
+      title: `Delete “${folder.name}”?`,
+      text: 'It goes to the Trash, where it can be restored with its documents filed in it.',
+      check: subfolders ? { label: `Delete its ${subfolders === 1 ? 'subfolder' : `${subfolders} subfolders`} too`, checked: true } : null,
+      ok: 'Delete'
+    });
+    if (answer) deleteFolder(folderId, !subfolders || answer.checked);
+  }
+
+  // The Trash: deleted folders and removed documents, newest first, kept until emptied (the oldest
+  // go past 200).
+  const TRASH_LIMIT = 200;
+  function trashItem(item) {
+    marker.trash = [{ id: id(), at: Date.now(), ...item }, ...marker.trash].slice(0, TRASH_LIMIT);
+    saveTrash();
+  }
+  function saveTrash() {
+    chrome.storage.local.set({ canliiTrash: marker.trash });
+    renderTrashButton();
+  }
+  function renderTrashButton() {
+    $('open-trash').hidden = !marker.trash.length;
+    $('trash-count').textContent = marker.trash.length ? ` ${marker.trash.length}` : '';
+    queueSnapshot();
+  }
+  function renderTrash() {
+    const projectName = (projectId) => marker.projects[projectId]?.name || 'a deleted project';
+    const when = (at) => new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    $('trash-list').innerHTML = marker.trash.map((item) => {
+      const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+      let what;
+      if (item.kind === 'project') {
+        const folders = Object.keys(item.folders).length, documents = Object.keys(item.documents).length;
+        what = ['Project', folders && plural(folders, 'folder'), documents && plural(documents, 'document')].filter(Boolean).join(', ');
+      } else if (item.kind === 'folder') {
+        const subfolders = Object.keys(item.folders).length - 1;
+        what = `Folder${subfolders ? `, with ${plural(subfolders, 'subfolder')}` : ''} · ${escapeHtml(projectName(item.project))}`;
+      } else what = `Document · ${escapeHtml(projectName(item.project))}`;
+      const glyph = item.kind === 'document' ? GLYPH(item.key) : item.kind === 'project' ? 'file' : 'folder';
+      return `<li class="trash-item"><span class="ico i-${glyph} ticon size-4 shrink-0 text-muted"></span>`
+        + `<span class="trash-name">${escapeHtml(item.name)}<span class="trash-meta">${what} · ${when(item.at)}</span></span>`
+        + `<button type="button" class="btn btn-outline btn-sm" data-restore="${escapeHtml(item.id)}">Restore</button></li>`;
+    }).join('') || '<li class="trash-empty">The Trash is empty.</li>';
+    $('empty-trash').disabled = !marker.trash.length;
+  }
+  function restore(itemId) {
+    const item = marker.trash.find((entry) => entry.id === itemId);
+    if (!item) return;
+    // A project comes back whole, under its own id (a new one should that id be taken), and opens.
+    if (item.kind === 'project') {
+      const projectId = marker.projects[item.project] ? id() : item.project;
+      marker.projects[projectId] = { ...item.projectData, order: projects().length };
+      for (const [folderId, folder] of Object.entries(item.folders)) marker.folders[folderId] = { ...folder, projectId };
+      const keys = [];
+      for (const [key, { data, document }] of Object.entries(item.documents)) {
+        const target = marker.markers[key] ||= { ...document };
+        target.byProject ||= {};
+        target.byProject[projectId] = data;
+        keys.push(key);
+      }
+      if (keys.length) saveDocuments(...keys);
+      marker.project = projectId;
+      selected = null;
+      marker.trash = marker.trash.filter((entry) => entry !== item);
+      saveTrash();
+      saveMarker();
+      renderTrash();
+      renderMarker();
+      renderSlots();
+      return status(`Restored ${item.name}`);
+    }
+    // Into its own project, or the open one if that project is gone.
+    const project = marker.projects[item.project] ? item.project : marker.project;
+    if (item.kind === 'folder') {
+      for (const [folderId, folder] of Object.entries(item.folders)) {
+        const parentId = folder.parentId && (item.folders[folder.parentId] || marker.folders[folder.parentId]) ? folder.parentId : null;
+        marker.folders[folderId] = { ...folder, projectId: project, parentId,
+          order: parentId === folder.parentId ? folder.order : (tree().get(null) || []).length };
+      }
+      saveMarker();
+    } else {
+      const target = marker.markers[item.key] ||= { ...item.document };
+      target.byProject ||= {};
+      if (!target.byProject[project]) target.byProject[project] = item.data;
+      saveDocuments(item.key);
+    }
+    marker.trash = marker.trash.filter((entry) => entry !== item);
+    saveTrash();
+    renderTrash();
+    if (project === marker.project) renderTree();
+    renderSlots();
+    status(`Restored ${item.name}`);
+  }
+  $('open-trash').addEventListener('click', () => { renderTrash(); $('trash').showModal(); });
+  $('close-trash').addEventListener('click', () => $('trash').close());
+  $('trash-list').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-restore]');
+    if (button) restore(button.dataset.restore);
+  });
+  $('empty-trash').addEventListener('click', async () => {
+    $('trash').close();
+    const count = marker.trash.length;
+    const answer = await confirmDialog({ title: 'Empty the Trash?', text: `${count} item${count === 1 ? '' : 's'} will be deleted for good. This cannot be undone.`, ok: 'Empty trash' });
+    if (!answer) return;
+    marker.trash = [];
+    saveTrash();
+    status('Emptied the Trash');
+  });
   const projectFolders = () => Object.keys(marker.folders).filter((folderId) => marker.folders[folderId].projectId === marker.project);
 
   // Documents: file, remove.
@@ -550,6 +689,9 @@
     renderTree();
   }
   function removeDocument(key) {
+    const { byProject, ...document } = marker.markers[key];
+    trashItem({ kind: 'document', name: documentTitle(key), project: marker.project, key, data: byProject[marker.project], document });
+    status(`Moved ${documentTitle(key)} to the Trash`);
     delete marker.markers[key].byProject[marker.project];
     if (!Object.keys(marker.markers[key].byProject).length) delete marker.markers[key];
     saveDocuments(key);
@@ -582,8 +724,8 @@
       const folder = marker.folders[folderId], siblings = (tree().get(folder.parentId || null) || []).map(([siblingId]) => siblingId);
       items = [['rename', 'Rename'], ['sub', 'New folder inside'], ['up', 'Move up', siblings[0] === folderId],
         ['down', 'Move down', siblings[siblings.length - 1] === folderId], ...(folder.parentId ? [['out', 'Move out']] : []),
-        ['copy-links', 'Copy links'], ['copy-notes', 'Copy links with notes'], ['delete', 'Delete']];
-    } else items = [['label', 'Folders and note'], ['copy-links', 'Copy link'], ['copy-notes', 'Copy link with note'], ['remove', 'Remove']];
+        ['copy-links', 'Copy links'], ['copy-notes', 'Copy links with notes'], ['delete', 'Delete…']];
+    } else items = [['label', 'Folders and note'], ['copy-links', 'Copy link'], ['copy-notes', 'Copy link with note'], ['remove', 'Move to Trash']];
     const menu = $('menu');
     menu.innerHTML = items.map(([action, text, disabled]) => `<button type="button" role="menuitem" data-action="${action}"${disabled ? ' disabled' : ''}>${text}</button>`).join('');
     menu.hidden = false;
@@ -605,19 +747,13 @@
     const item = event.target.closest('[data-action]');
     if (!item || item.disabled) return;
     const { folderId, key, button } = $('menu').target, action = item.dataset.action;
-    if ((action === 'delete' || action === 'remove') && !item.dataset.armed) {
-      item.dataset.armed = 'true';
-      item.textContent = action === 'remove' ? 'Remove from this project?'
-        : tree().has(folderId) ? 'Delete with its subfolders?' : 'Delete this folder?';
-      return;
-    }
     closeMenu();
     if (action === 'rename') { renaming = folderId; renderTree(); }
     else if (action === 'sub') { closed.delete(folderId); adding = folderId; renderTree(); }
     else if (action === 'up') moveKey(folderId, 'ArrowUp');
     else if (action === 'down') moveKey(folderId, 'ArrowDown');
     else if (action === 'out') moveKey(folderId, 'ArrowLeft');
-    else if (action === 'delete') deleteFolder(folderId);
+    else if (action === 'delete') confirmDeleteFolder(folderId);
     else if (action === 'label') label(key, button.closest('.trow'));
     else if (action === 'remove') removeDocument(key);
     // A document's menu copies that document; a folder's, everything in it; the header's, the selected folder.
@@ -876,40 +1012,49 @@
     renderSlots();
   });
 
-  let armedProject = 0;
-  const trashIcon = document.querySelector('[data-project="delete"]').innerHTML;
-  const disarm = (button) => { button.innerHTML = trashIcon; button.classList.remove('text-brand-text', 'w-auto', 'px-2'); };
-  document.querySelector('.project').addEventListener('click', (event) => {
+  document.querySelector('.project').addEventListener('click', async (event) => {
     const button = event.target.closest('[data-project]');
     if (!button) return;
     const act = button.dataset.project;
     if (act === 'add') return askName({ kind: 'project-add' });
     if (act === 'rename') return askName({ kind: 'project-rename' }, marker.projects[marker.project]?.name || '');
     if (projects().length < 2) return status('Keep at least one project.', true);
-    if (!armedProject) {
-      button.textContent = 'Delete?';
-      button.classList.add('text-brand-text', 'w-auto', 'px-2');
-      armedProject = setTimeout(() => { armedProject = 0; disarm(button); }, 2500);
-      return;
-    }
-    clearTimeout(armedProject);
-    armedProject = 0;
-    for (const [folderId, folder] of Object.entries(marker.folders)) if (folder.projectId === marker.project) delete marker.folders[folderId];
+    const projectId = marker.project, name = marker.projects[projectId]?.name || 'this project';
+    const folders = projectFolders().length, documents = projectDocuments().length;
+    const holds = [folders && `${folders} folder${folders === 1 ? '' : 's'}`, documents && `${documents} document${documents === 1 ? '' : 's'}`].filter(Boolean).join(' and ');
+    const answer = await confirmDialog({
+      title: `Delete “${name}”?`,
+      text: `${holds ? `It and its ${holds} go` : 'It goes'} to the Trash, where the whole project can be restored.`,
+      ok: 'Delete project'
+    });
+    if (answer && marker.project === projectId) deleteProject(projectId);
+  });
+
+  // A deleted project goes to the Trash whole: the project, its folders, and each document's filing
+  // and note in it (a document filed in no other project leaves the list until it is restored).
+  function deleteProject(projectId) {
+    const folders = Object.fromEntries(Object.entries(marker.folders).filter(([, folder]) => folder.projectId === projectId));
+    const touched = Object.keys(marker.markers).filter((key) => marker.markers[key]?.byProject?.[projectId]);
+    const documents = Object.fromEntries(touched.map((key) => {
+      const { byProject, ...document } = marker.markers[key];
+      return [key, { data: byProject[projectId], document }];
+    }));
+    trashItem({ kind: 'project', name: marker.projects[projectId]?.name || 'Project', project: projectId, projectData: marker.projects[projectId], folders, documents });
+    for (const folderId of Object.keys(folders)) delete marker.folders[folderId];
     // Only the documents filed in this project are rewritten (or removed, when it was their last).
-    const touched = Object.keys(marker.markers).filter((key) => marker.markers[key]?.byProject?.[marker.project]);
     for (const key of touched) {
-      delete marker.markers[key].byProject[marker.project];
+      delete marker.markers[key].byProject[projectId];
       if (!Object.keys(marker.markers[key].byProject).length) delete marker.markers[key];
     }
     saveDocuments(...touched);
-    delete marker.projects[marker.project];
+    delete marker.projects[projectId];
     ensureProject();
     selected = null;
     saveMarker(true);
     renderMarker();
     renderSlots();
-    disarm(button);
-  });
+    status(`Moved ${marker.trash[0].name} to the Trash`);
+  }
 
   // A page filed or changed documents: each change carries its document.
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -946,7 +1091,7 @@
     snapshotHandle = 0;
     try {
       const tree = snapshotTree();
-      localStorage.setItem(SNAPSHOT, JSON.stringify({ v: SNAPSHOT_VERSION, settings, tree: tree === undefined ? readSnapshot()?.tree : tree }));
+      localStorage.setItem(SNAPSHOT, JSON.stringify({ v: SNAPSHOT_VERSION, settings, trash: marker.trash.length, tree: tree === undefined ? readSnapshot()?.tree : tree }));
     } catch (_) { /* storage unavailable: the popup just paints without a snapshot */ }
   }
   function queueSnapshot() {
@@ -1006,6 +1151,7 @@
       $('tree').innerHTML = snapshot.tree.html;
       $('tree-empty').hidden = !snapshot.tree.empty;
       $('copy-links').title = snapshot.tree.title;
+      if (snapshot.trash) { $('open-trash').hidden = false; $('trash-count').textContent = ` ${snapshot.trash}`; }
     }
   }
 
@@ -1024,8 +1170,10 @@
     marker.project = stored.canliiCurrentProject;
     marker.slot1 = stored.canliiHotkeySlot1;
     marker.slot2 = stored.canliiHotkeySlot2;
+    marker.trash = Array.isArray(stored.canliiTrash) ? stored.canliiTrash : [];
     ensureProject();
     ready = true;
+    renderTrashButton();
     renderSettings();
     renderSlots();
     selectTab(settings.popupTab);

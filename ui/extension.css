@@ -194,6 +194,22 @@
   }
   .menu button { @apply block w-full rounded-md border-0 bg-transparent px-2 py-1.5 text-start text-[13px] text-ink enabled:hover:bg-hover focus-visible:bg-hover focus-visible:outline-none disabled:text-faint; }
   .menu button[data-armed] { @apply font-semibold text-brand-text; }
+
+  /* Confirmations and the Trash: native modal dialogs (focus kept inside, Escape closes). */
+  .dialog { @apply m-auto w-[min(340px,calc(100vw-24px))] max-h-[calc(100vh-24px)] overflow-hidden rounded-xl border border-line bg-surface p-0 text-ink shadow-[0_18px_40px_-10px_rgb(0_0_0/0.35)]; }
+  .dialog::backdrop { background: rgb(0 0 0 / 28%); }
+  .dialog-body { @apply px-4 pt-4 pb-3; }
+  .dialog-title { @apply m-0 text-[14px] font-semibold; }
+  .dialog-text { @apply m-0 mt-1.5 text-xs text-muted; }
+  .dialog-check { @apply mt-3 flex items-center gap-2 text-[13px] text-ink-soft; }
+  .dialog-check input { @apply size-4 accent-brand; }
+  .dialog-actions { @apply flex justify-end gap-1.5 border-t border-line px-4 py-2.5; }
+  .btn-danger { @apply bg-brand text-white enabled:hover:bg-brand-ink; }
+  .trash-list { @apply m-0 max-h-72 list-none overflow-y-auto p-0; }
+  .trash-item { @apply flex items-center gap-2 border-t border-line px-4 py-2 first:border-t-0; }
+  .trash-name { @apply min-w-0 flex-1 truncate text-[13px]; }
+  .trash-meta { @apply block truncate text-[11px] text-faint; }
+  .trash-empty { @apply m-0 px-4 py-6 text-center text-xs text-muted; }
 }
 
 /* Tab Search: one 132px row per result (the list is virtualized at that height). */
