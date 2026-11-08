@@ -641,7 +641,7 @@
     // Statute text: its provisions as indented paragraphs, as the quote copy writes them (content.js).
     const copyId = ++copies;
     const ready = fullModel && page.current(fullModel);
-    const statute = ready ? page.statuteCopy?.(fullModel, range) : null;
+    const statute = page.quickStatuteCopy?.(range) || (ready ? page.statuteCopy?.(fullModel, range) : null);
     if (statute) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -652,7 +652,7 @@
     // A copy made before the page's model is built (a quick select and Ctrl+C on a long statute):
     // the browser's own copy goes in now, and once the model is in, a statute's indented copy
     // replaces it, unless something else was copied meanwhile.
-    if (!ready && page.settings?.statuteCopyIndent !== false && page.statuteCopy && page.writeClipboard) {
+    if (!ready && provider !== 'canlii' && page.settings?.statuteCopyIndent !== false && page.statuteCopy && page.writeClipboard) {
       const saved = range.cloneRange(), started = Date.now();
       warm();
       const finish = (model) => {
@@ -662,7 +662,6 @@
         if (late) return page.writeClipboard(late);
       };
       // This copy's own number links change the page for a moment; a build they overlap is retried.
-      page.model(false).then(finish, () => page.model(false).then(finish)).catch(() => {});
     }
     if (!numbersOn() || !LINKABLE) return;
     const common = range.commonAncestorContainer;
@@ -678,7 +677,8 @@
       if (url) links.push([number, url]);
       if (links.length >= 5000) break;
     }
-    const undo = links.map(([number, url]) => {
+    const quietly = page.quietly || ((change) => change());
+    const undo = quietly(() => links.map(([number, url]) => {
       // A number that is (or holds) the page's own anchor: the anchor takes the link.
       const anchor = number.tagName === 'A' ? number : number.querySelector(':scope > a[name]:not([href])');
       if (anchor) {
@@ -690,14 +690,14 @@
       while (number.firstChild) link.appendChild(number.firstChild);
       number.appendChild(link);
       return () => { while (link.firstChild) number.insertBefore(link.firstChild, link); link.remove(); };
-    });
+    }));
     // The numbers' button look is the page's, not the text's: off while the browser copies the
     // selection's styles, so a paste shows the numbers as the page's own text (linked).
     // Only the copied region is restyled (a class on its common ancestor), never the whole page.
     root.classList.add('lp-copying');
     undo.push(() => root.classList.remove('lp-copying'));
     // The browser serializes the selection after this event; the page is back as it was before it paints.
-    setTimeout(() => { for (const restore of undo) restore(); }, 0);
+    setTimeout(() => quietly(() => { for (const restore of undo) restore(); }), 0);
   }, true);
 
   // One tooltip for every control, shown after a short hover.

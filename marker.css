@@ -30,23 +30,22 @@
 }
 
 /* On CanLII's search results the circle takes the place of the result's number (CanLII's own
-   number, right after it, is not drawn). It stands at the right of the number column, just before
-   the title, sized to the title's first line, so the row keeps CanLII's height. */
+   number, right after it, is not drawn). Full size, just before the title and centred on its first
+   line; its box is the line's height, so the row keeps CanLII's height. */
 .lpm-wrap.lpm-index {
   float: right;
-  width: 22px;
+  width: 34px;
   height: 21px;
-  margin: 0 12px 0 0;
+  margin: 0 10px 0 0;
   justify-content: center;
 }
 
 .lpm-index .lpm-circle {
-  width: 22px;
-  height: 22px;
+  margin: -6.5px 0;
 }
 
-.lpm-index .lpm-circle.lpm-empty {
-  box-shadow: inset 0 0 0 1.75px #c3cbd3;
+.lpm-index .lpm-badge {
+  bottom: calc(100% + 9.5px);
 }
 
 .lpm-wrap.lpm-index + span[data-result-number] {

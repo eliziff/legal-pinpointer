@@ -713,6 +713,16 @@
   // A passage (Tab Search result) replaces the selection/hover/clipboard source
   // and returns the payload for the caller to write instead of writing it here.
   async function copy(mode, showFeedback = true, passage = null) {
+    if (mode === 'quote' && !passage) {
+      const quick = canliiStatuteQuote(liveSelectionRange());
+      if (quick) {
+        await clipboardWrite(quick);
+        rememberedFragment = null;
+        const message = `Copied quote from s ${quick.first}${quick.last && quick.last !== quick.first ? `–${quick.last}` : ''}`;
+        if (showFeedback) showToast(message, false);
+        return { ok: true, message, plain: quick.plain };
+      }
+    }
     const model = await inspectPage(mode === 'citation');
     let payload;
     let message;
@@ -968,11 +978,145 @@
     return copyRange(model, range, mode, node);
   }
 
+  // A CanLII statute's provisions, read straight from the selected markup (a few milliseconds, no
+  // model): each provision's number and depth are in the page itself. Federal Acts nest provisions in
+  // lists (ul.ProvisionList); Alberta's are flat paragraphs whose class names the level. A subsection
+  // stands at its section's level; each paragraph, subparagraph and clause one level further in. Text
+  // with no number of its own (CanLII's Continued paragraphs, Alberta's closing words) stands at its
+  // provision's text.
+  const CANLII_PROVISION = /^(Continued)?(Section|Subsection|Paragraph|Subparagraph|Clause|Subclause|Subsubclause|Definition)$/;
+  const FLAT_LEVEL = { Section: 0, Subsection: 0, Definition: 0, Clause: 1, Subclause: 2, Subsubclause: 3, Paragraph: 3, Subparagraph: 4 };
+  const SECTION_NUMBER = 'span.sectionLabel, .SectionNumber, .canlii_section, .canlii_section_with_subsection';
+  const PROVISION_MARKER = /^[\s ]*(\d+(?:\.\d+)*[A-Z]?(?:[\s ]*\([0-9A-Za-z.]+\))*|(?:\([0-9A-Za-z.]+\))+)/;
+
+  function canliiStatutePage() {
+    return /(^|\.)canlii\.org$/.test(location.hostname) && /\/laws\//.test(location.pathname);
+  }
+
+  function provisionKind(block) {
+    for (const name of block.classList) {
+      const match = CANLII_PROVISION.exec(name);
+      if (match) return { name: match[2], continued: Boolean(match[1]) };
+    }
+    return null;
+  }
+
+  // A provision's pinpoint ("45(1)(a)"): its own number and those of the provisions it sits in, up
+  // to the one that states its section (CanLII's section and subsection attributes).
+  function parentProvision(block, listed) {
+    if (listed) {
+      const holder = block.closest('ul.ProvisionList')?.parentElement?.closest('li');
+      if (!holder) return null;
+      return [...holder.querySelectorAll(':scope > p, :scope > div > p')].find((p) => provisionKind(p) && !provisionKind(p).continued) || null;
+    }
+    const level = FLAT_LEVEL[provisionKind(block)?.name] ?? 0;
+    for (let p = block.previousElementSibling; p; p = p.previousElementSibling) {
+      const kind = p.tagName === 'P' && provisionKind(p);
+      if (kind && !kind.continued && (FLAT_LEVEL[kind.name] ?? 0) < level) return p;
+      if (p.querySelector?.('[section]') && level > 0 && kind && !kind.continued) return p;
+    }
+    return null;
+  }
+
+  function provisionLocator(block, listed) {
+    const parts = [];
+    for (let current = block, guard = 0; current && guard < 8; current = parentProvision(current, listed), guard += 1) {
+      const label = current.querySelector('[section]');
+      if (label) {
+        const section = label.getAttribute('section'), subsection = label.getAttribute('subsection');
+        return `${section}${subsection && subsection !== 'null' ? `(${subsection})` : ''}${parts.reverse().join('')}`;
+      }
+      const match = PROVISION_MARKER.exec(current.textContent);
+      if (!match) break;
+      const marker = match[1].replace(/[\s\u00a0]+/g, '');
+      if (/^\d/.test(marker)) return `${marker}${parts.reverse().join('')}`;
+      parts.push(marker);
+    }
+    return parts.reverse().join('');
+  }
+
+  function canliiStatuteQuote(range) {
+    if (!SETTINGS.statuteCopyIndent || !canliiStatutePage() || !range || range.collapsed) return null;
+    if (ownOverlay(range.startContainer) || ownOverlay(range.endContainer)) return null;
+    const container = range.commonAncestorContainer;
+    const common = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+    if (!common) return null;
+    const own = common.closest('p');
+    const picked = (own ? [own] : [...common.querySelectorAll('p')])
+      .filter((block) => provisionKind(block) && range.intersectsNode(block));
+    // A few words from inside one provision stay plain text: the selection must take in a provision's start.
+    if (!picked.length || !picked.some((block) => range.isPointInRange(block, 0))) return null;
+    if (picked.length > 2000) return null; // a whole Act (Ctrl+A): the browser's own copy, at once
+    const listed = picked.some((block) => block.closest('ul.ProvisionList'));
+    const here = `${location.origin}${location.pathname}`;
+    const pieces = [];
+    for (const [index, block] of picked.entries()) {
+      const kind = provisionKind(block);
+      let depth = FLAT_LEVEL[kind.name] ?? 0;
+      if (listed) {
+        depth = -1;
+        for (let list = block.closest('ul.ProvisionList'); list; list = list.parentElement?.closest('ul.ProvisionList')) depth += 1;
+        depth = Math.max(0, depth);
+      }
+      const text = block.textContent;
+      const match = kind.continued ? null : PROVISION_MARKER.exec(text);
+      const numbered = Boolean(match && (!/^\d/.test(match[1]) || block.querySelector(SECTION_NUMBER)));
+      const marker = numbered ? match[1].replace(/[\s ]+/g, ' ').trim() : '';
+      const prefix = numbered ? match[0].length + /^[\s ]*/.exec(text.slice(match[0].length))[0].length : 0;
+      // This block's selected part, and how far into the block the selection starts.
+      const part = document.createRange();
+      part.selectNodeContents(block);
+      let offset = 0;
+      if (range.compareBoundaryPoints(Range.START_TO_START, part) > 0) {
+        const before = document.createRange();
+        before.setStart(block, 0);
+        before.setEnd(range.startContainer, range.startOffset);
+        offset = before.toString().length;
+        part.setStart(range.startContainer, range.startOffset);
+      }
+      if (range.compareBoundaryPoints(Range.END_TO_END, part) < 0) part.setEnd(range.endContainer, range.endOffset);
+      const fragment = part.cloneContents();
+      stripLeadingCharacters(fragment, Math.max(0, prefix - offset));
+      const content = renderSelectionFragment(fragment);
+      const body = { plain: content.plain.replace(/^[\s ]+/, ''), html: content.html.replace(/<(strong|b|em|i|u|sup|sub)>(?:\s|&nbsp;)*<\/\1>/g, '').replace(/^(?:\s|&nbsp;|&#160;| )+/, '') };
+      // A section whose number only heads its first subsection holds no text of its own.
+      if (!body.plain && (!marker || index + 1 < picked.length)) continue;
+      let markerHtml = core.escapeHtml(marker);
+      if (marker) {
+        const label = block.querySelector('[section]');
+        const section = label?.getAttribute('section'), subsection = label?.getAttribute('subsection');
+        const name = section ? `sec${section}${subsection && subsection !== 'null' ? `subsec${subsection}` : ''}` : '';
+        const anchor = name && document.getElementsByName(name).length ? name : block.id;
+        if (anchor) markerHtml = anchorHtml(marker, `${here}#${encodeURIComponent(anchor)}`);
+      }
+      pieces.push({ marker, markerHtml, depth, leading: offset > prefix, body, block });
+    }
+    if (!pieces.length) return null;
+    const numberedDepths = pieces.filter((piece) => piece.marker).map((piece) => piece.depth);
+    const base = Math.min(...(numberedDepths.length ? numberedDepths : pieces.map((piece) => piece.depth)));
+    for (const piece of pieces) piece.depth = Math.max(0, piece.depth - base);
+    // One column for the whole quote, wide enough for its widest number, as quoteMarkup draws it.
+    const width = (label) => Array.from(label).reduce((sum, ch) => sum + (/\s/.test(ch) ? 0.28 : /[().,]/.test(ch) ? 0.33 : 0.56), 0);
+    const column = Math.min(5, Math.max(2.5, Math.ceil((Math.max(0, ...pieces.map((piece) => width(piece.marker))) + 0.9) * 4) / 4));
+    const lead = (piece) => (piece.leading ? '… ' : '');
+    return {
+      first: provisionLocator(pieces.find((piece) => piece.marker)?.block || pieces[0].block, listed),
+      last: provisionLocator([...pieces].reverse().find((piece) => piece.marker)?.block || pieces[pieces.length - 1].block, listed),
+      plain: pieces.map((piece) => (piece.marker
+        ? `${'\t'.repeat(piece.depth)}${piece.marker}\t${lead(piece)}${piece.body.plain}`
+        : `${'\t'.repeat(piece.depth + 1)}${piece.body.plain}`)).join('\n'),
+      html: pieces.map((piece) => (piece.marker
+        ? `<p style="margin:0 0 0 ${(piece.depth + 1) * column}em;text-indent:-${column}em">${piece.markerHtml}<span style="mso-tab-count:1">\t</span>${lead(piece)}${piece.body.html}</p>`
+        : `<p style="margin:0 0 0 ${(piece.depth + 1) * column}em">${piece.body.html}</p>`)).join('')
+    };
+  }
+
   /** A reader's own copy (Ctrl+C) of statute text, as the quote copy writes it: each provision it
    *  takes in as an indented paragraph, its number linked. Null (the browser's own copy) when the
    *  setting is off, the page has no provisions, the model is stale, or the selection starts no
    *  provision: a few words copied from inside one provision stay plain text. */
   function statuteCopy(model, range) {
+    if (canliiStatutePage()) return canliiStatuteQuote(range);
     if (!SETTINGS.statuteCopyIndent || !model?.structure?.nodes?.length || !range || range.collapsed) return null;
     if (!['section', 'rule', 'article', 'silcrow'].includes(model.structure.kind)) return null;
     if (ownOverlay(range.startContainer) || ownOverlay(range.endContainer)) return null;
@@ -1000,8 +1144,16 @@
     /** Where a pinpoint to this node links (its CanLII paragraph or provision where there is one). */
     linkFor: (model, node) => targetForNode(model, { kind: 'node' }, node),
     statuteCopy,
+    /** A CanLII statute's indented copy, read from the page alone (no model needed), or null. */
+    quickStatuteCopy: (range) => canliiStatuteQuote(range),
     /** Writes plain and HTML text to the clipboard (outside a copy event). */
     writeClipboard: (payload) => clipboardWrite(payload),
+    /** Runs a change the caller undoes at once (a copy's number links): the page's model is not
+     *  invalidated by it, so a model being built meanwhile stays good. */
+    quietly: (change) => {
+      flushModels();
+      try { return change(); } finally { modelObserver?.takeRecords(); }
+    },
     onInvalidate: (listener) => invalidationListeners.add(listener),
     copyUnit,
     copyControl,
