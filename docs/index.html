@@ -207,7 +207,7 @@
         <div><span><kbd>Ctrl ⇧ X</kbd></span><span>The quoted text with its pinpoint</span></div>
       </div>
     </div>
-    <div class="stage"><div class="shot doc"><span class="tag">Pasted into Word</span>As the Court held in <i><a href="#">R v Chouhan</a></i>, 2021 SCC 26 at paras <a href="#">3–5</a>, the amendments abolishing peremptory challenges applied prospectively.</div></div>
+    <div class="stage"><div class="shot doc"><span class="tag">Pasted into Word</span>As the Court held in <i><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener">R v Chouhan</a></i>, 2021 SCC 26 at paras <a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html#par3" target="_blank" rel="noopener">3–5</a>, the amendments abolishing peremptory challenges applied prospectively.</div></div>
   </section>
 
   <section class="feature" id="statutes">
@@ -224,14 +224,14 @@
     <div class="copy">
       <span class="label">Westlaw and Lexis</span>
       <h2>Open it on CanLII</h2>
-      <p>Three small buttons follow the title of a Westlaw or Lexis case or statute.</p>
+      <p>Reading a case or statute on Westlaw or Lexis? The button after its title takes you to the free CanLII version, so you can link to it and pinpoint it.</p>
       <ul class="legend">
         <li><span class="ic"><img src="assets/canlii.svg" alt="" width="15" height="15"></span><span>Opens the same document on CanLII. Greyed out when there's no CanLII version; a courthouse means it's only on the court's website.</span></li>
-        <li><span class="ic"><span class="lpm-circle" style="width:13px;height:13px;background:#e0533d"></span></span><span>The case's Case Marker circle.</span></li>
+        <li><span class="ic"><span class="lpm-circle" style="width:13px;height:13px;background:#e0533d"></span></span><span>Files the case in a Case Marker folder.</span></li>
         <li><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span><span>Copies the citation, linked to CanLII where possible.</span></li>
       </ul>
     </div>
-    <div class="stage"><div class="shot drawn">R v Chouhan <span class="lp-tools" data-lp-ui contenteditable="false"><a class="lp-tool lp-canlii live" aria-label="CanLII"></a><span class="lp-tool-marker"><span class="lpm-wrap lpm-title"><span class="lpm-circle" style="background:#e0533d"></span></span></span><button type="button" class="lp-tool lp-link" aria-label="Copy the linked citation"></button></span>
+    <div class="stage"><div class="shot drawn">R v Chouhan <span class="lp-tools" data-lp-ui contenteditable="false"><a class="lp-tool lp-canlii live" aria-label="Open on CanLII" data-tip="Open on CanLII" href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener"></a><span class="lp-tool-marker"><span class="lpm-wrap lpm-title"><span class="lpm-circle" style="background:#e0533d"></span></span></span><button type="button" class="lp-tool lp-link" aria-label="Copy the linked citation" data-tip="Copy the linked citation" id="demo-link"></button></span>
       <small>2021 SCC 26 · [2021] 2 SCR 136 · 459 DLR (4th) 193</small></div>
       <p class="caption">A Westlaw title with the extension's buttons.</p></div>
   </section>
@@ -353,7 +353,13 @@
   }
   addEventListener('hashchange', () => show(true));
   show(false);
-  document.addEventListener('click', (event) => { if (event.target.closest('.doc a, .drawn a, .drawn button')) event.preventDefault(); });
+  // The title's copy button copies the linked citation, as it does on Westlaw.
+  document.getElementById('demo-link').addEventListener('click', async (event) => {
+    const button = event.currentTarget, html = '<i><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html">R v Chouhan</a></i>, 2021 SCC 26', plain = 'R v Chouhan, 2021 SCC 26';
+    try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]); }
+    catch (_) { try { await navigator.clipboard.writeText(plain); } catch (_) { return; } }
+    button.classList.add('done'); button.dataset.tip = 'Copied'; setTimeout(() => { button.classList.remove('done'); button.dataset.tip = 'Copy the linked citation'; }, 1500);
+  });
 </script>
 </body>
 </html>
