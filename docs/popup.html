@@ -145,11 +145,14 @@
 
   <footer class="shrink-0 border-t border-line bg-surface px-3"><p id="status" class="m-0 h-7 truncate text-xs leading-7 text-muted [&.error]:text-brand-text" role="status" aria-live="polite"></p></footer>
 <script>
-const tab = new URLSearchParams(location.search).get('tab') || 'marker';
-document.body.dataset.tab = tab;
-for (const b of document.querySelectorAll('.tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === tab);
-for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab;
-document.querySelector('.tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) location.search = '?tab=' + b.dataset.tab; });
+// Tabs switch in place, as in the extension.
+function show(tab) {
+  document.body.dataset.tab = tab;
+  for (const b of document.querySelectorAll('.tabs [data-tab]')) b.setAttribute('aria-selected', b.dataset.tab === tab);
+  for (const p of document.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab;
+}
+show(new URLSearchParams(location.search).get('tab') || 'marker');
+document.querySelector('.tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) show(b.dataset.tab); });
 </script>
 </body>
 </html>
