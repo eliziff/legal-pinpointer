@@ -142,12 +142,10 @@
   box-shadow: 0 0 0 1.5px rgb(255 255 255 / 85%);
 }
 
+/* The banner's circle is too small for the "+N" count: it read as a grey smudge on CanLII's
+   header. The title's circle keeps it. */
 .lpm-banner .lpm-more {
-  right: -6px;
-  bottom: -4px;
-  padding: 0 2px;
-  font-size: 8.5px;
-  line-height: 11px;
+  display: none;
 }
 
 /* "+N": the other folders a document is filed under. Floats, so the circle's box never changes. */
@@ -245,6 +243,8 @@
   margin-bottom: 4px;
   padding: 6px 36px 4px 0;
   overflow-x: auto;
+  /* No scrollbar: one appearing once the slots overflow would make the picker taller. */
+  scrollbar-width: none;
   border-bottom: 1px solid #e5e7eb;
 }
 
@@ -349,7 +349,6 @@
   border-color: #1f2937;
   background: #e5e7eb;
   color: #111827;
-  font-weight: 500;
 }
 
 .lpm-chip > span {
