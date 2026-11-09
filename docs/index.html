@@ -74,7 +74,11 @@
   .feature { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 64px; align-items: center; padding: 88px 0; border-top: 1px solid var(--line); }
   .feature.flip > .copy { order: 2; }
   .feature.flip { grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); }
-  .feature.solo { grid-template-columns: minmax(0, 620px); }
+  .statute { padding: 22px 24px; font: 15px/1.55 "Times New Roman", Georgia, serif; color: #1a1a1a; }
+  .statute p { margin: 0 0 8px; }
+  .statute .sub { padding-left: 26px; }
+  .statute .lp-num { cursor: pointer; }
+  .menu-frame { border: 0; border-radius: 12px; background: #fff; box-shadow: var(--lift-sm), 0 0 0 1px var(--line); max-width: 100%; }
   .label { display: block; margin-bottom: 14px; font: 500 12.5px "Geist Mono", monospace; letter-spacing: .02em; color: var(--red); }
   .feature h2 { font-size: clamp(28px, 3.2vw, 38px); line-height: 1.08; letter-spacing: -0.035em; margin-bottom: 16px; }
   .feature p { font-size: 16px; }
@@ -180,14 +184,6 @@
 <main class="wrap">
 <div class="panel" id="guide" role="tabpanel">
 
-  <section class="feature solo" id="pinpoints">
-    <div class="copy">
-      <span class="label">Pinpoints</span>
-      <h2>Click a paragraph number</h2>
-      <p>Paragraph numbers are red on CanLII, Westlaw and Lexis. Click one and its pinpoint is copied, linked to that paragraph, ready to paste after your citation.</p>
-      <p>A note at the bottom of the window confirms what was copied.</p>
-    </div>
-  </section>
 
   <section class="feature flip" id="keys">
     <div class="copy">
@@ -203,12 +199,19 @@
     <div class="stage"><div class="shot doc"><span class="tag">Pasted into Word</span>As the Court held in <i><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener">R v Chouhan</a></i>, 2021 SCC 26 at paras <a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html#par3" target="_blank" rel="noopener">3–5</a>, the amendments abolishing peremptory challenges applied prospectively.</div></div>
   </section>
 
-  <section class="feature solo" id="statutes">
+  <section class="feature" id="statutes">
     <div class="copy">
       <span class="label">Statutes</span>
       <h2>Pinpoint any provision</h2>
-      <p>Section, subsection and paragraph numbers in statutes on CanLII are red too. Click one to copy the full pinpoint, such as <code>s 75(2)(b)</code>, linked to that provision.</p>
+      <p>Section, subsection and paragraph numbers in statutes on CanLII are red too. Click one to copy the full pinpoint, such as <code>s 11(d)</code>, linked to that provision.</p>
     </div>
+    <div class="stage"><div class="shot statute" id="statute-demo" data-url="https://www.canlii.org/en/ca/laws/stat/schedule-b-to-the-canada-act-1982-uk-1982-c-11/latest/schedule-b-to-the-canada-act-1982-uk-1982-c-11.html">
+      <p><span class="lp-num" data-pin="s 11">11</span> Any person charged with an offence has the right</p>
+      <p class="sub"><span class="lp-num" data-pin="s 11(a)">(a)</span> to be informed without unreasonable delay of the specific offence;</p>
+      <p class="sub"><span class="lp-num" data-pin="s 11(b)">(b)</span> to be tried within a reasonable time;</p>
+      <p class="sub"><span class="lp-num" data-pin="s 11(c)">(c)</span> not to be compelled to be a witness in proceedings against that person in respect of the offence;</p>
+      <p class="sub"><span class="lp-num" data-pin="s 11(d)">(d)</span> to be presumed innocent until proven guilty according to law in a fair and public hearing by an independent and impartial tribunal;</p>
+    </div></div>
   </section>
 
   <section class="feature flip" id="canlii">
@@ -227,22 +230,25 @@
       <p class="caption">A Westlaw title with the extension's buttons.</p></div>
   </section>
 
-  <section class="feature solo" id="marker">
+  <section class="feature" id="marker">
     <div class="copy">
       <span class="label">Case Marker</span>
       <h2>File cases as you read</h2>
       <p>There is a circle next to each case name on CanLII search results and in document titles, and next to the title on Westlaw, Lexis and court websites. Click it to file the case in a folder and add a note; it then takes the folder's colour.</p>
       <p>The extension also tries to detect when a case on Westlaw or Lexis is the same as a case on CanLII, so a case filed on one shows as filed on the others.</p>
     </div>
+    <div class="stage"><div class="shot drawn" style="overflow:visible">R v Chouhan <span class="lp-crumb-marker" id="marker-demo" title="File this case"></span>
+      <small>2021 SCC 26 · [2021] 2 SCR 136</small></div></div>
   </section>
 
-  <section class="feature solo" id="organize">
+  <section class="feature flip" id="organize">
     <div class="copy">
       <span class="label">The menu</span>
       <h2>Organize cases</h2>
       <p>Click the extension's icon in the toolbar. The <b>Marker</b> tab lists your folders and the cases filed in them; click a case to open it. <b>New folder</b> is at the bottom, and a folder's <b>⋯</b> menu renames, moves or deletes it.</p>
       <p>The <b>Copy</b> tab has the copy commands for the page you're on, and <b>Settings</b> turns any feature off.</p>
     </div>
+    <div class="stage" style="display:grid;place-items:center"><iframe class="menu-frame" src="popup.html" title="The extension's menu" width="376" height="560" loading="lazy"></iframe></div>
   </section>
 
   <section class="install" id="install">
@@ -276,10 +282,6 @@
       <p>Settings › <i>Copy controls</i> chooses how copying appears on a page: the red numbers (the default), small buttons in the margin, or a bar at the bottom of the window that copies whatever text you've selected.</p>
       <span class="rail"><span>Pinpoint<small>Ctrl X</small></span><span>Quote<small>Ctrl ⇧ X</small></span><span>Citation<small>Alt X</small></span></span>
       <p>The Copy tab switches between <code>at para 12</code> and the bare <code>12</code>.</p>
-    </div>
-    <div class="card">
-      <h3>Unnumbered decisions</h3>
-      <p>Older Supreme Court decisions on CanLII have no paragraph numbers, but CanLII shows where the report's pages break; those are used instead (<code>at 534</code>). A decision with neither is copied without a pinpoint.</p>
     </div>
     <div class="card">
       <h3>Ordinary copying</h3>
@@ -323,6 +325,7 @@
 
 <footer><div class="wrap"><span>Legal Pinpointer</span><a href="https://github.com/eliziff/legal-pinpointer/releases">Releases</a><a href="https://github.com/eliziff/legal-pinpointer">Source</a></div></footer>
 
+<script src="assets/marker-core.js"></script>
 <script>
   // The example tells its height, so its frame shows all of it and the page scrolls as one.
   const frame = document.getElementById('try');
@@ -345,6 +348,49 @@
     try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]); }
     catch (_) { try { await navigator.clipboard.writeText(plain); } catch (_) { return; } }
     button.classList.add('done'); button.dataset.tip = 'Copied'; setTimeout(() => { button.classList.remove('done'); button.dataset.tip = 'Copy the linked citation'; }, 1500);
+  });
+  // The extension's own note at the bottom of the window.
+  let toastTimer = 0;
+  function toast(text) {
+    let el = document.getElementById('legal-pinpointer-status');
+    if (!el) { el = document.createElement('div'); el.id = 'legal-pinpointer-status'; el.className = 'legal-pinpointer-toast'; el.setAttribute('role', 'status'); document.documentElement.appendChild(el); }
+    el.textContent = text; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+  }
+  // The statute: a click on a number copies its pinpoint, linked to the section.
+  const statute = document.getElementById('statute-demo');
+  statute.addEventListener('click', async (event) => {
+    const num = event.target.closest('.lp-num');
+    if (!num) return;
+    const pin = num.dataset.pin, url = statute.dataset.url + '#sec11';
+    const html = `<a href="${url}">${pin}</a>`;
+    toast(`Copied pinpoint: ${pin}`);
+    try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([pin], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]); }
+    catch (_) { try { await navigator.clipboard.writeText(pin); } catch (_) {} }
+  });
+  // Case Marker: the extension's own circle and folder picker.
+  const core = globalThis.LegalPinpointerMarkerCore;
+  const folders = {
+    jury: { name: 'Jury selection', color: '#e0533d', projectId: 'p', order: 0 },
+    peremptory: { name: 'Peremptory challenges', color: '#3b7ddd', projectId: 'p', parentId: 'jury', order: 0 },
+    charter: { name: 'Charter s 11(d)', color: '#2f9e6e', projectId: 'p', order: 1 },
+    transition: { name: 'Transitional law', color: '#e3a21a', projectId: 'p', order: 2 }
+  };
+  const filed = {}; let editor = null;
+  const slot = document.getElementById('marker-demo');
+  const drawCircle = () => {
+    const wrap = document.createElement('span'); wrap.className = 'lpm-wrap lpm-banner';
+    const ids = core.filings(filed, folders, 'p'), circle = core.circle(folders, ids);
+    circle.title = core.filingNames(folders, ids).join(' · ') || 'File this case';
+    wrap.appendChild(circle); slot.replaceChildren(wrap);
+  };
+  drawCircle();
+  addEventListener('scroll', () => editor?.close(), { passive: true });
+  slot.addEventListener('click', () => {
+    if (editor) { editor.close(); return; }
+    editor = core.openEditor({ anchor: slot, folders, project: 'p', data: filed,
+      onChange({ folderIds, note }) { core.setFilings(filed, folderIds, folders); if (note) filed.note = note; else delete filed.note; drawCircle(); },
+      onClose() { editor = null; }, inside: (e) => slot.contains(e.target) });
   });
 </script>
 </body>

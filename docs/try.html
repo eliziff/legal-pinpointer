@@ -15,12 +15,6 @@
   .head .lp-crumb-marker { cursor: pointer; }
   .doc { padding: 18px 24px 4px; }
   .doc p { margin: 0 0 18px; text-align: justify; }
-  .last { display: flex; align-items: baseline; gap: 12px; padding: 11px 20px; background: #fbf8f4; border-top: 1px solid #e8e1d8; font: 14.5px Calibri, "Segoe UI", sans-serif; color: #222; }
-  .last .label { flex: none; font: 600 10.5px system-ui, sans-serif; letter-spacing: .07em; text-transform: uppercase; color: #8a827a; }
-  .last .value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .last .value a { color: #1155cc; }
-  .last .hint { color: #8a827a; font-family: system-ui, sans-serif; font-size: 13px; }
-  #legal-pinpointer-status.legal-pinpointer-toast { bottom: 54px !important; }
 </style>
 </head>
 <body>
@@ -30,7 +24,6 @@
 <p>[<a class="reflex-paragAnchor" name="par2">2</a>] Although peremptory challenges were a long‑standing example of what Blackstone described as the “tenderness and humanity to prisoners, for which our English laws are justly famous”, they have drawn significant controversy in recent decades (<i>Commentaries on the Laws of England</i> (16th ed. 1825), Book IV, at p.&nbsp;353). While peremptory challenges permitted the Crown and the accused to exclude prospective jurors for suspected bias, they also had a darker side — a side which allowed for the arbitrary exclusion of jurors, as well as discriminatory practices born of prejudice and stereotypes, deployed by one side or the other to secure <i>not</i> an <i>impartial</i> jury, but a <i>favourable</i> jury. This quiet discrimination had palpable and well‑documented effects on the composition of juries.</p>
 
 </div>
-<div class="last"><span class="label">Last copied</span><span class="value" id="last"><span class="hint">Click a red number, or point at a paragraph and press Ctrl+X, Alt+X or Ctrl+Shift+X.</span></span></div>
 <script src="assets/marker-core.js"></script>
 <script>
 // A working example of Legal Pinpointer on a CanLII judgment: the extension's own styles and Case
@@ -61,10 +54,9 @@ function toast(text) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
 }
 async function copy(plain, html, message) {
-  document.getElementById('last').innerHTML = html;
   toast(message);
   try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]); }
-  catch (_) { try { await navigator.clipboard.writeText(plain); } catch (_) { /* the strip at the bottom still shows it */ } }
+  catch (_) { try { await navigator.clipboard.writeText(plain); } catch (_) {} }
 }
 const anchor = (n) => `${URL_BASE}#par${n}`;
 const pin = (from, to) => from === to
