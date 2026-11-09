@@ -212,6 +212,7 @@
     wrapWestlawNumbers();
     wrapCanliiBrackets();
     wrapCanliiStatuteNumbers();
+    wrapCanliiPrintedParagraphs();
     let found;
     try { found = providers.quickUnits(document, location); } catch (_) { return; }
     const units = [], seen = new Set(), cited = citedBy(), stated = provider === 'canlii' ? numberedLocators() : null;
@@ -639,6 +640,43 @@
   };
   addEventListener('scroll', wrapSoon, { passive: true });
   addEventListener('resize', () => { wrappedAt = Infinity; wrapSoon(); }, { passive: true });
+
+  // A CanLII decision that anchors only its first paragraphs ([1] to [11]) and prints the rest as
+  // plain "[12]": those printed numbers, carrying on the sequence after the last anchor, are put in a
+  // span.lp-num-text, red and clickable like the anchored ones. Only the paragraphs after the last
+  // anchor are read, once.
+  let printedFrom = null;
+  function wrapCanliiPrintedParagraphs() {
+    if (provider !== 'canlii' || !numbersOn() || !/\/doc\//.test(location.pathname)) return;
+    const anchors = document.getElementsByClassName('reflex-paragAnchor');
+    const lastAnchor = anchors[anchors.length - 1];
+    const lastNumber = Number((lastAnchor?.getAttribute('name') || '').replace(/^par/, ''));
+    if (!lastAnchor || !Number.isInteger(lastNumber) || printedFrom === lastAnchor) return;
+    printedFrom = lastAnchor;
+    const root = document.querySelector(STATUTE_ROOT) || document.body;
+    const start = lastAnchor.closest(TEXT_BLOCKS);
+    if (!start || !root.contains(start)) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, BLOCK_FILTER);
+    walker.currentNode = start;
+    let expected = lastNumber + 1;
+    const wraps = [];
+    for (let block = walker.nextNode(), steps = 0; block && steps < 20000; block = walker.nextNode(), steps += 1) {
+      const text = firstText(block);
+      if (!text || text.parentElement.closest(TEXT_BLOCKS) !== block || text.parentElement.closest(`${NUMBER}, [data-lp-ui], table`)) continue;
+      const match = /^([\s ]*)\[(\d{1,4})\]/.exec(text.data);
+      if (!match || Number(match[2]) !== expected) continue;
+      wraps.push([text, match[1].length, match[0].length - match[1].length]);
+      expected += 1;
+    }
+    for (const [text, lead, length] of wraps) {
+      const number = lead ? text.splitText(lead) : text;
+      if (number.length > length) number.splitText(length);
+      const span = document.createElement('span');
+      span.className = 'lp-num lp-num-text';
+      number.replaceWith(span);
+      span.appendChild(number);
+    }
+  }
 
   /** The locator a number's own markup states (CanLII statutes), or ''. */
   function statedLocator(number) {

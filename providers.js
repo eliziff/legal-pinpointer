@@ -890,7 +890,20 @@ ${base.headerText || ''}`), read(own)]);
     if (pages.length) return { kind: 'page', nodes: pages, source: 'legal-structure' };
     const nativeNumbers = base.provider !== 'canlii' || canliiAnchorsNumberDocument(plane.root.ownerDocument);
     if (base.documentType !== 'legislation' && base.nativeNodes.length && nativeNumbers) {
-      return { kind: base.nativeNodes[0].kind, nodes: uniqueNodes(base.nativeNodes), source: 'provider-native' };
+      const native = uniqueNodes(base.nativeNodes);
+      // CanLII sometimes anchors only the first paragraphs ([1] to [11]) and prints the rest as plain
+      // "[12]": those carry the numbering on, from the next number after the last anchor.
+      const last = native[native.length - 1], lastNumber = Number(last.locator);
+      if (base.provider === 'canlii' && native[0].kind === 'paragraph' && Number.isInteger(lastNumber)) {
+        const after = (node) => node.startPoint && last.element && last.element.compareDocumentPosition(pointElement(node.startPoint, plane.root) || last.element) & Node.DOCUMENT_POSITION_FOLLOWING;
+        const rest = [];
+        for (const node of visibleMarkerNodes(plane)) {
+          if (Number(node.locator) !== lastNumber + 1 + rest.length || !after(node)) continue;
+          rest.push(node);
+        }
+        if (rest.length) return { kind: 'paragraph', nodes: [...native, ...rest], source: 'provider-native' };
+      }
+      return { kind: native[0].kind, nodes: native, source: 'provider-native' };
     }
 
     const engineKind = base.documentType === 'legislation' ? 'section' : 'paragraph';
