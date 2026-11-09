@@ -76,6 +76,7 @@
   .feature { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 64px; align-items: center; padding: 88px 0; border-top: 1px solid var(--line); }
   .feature.flip > .copy { order: 2; }
   .feature.flip { grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); }
+  .feature.solo { grid-template-columns: minmax(0, 620px); }
   .label { display: block; margin-bottom: 14px; font: 500 12.5px "Geist Mono", monospace; letter-spacing: .02em; color: var(--red); }
   .feature h2 { font-size: clamp(28px, 3.2vw, 38px); line-height: 1.08; letter-spacing: -0.035em; margin-bottom: 16px; }
   .feature p { font-size: 16px; }
@@ -182,15 +183,13 @@
 <main class="wrap">
 <div class="panel" id="guide" role="tabpanel">
 
-  <section class="feature" id="pinpoints">
+  <section class="feature solo" id="pinpoints">
     <div class="copy">
       <span class="label">Pinpoints</span>
       <h2>Click a paragraph number</h2>
       <p>Paragraph numbers are red on CanLII, Westlaw and Lexis. Click one and its pinpoint is copied, linked to that paragraph, ready to paste after your citation.</p>
       <p>A note at the bottom of the window confirms what was copied.</p>
     </div>
-    <div class="stage"><div class="shot"><img src="img/judgment.png" alt="R v Chouhan on CanLII with red paragraph numbers" width="860" height="330"></div>
-      <p class="caption">R v Chouhan, 2021 SCC 26, on CanLII.</p></div>
   </section>
 
   <section class="feature flip" id="keys">
@@ -207,14 +206,12 @@
     <div class="stage"><div class="shot doc"><span class="tag">Pasted into Word</span>As the Court held in <i><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener">R v Chouhan</a></i>, 2021 SCC 26 at paras <a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html#par3" target="_blank" rel="noopener">3–5</a>, the amendments abolishing peremptory challenges applied prospectively.</div></div>
   </section>
 
-  <section class="feature" id="statutes">
+  <section class="feature solo" id="statutes">
     <div class="copy">
       <span class="label">Statutes</span>
       <h2>Pinpoint any provision</h2>
       <p>Section, subsection and paragraph numbers in statutes on CanLII are red too. Click one to copy the full pinpoint, such as <code>s 75(2)(b)</code>, linked to that provision.</p>
     </div>
-    <div class="stage"><div class="shot"><img src="img/statute.png" alt="Section 75 of the BC Family Law Act with its numbers in red" width="640" height="300"></div>
-      <p class="caption">Family Law Act, SBC 2011, c 25, s 75, on CanLII.</p></div>
   </section>
 
   <section class="feature flip" id="canlii">
@@ -233,27 +230,22 @@
       <p class="caption">A Westlaw title with the extension's buttons.</p></div>
   </section>
 
-  <section class="feature" id="marker">
+  <section class="feature solo" id="marker">
     <div class="copy">
       <span class="label">Case Marker</span>
       <h2>File cases as you read</h2>
       <p>There is a circle next to each case name on CanLII search results and in document titles, and next to the title on Westlaw, Lexis and court websites. Click it to file the case in a folder and add a note; it then takes the folder's colour.</p>
       <p>The extension also tries to detect when a case on Westlaw or Lexis is the same as a case on CanLII, so a case filed on one shows as filed on the others.</p>
     </div>
-    <div class="stage stack">
-      <div class="shot"><img src="img/canlii-header.png" alt="CanLII's header with the case name and its circle" width="820" height="67"></div>
-      <div class="shot" style="max-width:420px"><img src="img/picker.png" alt="The folder picker under a case title" width="560" height="330"></div>
-    </div>
   </section>
 
-  <section class="feature flip" id="organize">
+  <section class="feature solo" id="organize">
     <div class="copy">
       <span class="label">The menu</span>
       <h2>Organize cases</h2>
       <p>Click the extension's icon in the toolbar. The <b>Marker</b> tab lists your folders and the cases filed in them; click a case to open it. <b>New folder</b> is at the bottom, and a folder's <b>⋯</b> menu renames, moves or deletes it.</p>
       <p>The <b>Copy</b> tab has the copy commands for the page you're on, and <b>Settings</b> turns any feature off.</p>
     </div>
-    <div class="stage" style="display:grid;place-items:center"><div class="shot" style="width:300px"><img src="img/menu.png" alt="The Legal Pinpointer menu, Marker tab" width="376" height="600"></div></div>
   </section>
 
   <section class="install" id="install">
