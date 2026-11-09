@@ -101,8 +101,10 @@
   // The buttons style: the pinpoint and the pinpoint with its text. The numbers style: the pinpoint
   // only for a unit whose number cannot be clicked (its number is the control otherwise). Either
   // way, CanLII's Cited by follows where the paragraph is cited (setCited).
+  // The bar style: the bar at the bottom copies, so a unit keeps only its Cited by.
   const numbersStyle = () => settings.unitCopyStyle !== 'buttons';
-  const unitButtons = (unit) => (numbersStyle() ? (unit.numbered ? 0 : 1) : 2) + (unit.cited ? 1 : 0);
+  const railStyle = () => settings.unitCopyStyle === 'rail';
+  const unitButtons = (unit) => (railStyle() ? 0 : numbersStyle() ? (unit.numbered ? 0 : 1) : 2) + (unit.cited ? 1 : 0);
   function control() {
     const style = numbersStyle() ? 'numbers' : 'buttons';
     if (template && template.dataset.style !== style) { template = null; view.pool.length = 0; }
@@ -428,7 +430,7 @@
       const label = `Copy pinpoint (Ctrl+X) · ${KIND_LABEL[unit.kind] || unit.kind} ${unit.locator}`;
       node.firstChild.dataset.tip = label;
       node.firstChild.setAttribute('aria-label', label);
-      node.firstChild.hidden = numbersStyle() && unit.numbered;
+      node.firstChild.hidden = railStyle() || (numbersStyle() && unit.numbered);
       setCited(node, unit.cited);
       view.live.set(i, node);
       changed = true;
@@ -478,7 +480,8 @@
   const NUMBER = provider === 'canlii'
     ? 'a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, .lp-num'
     : provider === 'lexis' ? '[id^="PARA_"]' : '.lp-num';
-  const numbersOn = () => settings.unitCopyButtons && settings.unitCopyStyle !== 'buttons';
+  // Red, clickable numbers only with that choice: the margin buttons and the bar each replace them.
+  const numbersOn = () => settings.unitCopyButtons && settings.unitCopyStyle !== 'buttons' && settings.unitCopyStyle !== 'rail';
   const LABELS = '.canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel';
   const SECTION_LABEL = '.canlii_section, span.sectionLabel, .SectionNumber';
 

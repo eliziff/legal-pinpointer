@@ -32,7 +32,7 @@
     if (top && /canlii\.org$/.test(hostname)) document.documentElement.classList.toggle('lp-no-cited-by', stored.canliiCitedBy === false || stored.unitCopyButtons === false);
     // CanLII's name suggestions: Alberta first among same-named Acts (canlii-suggest.js, in the page's world, reads this).
     if (top && /canlii\.org$/.test(hostname)) document.documentElement.toggleAttribute('data-lp-alberta-first', stored.canliiAlbertaFirst === true);
-    if (top) document.documentElement.classList.toggle('lp-no-numbers', stored.unitCopyButtons === false || stored.unitCopyStyle === 'buttons');
+    if (top) document.documentElement.classList.toggle('lp-no-numbers', stored.unitCopyButtons === false || stored.unitCopyStyle === 'buttons' || stored.unitCopyStyle === 'rail');
     globalThis.LegalPinpointerEarlySettingsValue = stored;
     resolve(stored);
   }));
