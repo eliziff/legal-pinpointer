@@ -473,10 +473,20 @@ html.lp-title-drag body {
 
 html.lp-title-drag #co_docHeaderTitleLine,
 html.lp-title-drag #SS_DocumentTitle,
-html.lp-title-drag .documentheadertitle h1,
-{
+html.lp-title-drag .documentheadertitle h1 {
   user-select: text !important;
   -webkit-user-select: text !important;
+}
+
+/* Lexis's case-treatment flag sits inside the title (a linked "Negative treatment indicated" image):
+   it is left out of any selection, so a triple-click on the title copies the title alone. The
+   extension's own buttons at the title's end are left out too. */
+html:not(.lp-raw-titles) #SS_DocumentTitle .citatorsignal,
+html:not(.lp-raw-titles) .documentheadertitle h1 .citatorsignal,
+html:not(.lp-raw-titles) #SS_DocumentTitle .lp-tools,
+html:not(.lp-raw-titles) .documentheadertitle h1 .lp-tools {
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 html.lp-title-drag .lp-tools,
