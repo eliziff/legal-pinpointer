@@ -1,0 +1,117 @@
+'use strict';
+
+(function exposeResults(global) {
+  const ROW_HEIGHT = 132, OVERSCAN = 3;
+  function markedText(document, text, marks = []) {
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    for (const mark of marks) {
+      if (!Number.isInteger(mark.start) || !Number.isInteger(mark.end) || mark.start < offset || mark.end <= mark.start || mark.start >= text.length) continue;
+      fragment.append(document.createTextNode(text.slice(offset, mark.start)));
+      const highlight = document.createElement('mark');
+      highlight.textContent = text.slice(mark.start, mark.end); fragment.append(highlight);
+      offset = Math.min(text.length, mark.end);
+    }
+    fragment.append(document.createTextNode(text.slice(offset)));
+    return fragment;
+  }
+  function visibleRange(count, top, height) {
+    const start = Math.max(0, Math.min(count, Math.floor(top / ROW_HEIGHT) - OVERSCAN));
+    return { start, end: Math.min(count, start + Math.ceil(height / ROW_HEIGHT) + OVERSCAN * 2) };
+  }
+  // `choose(index, action)` selects a result; its buttons (or Enter, which opens) add
+  // the action. `icon(url)` is the page's favicon; `leave()` runs on ArrowUp from the top.
+  class ResultsList {
+    constructor(viewport, spacer, rows, { choose, icon = () => '', leave = () => {} }) {
+      Object.assign(this, { viewport, spacer, rows, choose, icon, results: [], selected: -1, start: -1, end: -1, frame: 0 });
+      this.onScroll = () => {
+        if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.render(); });
+      };
+      viewport.addEventListener('scroll', this.onScroll, { passive: true });
+      this.resize = new ResizeObserver(this.onScroll); this.resize.observe(viewport);
+      rows.addEventListener('click', event => {
+        const row = event.target.closest('[data-result]');
+        if (!row) return;
+        viewport.focus({ preventScroll: true });
+        choose(Number(row.dataset.result), event.target.closest('[data-action]')?.dataset.action || '');
+      });
+      viewport.addEventListener('keydown', event => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const page = Math.max(1, Math.floor(viewport.clientHeight / ROW_HEIGHT)), steps = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page };
+        if (event.key === 'ArrowUp' && this.selected <= 0) {
+          event.preventDefault(); leave();
+        } else if (event.key in steps) {
+          event.preventDefault(); choose(Math.max(0, Math.min(this.results.length - 1, this.selected + steps[event.key])));
+        } else if (event.key === 'Home' || event.key === 'End') {
+          event.preventDefault(); choose(event.key === 'Home' ? 0 : this.results.length - 1);
+        } else if (event.key === 'Enter' && this.selected >= 0) {
+          event.preventDefault(); choose(this.selected, 'open');
+        }
+      });
+    }
+    setResults(results, selected = -1, top = 0) {
+      this.results = results; this.selected = selected; this.start = this.end = -1;
+      this.spacer.style.height = `${results.length * ROW_HEIGHT}px`;
+      this.viewport.scrollTop = top; this.render();
+    }
+    redraw() { this.start = this.end = -1; this.render(); }
+    select(index) {
+      this.selected = index;
+      if (index >= 0) {
+        const top = index * ROW_HEIGHT, bottom = top + ROW_HEIGHT;
+        if (top < this.viewport.scrollTop) this.viewport.scrollTop = top;
+        else if (bottom > this.viewport.scrollTop + this.viewport.clientHeight) this.viewport.scrollTop = bottom - this.viewport.clientHeight;
+      }
+      this.render();
+    }
+    // Scrolling keeps the rows still in range and builds only those that enter it.
+    render() {
+      const { start, end } = visibleRange(this.results.length, this.viewport.scrollTop, this.viewport.clientHeight);
+      if (start !== this.start || end !== this.end) {
+        if (this.start < 0 || start >= this.end || end <= this.start) this.rows.replaceChildren(this.build(start, end));
+        else {
+          while (this.rows.firstChild && Number(this.rows.firstChild.dataset.result) < start) this.rows.firstChild.remove();
+          while (this.rows.lastChild && Number(this.rows.lastChild.dataset.result) >= end) this.rows.lastChild.remove();
+          if (start < this.start) this.rows.prepend(this.build(start, this.start));
+          if (end > this.end) this.rows.append(this.build(this.end, end));
+        }
+        this.rows.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
+        this.start = start; this.end = end;
+      }
+      for (const row of this.rows.children) row.setAttribute('aria-selected', Number(row.dataset.result) === this.selected);
+      if (this.selected >= start && this.selected < end) this.viewport.setAttribute('aria-activedescendant', `sonar-result-${this.selected}`);
+      else this.viewport.removeAttribute('aria-activedescendant');
+    }
+    build(start, end) {
+      const document = this.rows.ownerDocument, fragment = document.createDocumentFragment();
+      for (let i = start; i < end; i++) {
+        const result = this.results[i], row = document.createElement('div');
+        row.className = 'result-row'; row.dataset.result = i; row.id = `sonar-result-${i}`;
+        row.setAttribute('role', 'option'); row.setAttribute('aria-posinset', i + 1); row.setAttribute('aria-setsize', this.results.length);
+        const head = document.createElement('div'); head.className = 'result-head';
+        const src = this.icon(result.url);
+        if (src) {
+          const icon = document.createElement('img'); icon.className = 'result-icon'; icon.alt = ''; icon.src = src;
+          icon.onerror = () => { icon.hidden = true; }; head.append(icon);
+        }
+        const title = document.createElement('span'); title.className = 'result-title'; title.textContent = result.title; title.title = result.title;
+        head.append(title);
+        if (result.locator) { const locator = document.createElement('span'); locator.className = 'result-locator'; locator.textContent = result.locator; head.append(locator); }
+        const button = (action, label, className, hint = '') => {
+          const element = document.createElement('button'); element.type = 'button'; element.className = className; element.tabIndex = -1;
+          element.dataset.action = action; element.textContent = label; if (hint) element.title = hint; return element;
+        };
+        head.append(button('open', 'Open', 'result-open'));
+        const text = document.createElement('p'); text.className = 'result-text';
+        if (result.leading) text.append('…'); text.append(markedText(document, result.preview, result.marks)); if (result.trailing) text.append('…');
+        const actions = document.createElement('div'); actions.className = 'result-actions';
+        actions.append(button('quote', 'Copy quote', 'result-copy', 'Ctrl+Shift+X'), button('pinpoint', 'Copy pinpoint', 'result-copy', 'Ctrl+X'), button('link', 'Copy link', 'result-copy'));
+        row.append(head, text, actions); fragment.append(row);
+      }
+      return fragment;
+    }
+  }
+  const api = { ROW_HEIGHT, visibleRange, markedText, ResultsList };
+  global.LegalPinpointerResults = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(globalThis);
