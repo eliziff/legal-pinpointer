@@ -240,7 +240,7 @@
         <li><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></span><span>Copies the citation, linked to CanLII where possible.</span></li>
       </ul>
     </div>
-    <div class="stage"><div class="shot drawn">R v Chouhan <span class="lp-tools" data-lp-ui contenteditable="false"><a class="lp-tool lp-canlii live" aria-label="Open on CanLII" data-tip="Open on CanLII" href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener"></a><span class="lp-tool-marker"><span class="lpm-wrap lpm-title"><span class="lpm-circle" style="background:#e0533d"></span></span></span><button type="button" class="lp-tool lp-link" aria-label="Copy the linked citation" data-tip="Copy the linked citation" id="demo-link"></button></span>
+    <div class="stage"><div class="shot drawn">R v Chouhan <span class="lp-tools" data-lp-ui contenteditable="false"><a class="lp-tool lp-canlii live" aria-label="Open on CanLII" data-tip="Open on CanLII" href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener"></a><span class="lp-tool-marker" data-marker="lpm-title" title="File this case"></span><button type="button" class="lp-tool lp-link" aria-label="Copy the linked citation" data-tip="Copy the linked citation" id="demo-link"></button></span>
       <small>2021 SCC 26 · [2021] 2 SCR 136 · 459 DLR (4th) 193</small></div></div>
   </section>
 
@@ -251,7 +251,7 @@
       <p>The circle beside a case name files it in a folder, with a note. It's there on CanLII, including search results, and on Westlaw, Lexis and court websites.</p>
       <p>The extension also tries to detect when a case on Westlaw or Lexis is the same as a case on CanLII, so a case filed on one shows as filed on the others.</p>
     </div>
-    <div class="stage"><div class="shot drawn" style="overflow:visible">R v Chouhan <span class="lp-crumb-marker" id="marker-demo" title="File this case"></span>
+    <div class="stage"><div class="shot drawn" style="overflow:visible">R v Chouhan <span class="lp-crumb-marker" data-marker="lpm-banner" title="File this case"></span>
       <small>2021 SCC 26 · [2021] 2 SCR 136</small></div></div>
   </section>
 
@@ -426,21 +426,28 @@
     charter: { name: 'Charter s 11(d)', color: '#2f9e6e', projectId: 'p', order: 1 },
     transition: { name: 'Transitional law', color: '#e3a21a', projectId: 'p', order: 2 }
   };
+  // Every circle on the page is R v Chouhan, so they share one filing.
   const filed = {}; let editor = null;
-  const slot = document.getElementById('marker-demo');
-  const drawCircle = () => {
-    const wrap = document.createElement('span'); wrap.className = 'lpm-wrap lpm-banner';
-    const ids = core.filings(filed, folders, 'p'), circle = core.circle(folders, ids);
-    circle.title = core.filingNames(folders, ids).join(' · ') || 'File this case';
-    wrap.appendChild(circle); slot.replaceChildren(wrap);
+  const slots = [...document.querySelectorAll('[data-marker]')];
+  const drawCircles = () => {
+    const ids = core.filings(filed, folders, 'p');
+    for (const slot of slots) {
+      const wrap = document.createElement('span'); wrap.className = `lpm-wrap ${slot.dataset.marker}`;
+      const circle = core.circle(folders, ids);
+      circle.title = core.filingNames(folders, ids).join(' · ') || 'File this case';
+      wrap.appendChild(circle); slot.replaceChildren(wrap);
+    }
   };
-  drawCircle();
+  drawCircles();
   addEventListener('scroll', () => editor?.close(), { passive: true });
-  slot.addEventListener('click', () => {
-    if (editor) { editor.close(); return; }
+  for (const slot of slots) slot.addEventListener('click', () => {
+    const was = editor?.slot;
+    editor?.close();
+    if (was === slot) return;
     editor = core.openEditor({ anchor: slot, folders, project: 'p', data: filed,
-      onChange({ folderIds, note }) { core.setFilings(filed, folderIds, folders); if (note) filed.note = note; else delete filed.note; drawCircle(); },
+      onChange({ folderIds, note }) { core.setFilings(filed, folderIds, folders); if (note) filed.note = note; else delete filed.note; drawCircles(); },
       onClose() { editor = null; }, inside: (e) => slot.contains(e.target) });
+    if (editor) editor.slot = slot;
   });
 </script>
 </body>
