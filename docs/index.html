@@ -122,6 +122,21 @@
   .update { margin-top: 14px; padding: 16px 18px; border-radius: 12px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); font-size: 14.5px; color: var(--soft); }
 
   /* Advanced */
+  .feature.solo { grid-template-columns: minmax(0, 620px); }
+  .page { padding: 22px 24px; font: 15px/1.6 "Times New Roman", Georgia, serif; color: #1a1a1a; }
+  .page p { margin: 0 0 12px; } .page p:last-of-type { margin-bottom: 0; }
+  .page .pn { color: #c4271b; font-weight: 700; }
+  .page mark { background: #b4d5fe; color: inherit; }
+  .page .bar { display: flex; justify-content: center; margin: 18px -24px -22px; padding: 10px 0 12px; border-top: 1px solid #eceae6; background: #faf9f7; }
+  .page .bar .rail { margin: 0; }
+  .page .cited { display: inline-block; margin-left: 4px; padding: 1px 8px; border-radius: 999px; background: #fff1f0; color: #b72016; font: 600 12px system-ui, sans-serif; vertical-align: 1px; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font: 600 14px system-ui, sans-serif; color: #1f2328; }
+  .topbar .cite { min-width: 0; }
+  .topbar .lp-tools { position: static !important; margin: 0 auto 0 0 !important; }
+  .topbar .btnlike { padding: 5px 10px; border-radius: 7px; box-shadow: inset 0 0 0 1px #e5e7eb; font-weight: 500; font-size: 12.5px; color: #374151; }
+  .feature ul { padding-left: 18px; } .feature li { margin-bottom: 8px; font-size: 16px; }
+  .cases { margin: 0; padding-left: 22px; } .cases li { margin-bottom: 10px; font-size: 17px; }
+  .cases .note { display: block; font-size: 15px; color: #555; }
   .adv-head { padding: 80px 0 34px; }
   .adv-head h2 { font-size: clamp(30px, 3.6vw, 42px); letter-spacing: -0.035em; margin-bottom: 10px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; padding-bottom: 60px; }
@@ -159,7 +174,7 @@
   <nav class="tabs" role="tablist" aria-label="Guide">
     <a href="#guide" role="tab" aria-selected="true" data-tab="guide">Guide</a>
     <a href="#advanced" role="tab" aria-selected="false" data-tab="advanced">Advanced</a>
-    <a href="https://github.com/eliziff/legal-pinpointer/releases">Releases</a>
+    <a href="https://github.com/eliziff/legal-pinpointer">GitHub</a>
   </nav>
   <a class="btn get" href="https://github.com/eliziff/legal-pinpointer/releases/latest/download/legal-pinpointer.zip">Download</a>
 </div></div>
@@ -276,20 +291,36 @@
     <h2>Advanced guide</h2>
     <p>Settings and features you won't need on day one.</p>
   </div>
-  <div class="grid">
-    <div class="card">
-      <h3>Copy controls</h3>
-      <p>Settings › <i>Copy controls</i> chooses how copying appears on a page: the red numbers (the default), small buttons in the margin, or a bar at the bottom of the window that copies whatever text you've selected.</p>
-      <span class="rail"><span>Pinpoint<small>Ctrl X</small></span><span>Quote<small>Ctrl ⇧ X</small></span><span>Citation<small>Alt X</small></span></span>
-      <p>The Copy tab switches between <code>at para 12</code> and the bare <code>12</code>.</p>
+
+  <section class="feature" id="controls">
+    <div class="copy">
+      <span class="label">Copy controls</span>
+      <h2>Choose how copying looks</h2>
+      <p>In Settings, <i>Copy controls</i> has three choices: the red numbers (the default), small buttons in the margin, or a bar at the bottom of the window.</p>
+      <p>The bar copies whatever you've selected, or the paragraph under the pointer.</p>
+      <p>The Copy tab switches pinpoints between <code>at para 12</code> and the bare <code>12</code>.</p>
     </div>
-    <div class="card">
-      <h3>Ordinary copying</h3>
-      <p>Copy part of a judgment or statute with <kbd>Ctrl C</kbd> and its paragraph and section numbers stay linked to the source. Statute text also tries to keep its layout in Word.</p>
-      <p class="warn">The statute layout doesn't always survive Word's default paste ("merge formatting"). Turn off <i>Indented statute copies</i> in Settings to paste plain text.</p>
+    <div class="stage"><div class="shot page">
+      <p><span class="pn">[3]</span> The amendments came into force on September 19, 2019, the day jury selection was <mark>scheduled to begin in Mr. Chouhan's trial</mark>.</p>
+      <p><span class="pn">[4]</span> The trial judge held that the abolition of peremptory challenges applied only to proceedings already under way.</p>
+      <div class="bar"><span class="rail"><span>Pinpoint<small>Ctrl X</small></span><span>Quote<small>Ctrl ⇧ X</small></span><span>Citation<small>Alt X</small></span></span></div>
+    </div></div>
+  </section>
+
+  <section class="feature flip" id="ordinary">
+    <div class="copy">
+      <span class="label">Ctrl C</span>
+      <h2>Copy as you normally would</h2>
+      <p>Copy part of a judgment or statute with <kbd>Ctrl C</kbd> and its paragraph and section numbers stay linked to the source when you paste. Statute text keeps its indents in Word.</p>
+      <p class="warn">Word's default paste ("merge formatting") sometimes flattens the indents. Turn off <i>Indented statute copies</i> in Settings to paste plain text instead.</p>
     </div>
-    <div class="card">
-      <h3>On Westlaw, Lexis and CanLII</h3>
+    <div class="stage"><div class="shot doc"><span class="tag">Pasted into Word</span><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html#par3" target="_blank" rel="noopener">[3]</a> The amendments came into force on September 19, 2019, the day jury selection was scheduled to begin in Mr. Chouhan's trial.</div></div>
+  </section>
+
+  <section class="feature" id="bar">
+    <div class="copy">
+      <span class="label">Westlaw, Lexis and CanLII</span>
+      <h2>Around the page</h2>
       <ul>
         <li>On Westlaw, Lexis and court websites, a bar with the citation, the CanLII button and Copy link stays at the top as you scroll.</li>
         <li>On Westlaw and Lexis, <kbd>Alt C</kbd> opens the CanLII version.</li>
@@ -297,8 +328,16 @@
         <li>On CanLII, a cited paragraph gets a <b>Cited N</b> button listing the decisions that cite it.</li>
       </ul>
     </div>
-    <div class="card">
-      <h3>Case Marker</h3>
+    <div class="stage stack">
+      <div class="shot topbar"><span class="cite">R v Chouhan, 2021 SCC 26</span><span class="lp-tools" data-lp-ui contenteditable="false"><a class="lp-tool lp-canlii live" aria-label="Open on CanLII" data-tip="Open on CanLII" href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener"></a></span><span class="btnlike">Copy link</span></div>
+      <div class="shot page"><p><span class="pn">[11]</span> Peremptory challenges allowed each side to remove prospective jurors without giving a reason. <span class="cited">Cited 14</span></p></div>
+    </div>
+  </section>
+
+  <section class="feature flip" id="folders">
+    <div class="copy">
+      <span class="label">Case Marker</span>
+      <h2>More with folders</h2>
       <ul>
         <li>Folders can hold folders.</li>
         <li>Keep a separate set of folders for each file you're working on.</li>
@@ -306,23 +345,38 @@
         <li>Export and Import, in the Marker tab's settings, back up your folders.</li>
       </ul>
     </div>
-    <div class="card">
-      <h3>Other tools</h3>
-      <div class="keys" style="margin:4px 0 0">
-        <div><span><kbd>Ctrl ⇧ S</kbd></span><span>Tab Search: search the text of all your open tabs at once</span></div>
-        <div><span><kbd>Ctrl ⇧ E</kbd></span><span>Open CanLII's document text search</span></div>
-        <div><span><kbd>Ctrl ⇧ F</kbd></span><span>After copying a passage, a link to it, highlighted</span></div>
-      </div>
+    <div class="stage"><div class="shot doc"><span class="tag">A folder pasted into Word</span>
+      <ol class="cases">
+        <li><i><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener">R v Chouhan</a></i>, 2021 SCC 26<span class="note">Amendments apply prospectively; challenges for cause remain.</span></li>
+        <li><i>R v Alpha</i>, 2031 SCC 4<span class="note">Section 8 standing.</span></li>
+        <li><i>R v Beta</i>, 2029 ONCA 118</li>
+      </ol></div></div>
+  </section>
+
+  <section class="feature" id="tools">
+    <div class="copy">
+      <span class="label">Other tools</span>
+      <h2>Shortcuts</h2>
+      <p>If a shortcut doesn't work, another extension may be using it; change it at <code>chrome://extensions/shortcuts</code>.</p>
     </div>
-    <div class="card span">
-      <h3>Privacy</h3>
-      <p>Everything runs in your browser. Nothing you read is sent anywhere, and your folders are stored only in your browser. If a shortcut doesn't work, another extension may be using it; change it at <code>chrome://extensions/shortcuts</code>.</p>
+    <div class="keys">
+      <div><span><kbd>Ctrl ⇧ S</kbd></span><span>Tab Search: search the text of all your open tabs at once</span></div>
+      <div><span><kbd>Ctrl ⇧ E</kbd></span><span>Open CanLII's document text search</span></div>
+      <div><span><kbd>Ctrl ⇧ F</kbd></span><span>After copying a passage, a link to it, highlighted</span></div>
     </div>
-  </div>
+  </section>
+
+  <section class="feature solo" id="privacy">
+    <div class="copy">
+      <span class="label">Privacy</span>
+      <h2>Nothing leaves your browser</h2>
+      <p>Everything runs in your browser. Nothing you read is sent anywhere, and your folders are stored only in your browser.</p>
+    </div>
+  </section>
 </div>
 </main>
 
-<footer><div class="wrap"><span>Legal Pinpointer</span><a href="https://github.com/eliziff/legal-pinpointer/releases">Releases</a><a href="https://github.com/eliziff/legal-pinpointer">Source</a></div></footer>
+<footer><div class="wrap"><span>Legal Pinpointer</span><a href="https://github.com/eliziff/legal-pinpointer">GitHub</a></div></footer>
 
 <script src="assets/marker-core.js"></script>
 <script>
