@@ -967,10 +967,13 @@
   function fitHeader() {
     const header = document.getElementById('canlii-header');
     if (!header || headerObserver) return;
-    headerObserver = new ResizeObserver(([entry]) => {
-      const height = Math.ceil(entry.borderBoxSize?.[0]?.blockSize ?? header.getBoundingClientRect().height);
-      if (height > 80) document.documentElement.style.setProperty('--header-default-size', `${height}px`);
-      else document.documentElement.style.removeProperty('--header-default-size');
+    headerObserver = new ResizeObserver(() => {
+      // The height as drawn: CanLII zooms its header down at larger page zooms (zoom: 0.8 and less),
+      // and the observer's own size is the unzoomed one, which left a grey band under the header.
+      const height = Math.ceil(header.getBoundingClientRect().height);
+      // Always the header's real height. Removing the value (as this once did for short headers)
+      // dropped CanLII's own setting back to its 80px default and left a band below the header.
+      if (height) document.documentElement.style.setProperty('--header-default-size', `${height}px`);
     });
     headerObserver.observe(header);
   }
