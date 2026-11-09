@@ -21,6 +21,11 @@
   background: #b72016;
 }
 
+/* Above the copy rail when it is on (page-ui.js). */
+html.lp-rail-on #legal-pinpointer-status.legal-pinpointer-toast {
+  bottom: 62px;
+}
+
 #legal-pinpointer-status[hidden] {
   display: none !important;
 }

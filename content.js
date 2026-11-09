@@ -1370,6 +1370,8 @@
     quickStatuteCopy: (range) => canliiStatuteQuote(range),
     /** A click on a CanLII number, copied from the page itself: a promise, or null where the page cannot say. */
     quickNumberCopy: (number) => quickNumberCopy(number),
+    /** The hotkeys' copy (pinpoint, quote, citation) of the selection, or the passage under the pointer. */
+    copy: (mode) => copy(mode, true),
     /** A CanLII statute's provision numbers that CanLII writes as plain text ("(2)", "(a)"): for a
      *  block's first text node, the length of the number it starts with (after `lead` spaces), or null. */
     statuteNumberIn: (block, text) => {

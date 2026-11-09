@@ -1134,6 +1134,53 @@
     toolsObserver.observe(tools.title);
   }
 
+  // The copy rail (Settings: Copy controls, "A bar at the bottom of the page"): a small bar fixed at
+  // the bottom of the window with the hotkeys' three copies. It copies the selected text, or the
+  // passage last under the pointer, exactly as the keys do. Fixed and in its own shadow root, it
+  // never moves the page; pressing it keeps the selection (early.js).
+  const RAIL_CSS = `
+    :host { all: initial; }
+    .rail { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px;
+      border: 1px solid #e5e7eb; border-radius: 11px; background: rgb(255 255 255 / 96%); pointer-events: auto;
+      box-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 10px 24px -12px rgb(0 0 0 / 28%); font: 500 12.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    button { all: unset; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px; border-radius: 8px; color: #374151; cursor: pointer;
+      transition: background-color 80ms, color 80ms; }
+    button:hover { background: #fff1f0; color: #b72016; }
+    button:active { background: #fde2df; }
+    button:focus-visible { outline: 2px solid #d52b1e; outline-offset: 1px; }
+    kbd { font: 500 10.5px/1 system-ui, sans-serif; color: #9ca3af; }
+    .sep { width: 1px; height: 16px; background: #e5e7eb; margin: 0 2px; }
+    @media print { .rail { display: none; } }
+  `;
+  let rail = null;
+  function mountRail() {
+    if (rail) return;
+    const host = document.createElement('div');
+    host.setAttribute('data-lp-ui', '');
+    host.style.cssText = 'all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483644';
+    const shadow = host.attachShadow({ mode: 'open' });
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(RAIL_CSS);
+    shadow.adoptedStyleSheets = [sheet];
+    const bar = document.createElement('div');
+    bar.className = 'rail';
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', 'Copy');
+    bar.innerHTML = '<button type="button" data-lp-action="rail" data-mode="pinpoint">Pinpoint <kbd>Ctrl X</kbd></button><span class="sep"></span>'
+      + '<button type="button" data-lp-action="rail" data-mode="quote">Quote <kbd>Ctrl ⇧ X</kbd></button><span class="sep"></span>'
+      + '<button type="button" data-lp-action="rail" data-mode="citation">Citation <kbd>Alt X</kbd></button>';
+    shadow.appendChild(bar);
+    document.documentElement.appendChild(host);
+    document.documentElement.classList.add('lp-rail-on');
+    rail = host;
+  }
+  function unmountRail() {
+    rail?.remove();
+    rail = null;
+    document.documentElement.classList.remove('lp-rail-on');
+  }
+  actions?.set('rail', (button) => run(page.copy(button.dataset.mode), null));
+
   // The citation bar (Settings: Citation bar on Westlaw & Lexis): frozen along the top of the
   // document's scrolling area while the title is out of view, with the CanLII button, the citation
   // and Copy link. Fixed, in its own shadow root, and click-through outside the bar: it never moves
@@ -1290,6 +1337,7 @@
       queueSync();
       watchUnits();
     } else removeUnits();
+    if (settings.unitCopyButtons && settings.unitCopyStyle === 'rail') mountRail(); else unmountRail();
     if (provider === 'canlii') {
       document.documentElement.classList.toggle('lp-no-canlii-name', !settings.canliiHeader);
       document.documentElement.classList.toggle('lp-no-cited-by', !citedBy());
