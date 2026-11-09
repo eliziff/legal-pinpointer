@@ -137,6 +137,33 @@
   .feature ul { padding-left: 18px; } .feature li { margin-bottom: 8px; font-size: 16px; }
   .cases { margin: 0; padding-left: 22px; } .cases li { margin-bottom: 10px; font-size: 17px; }
   .cases .note { display: block; font-size: 15px; color: #555; }
+  .ts { font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2328; }
+  .ts-head { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+  .ts-q { width: 100%; box-sizing: border-box; height: 34px; padding: 0 10px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; font-size: 14px; outline: none; }
+  .ts-q:focus, .cs input:focus { border-color: #b72016; box-shadow: 0 0 0 3px rgb(213 43 30 / 12%); }
+  .ts-scope { display: flex; gap: 2px; margin-top: 8px; padding: 2px; border-radius: 7px; background: #f3f4f6; font-size: 12px; }
+  .ts-scope span { flex: 1; padding: 3px 0; border-radius: 5px; text-align: center; color: #6b7280; }
+  .ts-scope .on { background: #fff; color: #111827; box-shadow: 0 1px 2px rgb(0 0 0 / 8%); }
+  .ts-list { height: 330px; overflow: hidden; }
+  .ts-r { padding: 10px 12px; border-bottom: 1px solid #f0f1f3; }
+  .ts-r .t { display: flex; gap: 8px; align-items: baseline; font-weight: 600; }
+  .ts-r .t span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ts-r .t small { color: #6b7280; font-weight: 500; }
+  .ts-r .t a { color: #0b66c3; font-weight: 500; font-size: 12px; text-decoration: none; }
+  .ts-r p { margin: 3px 0 6px; color: #374151; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ts-r mark { background: #fde68a; color: inherit; }
+  .ts-r .b { display: flex; gap: 6px; }
+  .ts-r .b span { padding: 2px 8px; border-radius: 6px; box-shadow: inset 0 0 0 1px #e5e7eb; font-size: 11.5px; color: #374151; }
+  .ts-none { padding: 18px 12px; color: #6b7280; }
+  .cs { display: grid; gap: 8px; padding: 22px; font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; color: #374151; }
+  .cs label { font-weight: 600; color: #111827; font-size: 14px; }
+  .cs input { height: 38px; padding: 0 12px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; font-size: 14px; color: #111827; outline: none; }
+  .cs-hint { color: #6b7280; font-size: 12px; }
+  .pdfv { background: #525659; padding-bottom: 16px; }
+  .pdfbar { display: flex; justify-content: space-between; padding: 8px 14px; background: #323639; color: #e8eaed; font: 12.5px system-ui, sans-serif; }
+  .pdfpage { margin: 16px 22px 0; padding: 22px 26px 26px; background: #fff; font: 14.5px/1.6 "Times New Roman", Georgia, serif; color: #1a1a1a; }
+  .pdfpage p { margin: 0; }
+  .pdfpage mark { background: #b4d5fe; color: inherit; }
   .adv-head { padding: 80px 0 34px; }
   .adv-head h2 { font-size: clamp(30px, 3.6vw, 42px); letter-spacing: -0.035em; margin-bottom: 10px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; padding-bottom: 60px; }
@@ -344,35 +371,46 @@
     </div>
   </section>
 
-  <section class="feature" id="folders">
+
+  <section class="feature" id="tabsearch">
     <div class="copy">
-      <span class="label">Case Marker</span>
-      <h2>More with folders</h2>
-      <ul>
-        <li>Folders can hold folders.</li>
-        <li>Keep a separate set of folders for each file you're working on.</li>
-        <li>Copy a folder's cases as a list of links, with or without your notes.</li>
-        <li>Export and Import, in the Marker tab's settings, back up your folders.</li>
-      </ul>
+      <span class="label">Tab Search · Ctrl ⇧ S</span>
+      <h2>Search every tab you have open</h2>
+      <p>Tab Search searches the full text of every tab in the window, or just this tab group, in Chrome's side panel. Results appear as you type, each under the citation it would copy.</p>
+      <p>CanLII's search operators work as written: <code>AND</code>, <code>OR</code>, <code>"exact phrase"</code>, <code>/p</code> for the same paragraph, and the rest.</p>
+      <p><b>Open</b> jumps to the passage in its tab, and the panel stays open beside it. Copy the quote, pinpoint or a link straight from a result.</p>
     </div>
-    <div class="stage"><div class="shot doc"><span class="tag">A folder pasted into Word</span>
-      <ol class="cases">
-        <li><i><a href="https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html" target="_blank" rel="noopener">R v Chouhan</a></i>, 2021 SCC 26<span class="note">Abolition of peremptory challenges upheld.</span></li>
-        <li><i>R v Alpha</i>, 2031 SCC 4<span class="note">Section 8 standing.</span></li>
-        <li><i>R v Beta</i>, 2029 ONCA 118</li>
-      </ol></div></div>
+    <div class="stage"><div class="shot ts" id="ts-demo">
+      <div class="ts-head"><input class="ts-q" value="peremptory" aria-label="Search open tabs" spellcheck="false"><div class="ts-scope"><span class="on">This window</span><span>This group</span><span>This tab</span></div></div>
+      <div class="ts-list"></div>
+    </div></div>
   </section>
 
-  <section class="feature flip" id="tools">
+  <section class="feature flip" id="canliisearch">
     <div class="copy">
-      <span class="label">Other tools</span>
-      <h2>Shortcuts</h2>
-      <p>If a shortcut doesn't work, another extension may be using it; change it at <code>chrome://extensions/shortcuts</code>.</p>
+      <span class="label">CanLII search · Ctrl ⇧ E</span>
+      <h2>Search CanLII from any tab</h2>
+      <p>Press <kbd>Ctrl ⇧ E</kbd> anywhere, even on a new tab, type, and press Enter. CanLII's full-text search opens in a new tab, and the tab you were on stays as it was.</p>
+      <p>The same operators work here.</p>
     </div>
-    <div class="keys">
-      <div><span><kbd>Ctrl ⇧ S</kbd></span><span>Tab Search: search the text of all your open tabs at once</span></div>
-      <div><span><kbd>Ctrl ⇧ E</kbd></span><span>Open CanLII's document text search</span></div>
-      <div><span><kbd>Ctrl ⇧ F</kbd></span><span>After copying a passage, a link to it, highlighted</span></div>
+    <div class="stage"><form class="shot cs" id="cs-demo">
+      <label for="cs-q">Search CanLII</label>
+      <input id="cs-q" value="&quot;peremptory challenges&quot; /p abolition" spellcheck="false" autocomplete="off">
+      <span class="cs-hint">Enter opens the results in a new tab</span>
+    </form></div>
+  </section>
+
+  <section class="feature" id="pdf">
+    <div class="copy">
+      <span class="label">PDFs · Ctrl ⇧ F</span>
+      <h2>Link to a passage in a PDF</h2>
+      <p>Chrome can't make a link to highlighted text in a PDF. Copy the passage, press <kbd>Ctrl ⇧ F</kbd>, and the clipboard holds a link that opens the PDF scrolled to that passage and highlights it.</p>
+      <p>It works on ordinary web pages too. In Settings, choose whether you get the link alone, the passage as a link, or the passage followed by <code>[Link]</code>.</p>
+    </div>
+    <div class="stage stack">
+      <div class="shot pdfv"><div class="pdfbar"><span>factum.pdf</span><span>3 / 24</span></div>
+        <div class="pdfpage"><p>27. The appellant does not dispute that the trial proceeded before a judge alone. <mark>The issue is whether the delay between the charge and the trial was unreasonable in all the circumstances.</mark> That question turns on the record below.</p></div></div>
+      <div class="shot doc"><span class="tag">Pasted after Ctrl ⇧ F</span><a href="#pdf">The issue is whether the delay between the charge and the trial was unreasonable in all the circumstances.</a></div>
     </div>
   </section>
 
@@ -380,7 +418,8 @@
     <div class="copy">
       <span class="label">Privacy</span>
       <h2>Nothing leaves your browser</h2>
-      <p>Everything runs in your browser. Nothing you read is sent anywhere, and your folders are stored only in your browser.</p>
+      <p>Everything runs in your browser. Nothing you read is sent anywhere, and your folders are stored only in your browser. The one exception is a CanLII search, which goes to CanLII.</p>
+      <p>If a shortcut doesn't work, another extension may be using it; change it at <code>chrome://extensions/shortcuts</code>.</p>
     </div>
   </section>
 </div>
@@ -481,6 +520,29 @@
     toast(`Copied ${event.shiftKey ? 'quote' : 'pinpoint'}: ${pin}`);
     try { await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([plain], { type: 'text/plain' }), 'text/html': new Blob([html], { type: 'text/html' }) })]); }
     catch (_) { try { await navigator.clipboard.writeText(plain); } catch (_) {} }
+  });
+  // Tab Search: the panel filters a few open tabs as you type.
+  const tabs = [
+    { title: 'R v Chouhan, 2021 SCC 26', pin: 'para 1', url: 'https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html#par1', text: 'Jury selection in Pardeep Singh Chouhan’s trial for first degree murder was scheduled to begin on September 19, 2019. That day, amendments to the Criminal Code came into force which abolished peremptory challenges.' },
+    { title: 'R v Chouhan, 2021 SCC 26', pin: 'para 2', url: 'https://www.canlii.org/en/ca/scc/doc/2021/2021scc26/2021scc26.html#par2', text: 'Although peremptory challenges were a long-standing example of what Blackstone described as the “tenderness and humanity to prisoners, for which our English laws are justly famous”, they have drawn significant controversy in recent decades.' },
+    { title: 'Canadian Charter of Rights and Freedoms', pin: 's 11(d)', url: 'https://www.canlii.org/en/ca/laws/stat/schedule-b-to-the-canada-act-1982-uk-1982-c-11/latest/schedule-b-to-the-canada-act-1982-uk-1982-c-11.html', text: 'Any person charged with an offence has the right to be presumed innocent until proven guilty according to law in a fair and public hearing by an independent and impartial tribunal.' },
+    { title: 'Canadian Charter of Rights and Freedoms', pin: 's 11(b)', url: 'https://www.canlii.org/en/ca/laws/stat/schedule-b-to-the-canada-act-1982-uk-1982-c-11/latest/schedule-b-to-the-canada-act-1982-uk-1982-c-11.html', text: 'Any person charged with an offence has the right to be tried within a reasonable time.' }
+  ];
+  const tsQ = document.querySelector('#ts-demo .ts-q'), tsList = document.querySelector('#ts-demo .ts-list');
+  const escapeText = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  function searchTabs() {
+    const words = tsQ.value.toLowerCase().match(/[\p{L}\d]+/gu) || [];
+    const hits = words.length ? tabs.filter((t) => words.every((w) => (t.title + ' ' + t.text).toLowerCase().includes(w))) : [];
+    const mark = (t) => words.reduce((out, w) => out.replace(new RegExp('(' + w + ')', 'giu'), '<mark>$1</mark>'), escapeText(t));
+    tsList.innerHTML = hits.length ? hits.map((t) => `<div class="ts-r"><div class="t"><span>${escapeText(t.title)}</span><small>${t.pin}</small><a href="${t.url}" target="_blank" rel="noopener">Open</a></div><p>${mark(t.text)}</p><div class="b"><span>Copy quote</span><span>Copy pinpoint</span><span>Copy link</span></div></div>`).join('')
+      : `<div class="ts-none">${words.length ? 'No matches in your open tabs.' : 'Type to search your open tabs.'}</div>`;
+  }
+  tsQ.addEventListener('input', searchTabs); searchTabs();
+  // CanLII search: Enter opens CanLII's full-text search in a new tab.
+  document.getElementById('cs-demo').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const q = document.getElementById('cs-q').value.trim();
+    if (q) open('https://www.canlii.org/en/#search/text=' + encodeURIComponent(q), '_blank', 'noopener');
   });
 </script>
 </body>
