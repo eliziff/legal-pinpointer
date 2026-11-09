@@ -21,6 +21,11 @@
   background: #b72016;
 }
 
+/* Above the copy rail when it is on (page-ui.js). */
+html.lp-rail-on #legal-pinpointer-status.legal-pinpointer-toast {
+  bottom: 62px;
+}
+
 #legal-pinpointer-status[hidden] {
   display: none !important;
 }
@@ -264,32 +269,27 @@ html:not(.lp-no-numbers):not(#lp-none) .lp-num:hover {
   color: #b72016 !important;
 }
 
-/* A click: while pressed the wash darkens at once; once copied the number flashes solid red with
-   white digits (lp-num-copied, page-ui.js) and fades back (lp-num-fade). Colours only: nothing moves. */
+/* A click is a press: the number goes down a little, as a key does (1.5px lower, a shadow inside its
+   wash, the wash a shade deeper), and springs back when released. top on a position: relative inline
+   box moves only its picture, never the text around it. */
+html:not(.lp-no-numbers):not(#lp-none) :is(a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, span[id^="PARA_"], .lp-num) {
+  position: relative !important;
+  top: 0 !important;
+  transition: top 220ms cubic-bezier(.34, 1.9, .5, 1), box-shadow 200ms ease-out, background-color 120ms, color 120ms !important;
+}
+
 html:not(.lp-no-numbers):not(#lp-none) :is(a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, span[id^="PARA_"], .lp-num):active {
-  background: rgb(213 43 30 / 22%) !important;
-  transition: none !important;
+  top: 1.5px !important;
+  background: rgb(213 43 30 / 17%) !important;
+  box-shadow: inset 0 1.5px 2px rgb(110 20 12 / 24%) !important;
+  transition: top 40ms ease-out, box-shadow 40ms ease-out, background-color 40ms !important;
 }
 
-html:not(.lp-no-numbers):not(#lp-none) :is(a.reflex-paragAnchor[name], .canlii_section_with_subsection, .canlii_subsection, .canlii_section, span.sectionLabel, .SectionNumber, span.lawlabel, span[id^="PARA_"], .lp-num).lp-num-copied {
-  background: #b72016 !important;
-  color: #ffffff !important;
-  transition: none !important;
-}
-
-/* The digits inside a label, and a judgment's "[ ]" around its number, turn white with it. */
-html:not(.lp-no-numbers):not(#lp-none) .lp-num-copied :is(.canlii_section_with_subsection, .canlii_subsection, .canlii_section),
-html:not(.lp-no-numbers):not(#lp-none) .lp-num-copied + span.lp-br,
-html:not(.lp-no-numbers):not(#lp-none) span.lp-br:has(+ .lp-num-copied) {
-  color: #ffffff !important;
-  transition: none !important;
-}
-
-html:not(.lp-no-numbers):not(#lp-none) .lp-num-fade,
-html:not(.lp-no-numbers):not(#lp-none) .lp-num-fade :is(.canlii_section_with_subsection, .canlii_subsection, .canlii_section),
-html:not(.lp-no-numbers):not(#lp-none) .lp-num-fade + span.lp-br,
-html:not(.lp-no-numbers):not(#lp-none) span.lp-br:has(+ .lp-num-fade) {
-  transition: background-color 250ms ease-out, color 250ms ease-out !important;
+/* A label inside a label (federal "(1)" in its lawlabel) goes down with it, not twice. */
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel :is(.canlii_section_with_subsection, .canlii_subsection, .canlii_section),
+html:not(.lp-no-numbers):not(#lp-none) span.lawlabel :is(.canlii_section_with_subsection, .canlii_subsection, .canlii_section):active {
+  top: 0 !important;
+  box-shadow: none !important;
 }
 
 /* While a selection is copied, its numbers are the page's plain text (no tag look in the paste). */
