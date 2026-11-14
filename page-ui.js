@@ -966,10 +966,12 @@
     fitHeader();
   }
 
-  let headerObserver = null;
+  let headerObserver = null, headerSize = null;
   function fitHeader() {
     const header = document.getElementById('canlii-header');
     if (!header || headerObserver) return;
+    // CanLII's own value, put back when the header is CanLII's again.
+    headerSize = document.documentElement.style.getPropertyValue('--header-default-size');
     headerObserver = new ResizeObserver(() => {
       // The height as drawn: CanLII zooms its header down at larger page zooms (zoom: 0.8 and less),
       // and the observer's own size is the unzoomed one, which left a grey band under the header.
@@ -989,7 +991,9 @@
     crumb.name.removeAttribute('title');
     headerObserver?.disconnect();
     headerObserver = null;
-    document.documentElement.style.removeProperty('--header-default-size');
+    if (headerSize) document.documentElement.style.setProperty('--header-default-size', headerSize);
+    else document.documentElement.style.removeProperty('--header-default-size');
+    headerSize = null;
     if (crumb.tabTitle !== undefined) document.title = crumb.tabTitle;
     crumb = null;
   }
