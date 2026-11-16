@@ -933,6 +933,8 @@
   let crumb = null;
 
   function mountCrumb() {
+    // Tracked from the start: content.css reshapes the header at first paint, before the title is found.
+    fitHeader();
     const name = document.querySelector('#canlii-breadcrumbs > span:last-of-type [itemprop="name"]');
     const title = document.querySelector('#title-container h1.main-title, h1.main-title');
     if (!name || !title) return;
